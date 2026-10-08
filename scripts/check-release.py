@@ -16,6 +16,7 @@ allowed = {
     'Ai-llowance.app/Contents/Resources/Claude.png',
     'Ai-llowance.app/Contents/Resources/ChatGPT.png',
     'Ai-llowance.app/Contents/Resources/THIRD_PARTY_NOTICES.md',
+    'Ai-llowance.app/Contents/Resources/PRIVACY.md',
     'Ai-llowance.app/Contents/_CodeSignature/CodeResources',
 }
 secret_patterns = [

@@ -15,7 +15,8 @@ final class CodexRPC {
     init(executable: URL, home: URL, existing: Bool, timeout: TimeInterval) throws {
         deadline = Date().addingTimeInterval(timeout)
         process.executableURL = executable
-        process.arguments = ["app-server", "--listen", "stdio://"]
+        process.arguments = ["app-server", "--listen", "stdio://",
+                             "-c", "analytics.enabled=false", "-c", "feedback.enabled=false"]
         if !existing { process.arguments! += ["-c", "cli_auth_credentials_store=\"keyring\""] }
         // Start with a small environment: inherited API keys must not select the wrong billing identity.
         process.environment = ["HOME": FileManager.default.homeDirectoryForCurrentUser.path,

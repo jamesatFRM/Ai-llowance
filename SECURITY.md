@@ -8,9 +8,9 @@ Do not post credentials, raw authentication responses, or private account detail
 
 - Writes create private temporary files before writing and atomically replace their destination. Saved settings are size-bounded and validated; invalid files are preserved instead of silently reset.
 - Share-image export loads only fictional in-memory accounts, without reading or replacing saved account settings.
-- Account labels and connection settings are local, under `~/Library/Application Support/UsageBar`, with private file permissions. Quota snapshots and email labels stay in process memory.
+- Account labels and connection settings are local, under `~/Library/Application Support/UsageBar`, with private file permissions. Normal GUI quota snapshots and signed-in email labels stay in process memory. The retained legacy status-line helper can write a private quota-only feed; provider CLIs manage their own caches and logs. See [Privacy](PRIVACY.md).
 - Organization API keys are stored in this Mac's non-synchronizing Keychain. Background reads do not prompt repeatedly if Keychain is locked.
-- Codex and Claude manage their own subscription credentials. App-owned Codex profiles require Keychain. New isolated Claude login launchers reject Claude's plaintext fallback. Existing CLI profiles keep their existing credential policy.
+- Codex and Claude manage their own subscription credentials. App-owned Codex profiles require Keychain. New isolated Claude login launchers detect and remove Claude's plaintext fallback after login; this is not a guarantee that credentials are never temporarily written. Existing CLI profiles keep their existing credential policy.
 - Ai-llowance invokes locally installed provider CLIs. Their version, behavior, authentication, and network traffic remain controlled by the provider. The app does not bundle them or inspect their token files.
 - API requests use fixed HTTPS origins, GET-only reporting endpoints, bounded responses, and no redirects, shared cookies, or URL cache.
 - There is no Ai-llowance analytics service, telemetry endpoint, cloud sync, or automatic updater.

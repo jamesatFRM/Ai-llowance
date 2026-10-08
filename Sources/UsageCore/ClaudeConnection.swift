@@ -123,6 +123,7 @@ public struct ClaudeConnection: Sendable {
         unset ANTHROPIC_API_KEY ANTHROPIC_AUTH_TOKEN CLAUDE_CODE_OAUTH_TOKEN ANTHROPIC_BASE_URL
         unset CLAUDE_CODE_USE_BEDROCK CLAUDE_CODE_USE_VERTEX CLAUDE_CODE_USE_FOUNDRY ANTHROPIC_PROFILE
         export CLAUDE_CONFIG_DIR=\(ShellQuote.argument(profile.path))
+        export DISABLE_TELEMETRY=1 DISABLE_ERROR_REPORTING=1
         cd \(ShellQuote.argument(work.path))
         """
         if let completion {
@@ -178,7 +179,8 @@ public struct ClaudeConnection: Sendable {
                 "PATH": "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin", "CLAUDE_CONFIG_DIR": profile.path,
                 // Claude uses USER to select the macOS Keychain account. Omitting it produces
                 // a false logged-out result even when the profile has a valid sign-in.
-                "USER": NSUserName(), "LOGNAME": NSUserName()]
+                "USER": NSUserName(), "LOGNAME": NSUserName(),
+                "DISABLE_TELEMETRY": "1", "DISABLE_ERROR_REPORTING": "1"]
             process.standardOutput = output; process.standardError = FileHandle.nullDevice
             process.standardInput = FileHandle.nullDevice
             process.currentDirectoryURL = profile

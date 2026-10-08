@@ -1,60 +1,32 @@
 # Preview verification
 
-Ai-llowance 0.1.0 is a preview, not a production release. The downloadable app is ad-hoc signed, not Developer ID signed or notarized.
+Ai-llowance 0.1.0 is an ad-hoc signed, unnotarized preview, not a production release.
 
-## Verified locally
+## Verified locally — October 8, 2026
 
 - Apple Silicon release build with Swift 6.4, targeting macOS 14+.
-- 30 Swift Testing tests: quota parsing, units, multiple windows, rejection of missing/malformed/cached reports, cost pagination, account isolation, process timeouts, credential handling, legacy settings restoration, identity propagation, polling boundaries, and provider backoff. The final local release run enabled the optional isolated dummy-Keychain round trip with `USAGEBAR_TEST_KEYCHAIN=1`.
-- Real subscription reads for two Claude accounts and two Codex accounts, with separate email labels in the native UI.
-- Native compact-menu layout checked using fictional sample accounts.
-- Automatic reading timestamps advanced for all four accounts without clicking Refresh.
-- Direct Claude usage with Claude Code 2.1.294 returned a successful JSON envelope with zero model turns and zero model cost. No conversation or persistent Terminal session was required.
-- Legacy status-line migration preserved independent user changes and restored the previous setting when still owned by Ai-llowance.
+- **70 tests passed:** 54 core/provider tests and 16 application-flow tests. The local run included the optional disposable Keychain round trip. Tests cover parsing, account isolation, credential failures, process deadlines/cancellation, login origins, stale responses, safe persistence, polling/backoff, fictional export, and process-scoped telemetry opt-outs.
+- Two Claude and two Codex subscription accounts read successfully in the native interface during local hardening; saved settings survived app replacement unchanged.
+- Automatic refresh advanced all four accounts without manual Refresh; compact grouping, outside-click dismissal, pause/resume, and Light/Dark/Automatic controls were inspected.
+- Claude Code 2.1.294 returned a successful `/usage` report with zero model turns and zero model cost. No conversation or persistent Terminal session was required.
+- Fictional dark/light share images were generated from the actual dashboard rows and visually inspected.
+- Current source, reachable Git history and archive checks found no real account identities, credential patterns or machine-specific paths. A source security review found no confirmed vulnerability; this is not an independent certification or proof of absence.
 
 ## Integration boundaries
 
-Claude uses its installed CLI's built-in `/usage` command, not an external published quota API. Its printable plan-row format may change. Unknown, incomplete, model-generated, cached, or rate-limited reports are rejected rather than converted into invented fresh usage.
+Claude uses its installed CLI's built-in `/usage`, not a published external quota API. Unknown, incomplete, model-generated, cached or rate-limited reports are rejected. Codex uses local app-server account/quota methods, which do not represent every ChatGPT feature. Provider latency and rounding may differ from other surfaces.
 
-Codex uses local app-server account and quota methods. The readings do not represent every ChatGPT feature. Provider reporting latency and rounding can differ from another provider surface.
+Successful reads become due after 60 seconds; a coalescible timer checks every 15 seconds. Opening the menu allows a healthy read after 30 seconds. Errors retain backoff. Offline, sleeping and paused states suppress reads. Resource measurements and methodology are in the [hardening report](hardening-and-resources.md); they describe the measured earlier build, not every Mac or provider CLI version.
 
-Successful reads become due again after 60 seconds. A local timer checks deadlines every 15 seconds with tolerance; response time may extend the cadence. Opening the menu allows a healthy read after 30 seconds. Errors retain backoff, including provider Retry-After. Offline, sleeping, and paused states suppress reads.
+## Release verification
+
+The package script verifies the signature, an exact archive-file allowlist, executable permissions, bundle identity, common sensitive patterns and local machine paths. GitHub Actions runs fixture tests, source/history privacy checks and packaging on a fresh macOS runner. Check the [actual CI runs](https://github.com/jamesatFRM/Ai-llowance/actions) and [release notes](https://github.com/jamesatFRM/Ai-llowance/releases/tag/v0.1.0) for the published revision and checks; a workflow definition alone is not a passing run.
 
 ## Not yet established
 
-- A clean install and browser-login walkthrough on another person's Mac.
-- Intel builds and the full range of supported macOS releases.
-- Live organization API billing: adapters are verified with synthetic fixtures, not a supplied real admin key.
-- Developer ID signing, notarization, independent security audit, and automatic updates.
-- Remaining Claude API credit balances or Vercel Gateway balances.
-
-GitHub Actions is configured to run tests and package the app on a fresh macOS runner. A workflow definition alone is not evidence that a run has passed; check the repository's actual checks before downloading a release.
-
-## Prepared release artifact
-
-The Apple Silicon ZIP passed a strict file allowlist, executable-permission and bundle-identity checks, sensitive-pattern checks, and a check for local machine paths. Archived executables match the packaged app that was opened and inspected natively. Public source was checked for real account identifiers, local home paths, and credential patterns. These focused checks do not constitute an independent security audit.
-
-The repository and release archive are prepared locally. Public GitHub publishing and its first CI run are pending repository-owner selection.
-
-## Current interface verification
-
-The menu uses one overall weekly row per account, weekday reset labels, small email labels, and a smaller five-hour session row with a bold label when available. Model-specific weekly limits are tucked into Settings. An expired session does not invalidate an otherwise fresh weekly reading.
-
-All 36 tests passed, including equal-weight averages, account filtering, missing/stale/error groups, backward-compatible settings, and allowance-color boundaries (30% normal, above 20% warning, at or below 20% critical). The release build, signature check, and strict archive checks passed.
-
-Native UI inspection verified Light, Dark, and Automatic controls; transparent monochrome marks; compact account mode without names; account selection; provider averages; the combined average; pause/resume; and the smaller bold five-hour rows. The dropdown was absent after an outside click. Readings refreshed for both Claude accounts and both Codex accounts. These checks were on this Mac only, not a clean install or public CI run.
-
-The current healthy-read scheduler uses a dispatch timer independent of AppKit event tracking. Manual refresh requests during a read are queued and remain subject to provider backoff. The earlier report of updates requiring Settings was not conclusively reproduced, so the scheduling fix is not proof of that report's root cause.
-
-## Ai-llowance rename
-
-The display name, native windows, accessibility labels, connection messages, docs, app bundle filename, and release archive use Ai-llowance. The bundle identifier, executable target, Keychain service, and Application Support directory retain their original identities for compatibility. The existing account/preferences file was byte-for-byte unchanged across replacement and launch. All 36 tests and the release archive checks passed after the rename; the renamed native Settings window opened with existing connections. This remains a local preview, not a public release.
-
-## Account connection pressure test
-
-The latest run passed 58 tests, including the isolated dummy-Keychain test, and the updated app read all four existing subscription accounts successfully. See [connection pressure-test details](connection-pressure-test.md) for fixes, test boundaries, and remaining real-world checks. The preview remains local and unpublished.
-
-
-## October 8: broad hardening, grouping, and resource measurement
-
-68 tests passed, the updated four-account local workflow was checked, and dark/light fictional-account PNG exports were visually verified. See [the hardening and resource report](hardening-and-resources.md) for fixes, measurements, method, and remaining limits. The app remains a local preview, not a public/production release.
+- A clean install and fresh browser-login walkthrough on another person's Mac.
+- Intel binaries and the full range of supported macOS versions.
+- Live organization API billing with real admin keys; adapters are fixture-tested.
+- Developer ID signing, notarization, independent security audit or automatic updates.
+- Exhaustive provider-CLI telemetry, cache/log retention or managed-policy behavior. See [Privacy](../PRIVACY.md).
+- Claude API credit balances, Vercel Gateway balances, Gemini or Grok support.

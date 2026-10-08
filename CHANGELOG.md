@@ -2,6 +2,8 @@
 
 ## 0.1.0 — Preview
 
+- Published privacy policy, process-scoped provider telemetry opt-outs, metadata-only probes, and automated source/history privacy checks.
+
 - Stable provider grouping for individual menu-bar accounts; Claude first, then OpenAI.
 - Validated decoded percentages/reset metadata, bounded saved settings, duplicate-ID rejection, private atomic file writes, and invalid cost-total rejection.
 - Quit cancels pending usage reads, sign-in, and initial connection checks. Codex cleanup finishes its forced-termination fallback before returning.

@@ -41,6 +41,38 @@ private func loginServer(_ reply: String, beforeReply: String = "", afterReply: 
 private let startReply = #"{"id":2,"result":{"authUrl":"https://auth.openai.com/authorize?fixture=true","loginId":"expected"}}"#
 private let successNotice = #"{"method":"account/login/completed","params":{"loginId":"expected","success":true}}"#
 
+@Test func codexProcessesDisableAnalyticsForNewAndExistingProfiles() throws {
+    let fixture = try PressureFixture("""
+    case " $* " in *' -c analytics.enabled=false '*) ;; *) exit 91 ;; esac
+    case " $* " in *' -c feedback.enabled=false '*) ;; *) exit 92 ;; esac
+    while IFS= read -r line; do
+      case "$line" in *'"method":"initialize"'*) printf '%s\\n' '{"id":1,"result":{}}' ;; esac
+    done
+    """)
+    defer { fixture.clean() }
+    for existing in [false, true] {
+        let rpc = try CodexRPC(executable: fixture.executable, home: fixture.root, existing: existing, timeout: 2)
+        defer { rpc.stop() }
+        try rpc.initialize()
+    }
+}
+
+@Test func claudeTerminalLoginDisablesTelemetryWithoutChangingSharedConfiguration() throws {
+    let fixture = try PressureFixture("""
+    [ "$DISABLE_TELEMETRY" = 1 ] && [ "$DISABLE_ERROR_REPORTING" = 1 ] || exit 91
+    [ "$1 $2" = 'auth login' ] || exit 92
+    """)
+    defer { fixture.clean() }
+    let account = Account(name: "Fixture", kind: .claudeCode)
+    let launcher = try fixture.connection().launcher(account: account, login: true, loginOnly: true)
+    let process = Process()
+    process.executableURL = launcher
+    process.standardOutput = FileHandle.nullDevice; process.standardError = FileHandle.nullDevice
+    try process.run(); process.waitUntilExit()
+    #expect(process.terminationStatus == 0)
+    #expect(!FileManager.default.fileExists(atPath: fixture.root.appendingPathComponent("existing/settings.json").path))
+}
+
 @Test func codexLoginAcceptsEarlyCompletionAndIgnoresAnotherLoginID() async throws {
     let other = #"{"method":"account/login/completed","params":{"loginId":"other","success":false}}"#
     let fixture = try PressureFixture(loginServer(startReply,

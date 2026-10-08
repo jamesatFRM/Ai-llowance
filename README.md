@@ -6,10 +6,17 @@ A small native macOS menu bar app for multiple Claude and OpenAI accounts. Swift
 
 **0.1.0 preview — not a production release.** The download is for Apple Silicon Macs and is ad-hoc signed, not Developer ID signed or notarized. Claude's CLI usage format is version-dependent. See [verification](docs/verification.md) for tested behavior and remaining limits.
 
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/menu-dark.png">
+  <img src="docs/images/menu-light.png" width="390" alt="Ai-llowance menu showing fictional Claude and OpenAI accounts with weekly and five-hour remaining percentages">
+</picture>
+
+*Fictional accounts and readings. [Privacy policy](PRIVACY.md).*
+
 ## Install
 
 1. Install [Claude Code](https://code.claude.com/docs/en/setup) and/or [Codex CLI](https://developers.openai.com/codex/cli) and keep the provider CLI up to date.
-2. Build the preview from source below, or use its locally packaged Apple Silicon ZIP. A public GitHub release has not been published yet. Extract the ZIP and move **Ai-llowance.app** into **Applications**.
+2. Download the [0.1.0 Apple Silicon preview](https://github.com/jamesatFRM/Ai-llowance/releases/tag/v0.1.0), or build from source below. Extract the ZIP and move **Ai-llowance.app** into **Applications**.
 3. Open Ai-llowance. Its icon appears in the menu bar; **Settings** manages connections.
 
 macOS may block the preview because it is not notarized. Review the source and release checksum before deciding whether to allow it through **System Settings → Privacy & Security → Open Anyway**. Follow [Apple's guidance](https://support.apple.com/102445); do not disable Gatekeeper globally. You can also build from source below.
@@ -65,7 +72,7 @@ See the [hardening and resource report](docs/hardening-and-resources.md) for mea
 - Network/API credentials are never logged. Claude's full local usage report stays in memory; only plan rows become app state. No transcript contents are read by Ai-llowance.
 - API keys use this Mac's non-synchronizing Keychain. New Codex profiles require Keychain with no plaintext fallback.
 - Claude owns its credentials. For new isolated Claude profiles, the login launcher detects Claude's possible plaintext fallback, logs out, removes that app-owned fallback, and stops until Keychain is available. Existing profiles retain Claude's credential-storage policy.
-- API requests are GET-only to fixed official origins, with redirects rejected. Ai-llowance has no analytics, cookies, or backend service. Provider CLIs retain their own provider-controlled behavior.
+- API requests are GET-only to fixed official origins, with redirects rejected. Ai-llowance has no analytics, cookies, or backend service. Processes it launches disable supported Claude telemetry/error reporting and Codex analytics/feedback. Provider services still handle authentication and quota requests; see the [privacy policy](PRIVACY.md).
 - Removing an app-owned OpenAI account logs it out. Claude sign-ins remain CLI-managed; use **More → Sign out in Terminal** before removal if desired.
 - Dashboard links use your browser's current account, which may differ from the selected connection.
 

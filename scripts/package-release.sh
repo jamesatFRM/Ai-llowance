@@ -2,6 +2,7 @@
 set -euo pipefail
 project_dir="$(cd "$(dirname "$0")/.." && pwd)"
 output_dir="${USAGEBAR_OUTPUT_DIR:-$project_dir/dist}"
+(cd "$project_dir" && python3 scripts/check-privacy.py)
 bash "$project_dir/scripts/build-app.sh"
 app_dir="$output_dir/Ai-llowance.app"
 version=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$app_dir/Contents/Info.plist")

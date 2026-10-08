@@ -19,7 +19,6 @@ struct UsageBridge {
                 let account = Account(name: "Existing CLI", kind: .claudeCode, usesExistingClaude: true)
                 let snapshot = try await ClaudeUsageAdapter(executable: URL(fileURLWithPath: args[1])).fetch(account: account, now: Date())
                 print("Claude direct usage succeeded: \(snapshot.windows.count) windows.")
-                for window in snapshot.windows { print("\(window.label): \(window.usedPercent)% used; reset \(window.resetsAt == nil ? "not parsed" : "present")") }
                 return
             }
             guard args.count == 2, args[0] == "--account", let id = UUID(uuidString: args[1]) else {

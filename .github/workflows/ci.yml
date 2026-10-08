@@ -17,6 +17,11 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           persist-credentials: false
+          fetch-depth: 0
+      - name: Privacy guard (source and history)
+        run: |
+          python3 scripts/check-privacy.py --self-test
+          python3 scripts/check-privacy.py --history
       - name: Tests
         run: bash scripts/test.sh
       - name: Build and verify preview archive

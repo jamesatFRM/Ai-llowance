@@ -60,6 +60,7 @@ private func envelope(_ text: String, turns: Int = 0, cost: Double = 0) throws -
     let payload = String(data: try envelope(planText), encoding: .utf8)!
     let script = """
     #!/bin/sh
+    [ "$DISABLE_TELEMETRY" = 1 ] && [ "$DISABLE_ERROR_REPORTING" = 1 ] || exit 91
     printf '%s\\n' "$*" >> \(ShellQuote.argument(log.path))
     if [ "$1" = auth ]; then
       printf '%s' '{"loggedIn":true,"authMethod":"claude.ai","email":"separate@example.com"}'

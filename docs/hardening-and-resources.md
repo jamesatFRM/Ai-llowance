@@ -1,6 +1,6 @@
 # Hardening and resource verification
 
-October 8, 2026. Local preview only; not a public or production release.
+October 8, 2026. Measurements taken before public preview publication, at source revision `ba1dcdee`. Not a production certification.
 
 ## Scope and outcome
 
@@ -56,4 +56,4 @@ The lightweight claim applies most strongly to the native app while idle. Refres
 - Provider CLI startup is the main refresh resource cost; additional accounts increase work. The app preserves approximately one-minute healthy refresh and provider backoff.
 - Claude's interactive login belongs to Terminal. Stopping the app's waiting state does not close that Terminal session. Claude sign-out remains explicit and CLI-managed.
 - Tests use isolated fake provider processes for failure paths. Fresh SSO on another Mac, real locked-Keychain behavior, actual machine sleep/wake cycles, Intel, and every supported macOS version were not certified in this pass. API spending was fixture-tested, not exercised with live organization admin credentials.
-- This preview is ad-hoc signed, not Developer ID signed or notarized. No public GitHub release has been published.
+- This preview is ad-hoc signed, not Developer ID signed or notarized. See the repository release page for current public preview availability.

@@ -16,6 +16,7 @@ cp "$project_dir/Resources/UsageBar.icns" "$app_dir/Contents/Resources/UsageBar.
 cp "$project_dir/LICENSE" "$app_dir/Contents/Resources/LICENSE"
 cp "$project_dir/Resources/Claude.png" "$project_dir/Resources/ChatGPT.png" "$app_dir/Contents/Resources/"
 cp "$project_dir/THIRD_PARTY_NOTICES.md" "$app_dir/Contents/Resources/"
+cp "$project_dir/PRIVACY.md" "$app_dir/Contents/Resources/"
 # Keep debug paths and symbols out of public binaries; sign after stripping.
 /usr/bin/strip -S "$app_dir/Contents/MacOS/UsageBar" "$app_dir/Contents/MacOS/UsageBridge"
 cat > "$app_dir/Contents/Info.plist" <<'PLIST'

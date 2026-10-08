@@ -12,3 +12,14 @@ dist/
 accounts.json
 __pycache__/
 *.pyc
+
+*.log
+*.jsonl
+auth.json
+.credentials.json
+*.mobileprovision
+*.key
+CodexProfiles/
+ClaudeProfiles/
+ClaudeFeeds/
+ClaudeConnections/

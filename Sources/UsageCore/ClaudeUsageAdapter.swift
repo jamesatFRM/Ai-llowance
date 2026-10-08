@@ -22,7 +22,8 @@ public struct ClaudeUsageAdapter: UsageAdapter, Sendable {
                                  "--tools", "", "--strict-mcp-config", "--mcp-config", "{\"mcpServers\":{}}"]
             process.environment = ["HOME": FileManager.default.homeDirectoryForCurrentUser.path,
                 "USER": NSUserName(), "LOGNAME": NSUserName(), "PATH": "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin",
-                "LANG": "en_US.UTF-8", "CLAUDE_CONFIG_DIR": profile.path, "NO_COLOR": "1"]
+                "LANG": "en_US.UTF-8", "CLAUDE_CONFIG_DIR": profile.path, "NO_COLOR": "1",
+                "DISABLE_TELEMETRY": "1", "DISABLE_ERROR_REPORTING": "1"]
             process.currentDirectoryURL = work
             process.standardOutput = output; process.standardError = FileHandle.nullDevice
             process.standardInput = FileHandle.nullDevice
