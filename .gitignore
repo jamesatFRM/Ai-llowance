@@ -1,0 +1,14 @@
+.build/
+.swiftpm/
+dist/
+.DS_Store
+*.dSYM/
+*.zip
+*.app/
+.env
+.env.*
+*.pem
+*.p12
+accounts.json
+__pycache__/
+*.pyc

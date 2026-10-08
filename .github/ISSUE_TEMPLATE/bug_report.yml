@@ -1,0 +1,25 @@
+name: Bug report
+description: Report a connection, reading, or interface problem.
+body:
+  - type: markdown
+    attributes:
+      value: Do not include keys, tokens, email addresses, auth files, or raw CLI output. Redact account details in screenshots.
+  - type: textarea
+    id: behavior
+    attributes:
+      label: What happened?
+      description: What did you expect, and what did UsageBar show?
+    validations:
+      required: true
+  - type: input
+    id: versions
+    attributes:
+      label: Versions
+      description: UsageBar version, macOS version, Apple Silicon or Intel, and Claude Code / Codex CLI version.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+      description: Include the provider and whether this is an existing or separate login. No account identifiers.
