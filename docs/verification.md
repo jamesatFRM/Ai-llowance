@@ -36,10 +36,12 @@ The Apple Silicon ZIP passed a strict file allowlist, executable-permission and 
 
 The repository and release archive are prepared locally. Public GitHub publishing and its first CI run are pending repository-owner selection.
 
-Compact reset labels were simplified to “Resets in 4d” (hours/minutes below a day), with quota-window names retained in tooltips, accessibility labels, and Accounts. Release build, archive checks, and native sample-layout inspection passed. The prepared ZIP was updated and the normal app restored.
+## Current interface verification
 
-## Weekly-only display
+The menu uses one overall weekly row per account, weekday reset labels, small email labels, and a smaller five-hour session row with a bold label when available. Model-specific weekly limits are tucked into Settings. An expired session does not invalidate an otherwise fresh weekly reading.
 
-The compact menu, account details, and menu-bar percentage now use only weekly limits. Five-hour windows are retained in provider parsing but are not displayed or included in the summary; their reset does not make a valid weekly reading stale. Reset labels show weekdays in the Mac's local timezone. Missing weekly windows are explicitly unavailable rather than substituted with session data.
+All 36 tests passed, including equal-weight averages, account filtering, missing/stale/error groups, backward-compatible settings, and allowance-color boundaries (30% normal, above 20% warning, at or below 20% critical). The release build, signature check, and strict archive checks passed.
 
-All 30 tests passed, including typed window selection, missing-duration handling, and expiry isolation. The release build and archive checks passed. Native accessibility and screenshot inspection confirmed weekly-only rows and weekday labels; the normal app was restored and the prepared release archive updated. Still local; not publicly released.
+Native UI inspection verified Light, Dark, and Automatic controls; transparent monochrome marks; compact account mode without names; account selection; provider averages; the combined average; pause/resume; and the smaller bold five-hour rows. The dropdown was absent after an outside click. Readings refreshed for both Claude accounts and both Codex accounts. These checks were on this Mac only, not a clean install or public CI run.
+
+The current healthy-read scheduler uses a dispatch timer independent of AppKit event tracking. Manual refresh requests during a read are queued and remain subject to provider backoff. The earlier report of updates requiring Settings was not conclusively reproduced, so the scheduling fix is not proof of that report's root cause.

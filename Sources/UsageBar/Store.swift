@@ -17,6 +17,7 @@ final class AppStore: ObservableObject {
     @Published var paused = false
     @Published var offline = false
     @Published var now = Date()
+    @Published private(set) var menuPreferences = MenuPreferences()
     let demo: Bool
     let root: URL
     var executable = CodexAdapter.findExecutable()
@@ -24,13 +25,14 @@ final class AppStore: ObservableObject {
     private var schedules: [UUID: PollState] = [:]
     private var refreshTask: Task<Void, Never>?
     private var loginTask: Task<Void, Never>?
-    private var timer: Timer?
+    private var heartbeat: DispatchSourceTimer?
+    private var pendingManualRefresh = false
     private let network = NWPathMonitor()
     private var sleeping = false
     private var readOnly = false
     private let costs = CostAdapter()
     private let keychain = KeychainStore()
-    private struct Saved: Codable { var accounts: [Account]; var paused: Bool }
+    private struct Saved: Codable { var accounts: [Account]; var paused: Bool; var menuPreferences: MenuPreferences? }
 
     init(demo: Bool = false, root: URL = Paths.root) {
         self.demo = demo; self.root = root
@@ -49,6 +51,7 @@ final class AppStore: ObservableObject {
             do {
                 let saved = try JSONDecoder().decode(Saved.self, from: Data(contentsOf: url))
                 accounts = saved.accounts; paused = saved.paused
+                menuPreferences = saved.menuPreferences ?? MenuPreferences()
             } catch { notice = "Account settings could not be read. The existing file was preserved. Restore accounts.json before adding accounts."; readOnly = true }
         }
         network.pathUpdateHandler = { [weak self] path in
@@ -56,12 +59,14 @@ final class AppStore: ObservableObject {
             Task { @MainActor in self?.offline = offline; if !offline { self?.refresh() } }
         }
         network.start(queue: DispatchQueue(label: "UsageBar.network", qos: .utility))
-        // A lightweight local due check avoids missing the one-minute deadline when a read
-        // finishes just after a timer tick. Provider reads still happen only when due.
-        timer = Timer.scheduledTimer(withTimeInterval: 15, repeats: true) { [weak self] _ in
+        // Dispatch deadlines do not depend on AppKit's default/event-tracking run-loop mode.
+        let heartbeat = DispatchSource.makeTimerSource(queue: DispatchQueue(label: "UsageBar.heartbeat", qos: .utility))
+        heartbeat.schedule(deadline: .now() + 15, repeating: 15, leeway: .seconds(3))
+        heartbeat.setEventHandler { [weak self] in
             Task { @MainActor in self?.now = Date(); self?.refresh() }
         }
-        timer?.tolerance = 3
+        self.heartbeat = heartbeat
+        heartbeat.resume()
         NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.willSleepNotification, object: nil, queue: .main) { [weak self] _ in
             Task { @MainActor in self?.sleeping = true; self?.refreshTask?.cancel(); self?.loginTask?.cancel() }
         }
@@ -69,14 +74,46 @@ final class AppStore: ObservableObject {
             Task { @MainActor in self?.sleeping = false; self?.now = Date(); self?.refresh() }
         }
     }
-    var menuLabel: String {
-        let values = accounts.filter { $0.enabled && errors[$0.id] == nil }.compactMap { snapshots[$0.id] }.filter { !$0.isStale(at: now, windows: $0.weeklyWindows) }.flatMap(\.weeklyWindows)
-        guard let remaining = values.map(\.remainingPercent).min() else { return "Usage" }
-        return "\(Int(remaining))% left"
+    var refreshSummary: String {
+        if demo { return "Sample data" }
+        if paused { return "Paused" }
+        if offline { return "Offline" }
+        if refreshing { return "Updating…" }
+        let active = accounts.filter { $0.enabled }
+        if active.contains(where: { errors[$0.id] != nil }) { return "Check accounts" }
+        guard !active.isEmpty else { return "Auto-refresh · 1 min" }
+        let readings = active.compactMap { snapshots[$0.id]?.observedAt }
+        guard readings.count == active.count, let oldest = readings.min() else { return "Waiting for readings" }
+        let age = max(0, Int(now.timeIntervalSince(oldest)))
+        return age < 60 ? "Updated just now" : "Updated \(age / 60)m ago"
+    }
+    var menuEntries: [MenuEntry] {
+        MenuSummary.entries(accounts: accounts, snapshots: snapshots, unavailable: Set(errors.keys), preferences: menuPreferences, now: now)
+    }
+    private func updateMenu(_ change: (inout MenuPreferences) -> Void) {
+        let previous = menuPreferences
+        change(&menuPreferences)
+        do { try persist() } catch { menuPreferences = previous; notice = "Could not save the menu-bar setting." }
+    }
+    func setTheme(_ value: AppTheme) { updateMenu { $0.theme = value } }
+    func setShowAccountNames(_ value: Bool) { updateMenu { $0.showAccountNames = value } }
+    func setMenuDisplay(_ value: MenuDisplay) { updateMenu { $0.display = value } }
+    func setMenuAggregation(_ value: MenuAggregation) { updateMenu { $0.aggregation = value } }
+    func setAllMenuAccounts(_ value: Bool) {
+        updateMenu {
+            if !value && $0.allAccounts { $0.selectedAccountIDs = Set(accounts.filter { !$0.kind.isAPI }.map(\.id)) }
+            $0.allAccounts = value
+        }
+    }
+    func setMenuAccount(_ account: Account, included: Bool) {
+        updateMenu {
+            if included { $0.selectedAccountIDs.insert(account.id) }
+            else { $0.selectedAccountIDs.remove(account.id) }
+        }
     }
     private func persist() throws {
         guard !readOnly else { throw UsageError.storage }
-        if !demo { try Paths.write(Saved(accounts: accounts, paused: paused), to: root.appendingPathComponent("accounts.json")) }
+        if !demo { try Paths.write(Saved(accounts: accounts, paused: paused, menuPreferences: menuPreferences), to: root.appendingPathComponent("accounts.json")) }
     }
     @discardableResult
     func add(name: String, kind: ConnectionKind, secret: String, existing: Bool, refreshAfter: Bool = true) throws -> Account {
@@ -199,17 +236,26 @@ final class AppStore: ObservableObject {
         } catch { notice = safeMessage(error) }
     }
     func refresh(force: Bool = false) {
-        guard !demo, !paused, !sleeping, !refreshing, !removing else { return }
+        now = Date()
+        guard !demo, !paused, !sleeping, !removing, !offline else { return }
+        if refreshing { pendingManualRefresh = pendingManualRefresh || force; return }
+        let due = accounts.filter {
+            $0.enabled && signingIn != $0.id && (schedules[$0.id] ?? PollState()).shouldRefresh(at: now, manual: force)
+        }
+        guard !due.isEmpty else { return }
         refreshing = true
         refreshTask = Task {
-            defer { refreshing = false }
-            for account in accounts where account.enabled && signingIn != account.id {
-                if Task.isCancelled { return }
-                if offline { continue }
+            defer {
+                refreshing = false
+                let pending = pendingManualRefresh
+                pendingManualRefresh = false
+                if pending { refresh(force: true) }
+            }
+            for account in due {
+                if Task.isCancelled || paused || sleeping || offline { return }
+                guard accounts.contains(where: { $0.id == account.id && $0.enabled }) else { continue }
                 let start = Date()
                 var schedule = schedules[account.id] ?? PollState()
-                // Manual refresh never bypasses provider backoff; healthy reads are capped at one per 30 seconds.
-                guard schedule.shouldRefresh(at: start, manual: force) else { continue }
                 do {
                     let adapter: any UsageAdapter
                     switch account.kind {
@@ -277,6 +323,8 @@ final class AppStore: ObservableObject {
         panel.message = "Choose the installed Claude Code executable."
         guard panel.runModal() == .OK, let url = panel.url, FileManager.default.isExecutableFile(atPath: url.path) else { return }
         claudeExecutable = url
+        for account in accounts where account.kind == .claudeCode { schedules[account.id] = PollState() }
+        refresh(force: true)
     }
     func safeMessage(_ error: Error) -> String {
         if let known = error as? UsageError { return known.localizedDescription }

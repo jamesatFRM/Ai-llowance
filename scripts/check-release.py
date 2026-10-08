@@ -13,6 +13,9 @@ allowed = {
     'UsageBar.app/Contents/MacOS/UsageBridge',
     'UsageBar.app/Contents/Resources/UsageBar.icns',
     'UsageBar.app/Contents/Resources/LICENSE',
+    'UsageBar.app/Contents/Resources/Claude.png',
+    'UsageBar.app/Contents/Resources/ChatGPT.png',
+    'UsageBar.app/Contents/Resources/THIRD_PARTY_NOTICES.md',
     'UsageBar.app/Contents/_CodeSignature/CodeResources',
 }
 secret_patterns = [

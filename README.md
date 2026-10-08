@@ -8,7 +8,7 @@ A small native macOS menu bar app for multiple Claude and OpenAI accounts. Swift
 
 1. Install [Claude Code](https://code.claude.com/docs/en/setup) and/or [Codex CLI](https://developers.openai.com/codex/cli) and keep the provider CLI up to date.
 2. Download the Apple Silicon ZIP from this repository's **Releases** page. Extract it and move **UsageBar.app** into **Applications**.
-3. Open UsageBar. Its icon appears in the menu bar; **Accounts…** manages connections.
+3. Open UsageBar. Its icon appears in the menu bar; **Settings** manages connections.
 
 macOS may block the preview because it is not notarized. Review the source and release checksum before deciding whether to allow it through **System Settings → Privacy & Security → Open Anyway**. Follow [Apple's guidance](https://support.apple.com/102445); do not disable Gatekeeper globally. You can also build from source below.
 
@@ -30,12 +30,18 @@ The CLIs must be installed once; common installation locations are detected, wit
 
 | Connection | Displays | Source |
 |---|---|---|
-| OpenAI Codex subscription | Reported weekly quota windows and reset weekdays | Official local Codex app-server |
-| Claude subscription | Weekly and any model-specific weekly limits returned | Installed Claude Code's built-in `/usage` command |
+| OpenAI Codex subscription | Weekly and session quota windows, plus weekly reset weekdays | Official local Codex app-server |
+| Claude subscription | Weekly, five-hour, and any model-specific weekly limits returned | Installed Claude Code's built-in `/usage` command |
 | OpenAI API | Organization costs this UTC month | Official Admin Costs API |
 | Anthropic API | Organization costs this UTC month, excluding Priority Tier | Official Admin Cost Report API |
 
-Percentages are explicitly labeled **left**. Only weekly windows are displayed, with the reset weekday (for example, “Resets Wed”). Five-hour session limits are hidden and do not affect the menu-bar percentage; hover or open Accounts for the weekly window name. Each subscription account shows its signed-in email when available, and every compact account shows how old its reading is. Opening the menu or Accounts requests a new reading, capped at one healthy network read per 30 seconds. Background polling is about once a minute with provider backoff. Sleeping, pausing, and offline status stop network reads. Old/error readings are visibly marked; reset times never fabricate replenished quota.
+Percentages are explicitly labeled **left**. Each account has one prominent overall weekly reading with the reset weekday (for example, “Resets Wed”) and a smaller five-hour session reading underneath when available. Additional model-specific limits are in Settings. Bars use remaining allowance: white in dark mode (dark in light mode) at 30% or more, yellow above 20% and below 30%, red at 20% or less. Unavailable readings are gray. Each subscription account shows its signed-in email when available; the header has one refresh status for all accounts.
+
+Choose Automatic, Light, or Dark appearance in Settings. Automatic follows macOS. Provider icons use native monochrome templates on transparent backgrounds.
+
+The menu bar can show an average across all accounts, one average per provider, or individual accounts. Individual-account mode can hide names for just provider icons and percentages; hover to identify accounts. Include all accounts or select specific ones. Averages give each account equal weight, regardless of plan size; they do not represent pooled credits. Only the overall weekly allowance is used in menu-bar summaries. Missing, failed, or stale accounts make their group unavailable instead of being silently excluded.
+
+Opening the menu or Settings requests a new reading, capped at one healthy network read per 30 seconds. Background polling runs about once a minute, independently of menu interaction, with provider backoff. Sleeping, pausing, and offline status stop network reads. Old/error readings are visibly marked; reset times never fabricate replenished quota. Clicking outside the menu dismisses it. Pause/resume and Quit are direct icon buttons.
 
 Codex reports Codex's buckets, not a universal ChatGPT allowance. The Claude report is a direct plan-usage query, so usage elsewhere on that subscription can be reflected without another Claude Code conversation. It is still a point-in-time provider report, not a continuous live counter.
 
@@ -69,7 +75,7 @@ bash scripts/build-app.sh
 open dist/UsageBar.app
 ```
 
-The locally built `UsageBar.app` opens directly. Close Accounts to keep it in the menu bar; Quit is in the popover menu. Preview fixtures never replace real account data:
+The locally built `UsageBar.app` opens directly. Close Settings to keep it in the menu bar; the power icon quits the app. Preview fixtures never replace real account data:
 
 ```sh
 # Quit any running UsageBar instance first.
@@ -113,3 +119,5 @@ Bug reports should include app/macOS/CLI versions and reproducible steps, with e
 ## License and affiliation
 
 [MIT](LICENSE). UsageBar is an independent project and is not affiliated with or endorsed by Anthropic or OpenAI. Provider names identify the services it connects to.
+
+Provider logos belong to their respective owners and are excluded from the MIT license. See [third-party notices](THIRD_PARTY_NOTICES.md).
