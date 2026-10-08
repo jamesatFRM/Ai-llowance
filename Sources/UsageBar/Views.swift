@@ -7,6 +7,7 @@ private typealias ViewState<Value> = SwiftUI.State<Value>
 
 struct Dashboard: View {
     @ObservedObject var store: AppStore
+    var renderForSharing = false
     var manage: () -> Void
     var body: some View {
         VStack(alignment: .leading, spacing: 9) {
@@ -27,12 +28,11 @@ struct Dashboard: View {
                     Button("Connect an account", action: manage).controlSize(.small)
                 }.padding(12).frame(maxWidth: .infinity, alignment: .leading).background(Color.primary.opacity(0.045), in: RoundedRectangle(cornerRadius: 12))
             } else {
-                ScrollView {
-                    VStack(spacing: 9) {
-                        providerGroups("OpenAI", subscription: .codex, api: .openAIAPI)
-                        providerGroups("Claude", subscription: .claudeCode, api: .claudeAPI)
-                    }
-                }.scrollIndicators(.hidden).fixedSize(horizontal: false, vertical: true).frame(maxHeight: 500)
+                if renderForSharing { providerContent }
+                else {
+                    ScrollView { providerContent }
+                        .scrollIndicators(.hidden).fixedSize(horizontal: false, vertical: true).frame(maxHeight: 500)
+                }
             }
             if let notice = store.notice { Text(notice).font(.system(size: 10)).foregroundStyle(.orange).lineLimit(2).padding(.horizontal, 9) }
             HStack {
@@ -48,6 +48,12 @@ struct Dashboard: View {
                 }.help("Quit Ai-llowance").accessibilityLabel("Quit Ai-llowance")
             }.font(.system(size: 10)).buttonStyle(.plain).foregroundStyle(.secondary).padding(.horizontal, 9).padding(.bottom, 3)
         }.padding(7).frame(width: 350).background(Color(nsColor: .windowBackgroundColor)).preferredColorScheme(store.menuPreferences.theme.colorScheme)
+    }
+    private var providerContent: some View {
+        VStack(spacing: 9) {
+            providerGroups("Claude", subscription: .claudeCode, api: .claudeAPI)
+            providerGroups("OpenAI", subscription: .codex, api: .openAIAPI)
+        }
     }
     @ViewBuilder
     private func providerGroups(_ name: String, subscription: ConnectionKind, api: ConnectionKind) -> some View {
@@ -115,6 +121,7 @@ private struct CompactRow: View {
         if account.kind == .claudeCode && snapshot == nil, let claudeSignedIn { return claudeSignedIn ? "refresh" : "sign in" }
         if error != nil { return "check account" }
         if stale { return "stale" }
+        if snapshot?.providerRestricted == true { return "Provider limit" }
         guard let window else { return snapshot?.costUSD == nil ? (snapshot == nil ? "no reading" : "Weekly unavailable") : "API cost" }
         guard let reset = window.resetsAt else { return "Reset unknown" }
         return "Resets \(reset.formatted(.dateTime.weekday(.abbreviated)))"
@@ -130,7 +137,7 @@ private struct CompactRow: View {
                 ProviderMark(provider: account.kind == .codex || account.kind == .openAIAPI ? .openAI : .claude).frame(width: 16)
                 Text(account.name).font(.system(size: 12, weight: .semibold)).lineLimit(1).frame(width: 82, alignment: .leading)
                 if let window {
-                    AllowanceBar(remaining: window.remainingPercent, unavailable: stale || error != nil || !account.enabled)
+                    AllowanceBar(remaining: window.remainingPercent, unavailable: stale || error != nil || !account.enabled || snapshot?.providerRestricted == true)
                         .frame(width: 42, height: 4)
                 } else { Color.clear.frame(width: 42, height: 4) }
                 Spacer(minLength: 0)
@@ -177,7 +184,7 @@ private struct AccountReading: View {
                     Spacer()
                     if let reset = window.resetsAt { Text("Resets \(reset.formatted(.dateTime.weekday(.abbreviated)))").font(.system(size: 10)).foregroundStyle(.secondary) }
                 }.foregroundStyle(stale || !account.enabled ? Color.secondary : .primary)
-                AllowanceBar(remaining: window.remainingPercent, unavailable: stale || error != nil || !account.enabled).frame(height: 5)
+                AllowanceBar(remaining: window.remainingPercent, unavailable: stale || error != nil || !account.enabled || snapshot.providerRestricted == true).frame(height: 5)
                 if let session = snapshot.sessionWindow(for: account.kind) {
                     let sessionStale = snapshot.isStale(at: now, windows: [session])
                     HStack {
@@ -205,6 +212,10 @@ private struct AccountReading: View {
                 Text("API spending · this UTC month").font(.system(size: 10)).foregroundStyle(.secondary)
             } else {
                 Text(error != nil ? "Needs attention" : (snapshot == nil ? "Waiting for a reading" : "Weekly limit unavailable")).font(.system(size: 12)).foregroundStyle(.secondary).padding(.vertical, 8)
+            }
+            if snapshot?.providerRestricted == true {
+                Text("The provider reports a usage or credit restriction. Remaining percentages do not mean requests are available.")
+                    .font(.system(size: 10)).foregroundStyle(.orange).fixedSize(horizontal: false, vertical: true)
             }
             if let error { Text(error).font(.system(size: 10)).foregroundStyle(.orange).fixedSize(horizontal: false, vertical: true) }
         }

@@ -30,13 +30,11 @@ public struct ClaudeConnection: Sendable {
         let previousStatusLine: Data?
     }
     private func writePrivate(_ data: Data, to url: URL, executable: Bool = false) throws {
-        try Paths.prepare(url.deletingLastPathComponent())
-        try data.write(to: url, options: .atomic)
-        try FileManager.default.setAttributes([.posixPermissions: executable ? 0o700 : 0o600], ofItemAtPath: url.path)
+        try Paths.writePrivate(data, to: url, executable: executable)
     }
     private func readSettings(_ url: URL) throws -> (Data?, [String: Any]) {
         guard FileManager.default.fileExists(atPath: url.path) else { return (nil, [:]) }
-        let data = try Data(contentsOf: url)
+        let data = try Paths.readData(url)
         guard data.count <= 2_000_000, let object = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
             throw UsageError.unavailable("Claude’s settings could not be read safely. They were left unchanged.")
         }
@@ -56,7 +54,7 @@ public struct ClaudeConnection: Sendable {
         var settings = originalSettings
         let record: Record
         if FileManager.default.fileExists(atPath: recordURL.path) {
-            record = try JSONDecoder().decode(Record.self, from: Data(contentsOf: recordURL))
+            record = try JSONDecoder().decode(Record.self, from: Paths.readData(recordURL))
             guard record.accountID == account.id, record.settingsPath == settingsURL.path,
                   (settings["statusLine"] as? [String: Any])?["command"] as? String == record.installedCommand else {
                 throw UsageError.unavailable("Claude’s status line changed after connection. Remove this connection before setting it up again; your new setting will be preserved.")
@@ -100,7 +98,7 @@ public struct ClaudeConnection: Sendable {
     public func uninstall(account: Account) throws {
         let recordURL = folder(account).appendingPathComponent("setup.json")
         guard FileManager.default.fileExists(atPath: recordURL.path) else { return }
-        let record = try JSONDecoder().decode(Record.self, from: Data(contentsOf: recordURL))
+        let record = try JSONDecoder().decode(Record.self, from: Paths.readData(recordURL))
         let url = config(account).appendingPathComponent("settings.json")
         guard record.accountID == account.id, record.settingsPath == url.path else { throw UsageError.invalidData }
         let (original, current) = try readSettings(url)

@@ -53,3 +53,8 @@ The display name, native windows, accessibility labels, connection messages, doc
 ## Account connection pressure test
 
 The latest run passed 58 tests, including the isolated dummy-Keychain test, and the updated app read all four existing subscription accounts successfully. See [connection pressure-test details](connection-pressure-test.md) for fixes, test boundaries, and remaining real-world checks. The preview remains local and unpublished.
+
+
+## October 8: broad hardening, grouping, and resource measurement
+
+68 tests passed, the updated four-account local workflow was checked, and dark/light fictional-account PNG exports were visually verified. See [the hardening and resource report](hardening-and-resources.md) for fixes, measurements, method, and remaining limits. The app remains a local preview, not a public/production release.

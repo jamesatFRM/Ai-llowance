@@ -86,6 +86,7 @@ public struct CostAdapter: UsageAdapter {
             }
             let result = try UsageParser.costs(data, kind: account.kind)
             total += result.amount
+            guard !total.isNaN else { throw UsageError.invalidData }
             guard let next = result.nextPage else {
                 return Snapshot(observedAt: now, costUSD: total, periodStart: Self.monthStart(now),
                     source: "Organization cost report · UTC month to date",

@@ -220,3 +220,74 @@ private actor FetchGate {
     store.offline = false; store.paused = true; store.refresh(force: true)
     #expect(!store.refreshing)
 }
+
+@Test @MainActor func duplicateAccountIDsAndOversizedSettingsFailClosed() async throws {
+    let root = try fixtureRoot(); defer { try? FileManager.default.removeItem(at: root) }
+    let account = Account(name: "Duplicate", kind: .codex)
+    struct Settings: Encodable { let accounts: [Account]; let paused = false }
+    let file = root.appendingPathComponent("accounts.json")
+    let duplicate = try JSONEncoder().encode(Settings(accounts: [account, account]))
+    for original in [duplicate, Data(repeating: 32, count: 2_000_001)] {
+        try original.write(to: file)
+        let store = AppStore(root: root, monitor: false)
+        #expect(store.accounts.isEmpty)
+        #expect(store.notice != nil)
+        #expect(throws: UsageError.storage) { try store.add(name: "New", kind: .codex, secret: "", existing: false) }
+        await store.remove(account)
+        #expect(try Data(contentsOf: file) == original)
+    }
+}
+
+@Test @MainActor func shareDemoDoesNotLoadOrWriteRealSettingsOrReadProviders() async throws {
+    let root = try fixtureRoot(); defer { try? FileManager.default.removeItem(at: root) }
+    let file = root.appendingPathComponent("accounts.json")
+    let original = Data("invalid private settings".utf8); try original.write(to: file)
+    let store = AppStore(demo: true, root: root, fetch: { _, _ in
+        Issue.record("Demo must never read a real provider")
+        throw UsageError.server
+    })
+    #expect(store.accounts.count == 4)
+    #expect(store.snapshots.values.allSatisfy { $0.identity?.hasSuffix("@example.com") == true })
+    store.refresh(force: true); store.setShowAccountNames(true)
+    #expect(!store.refreshing)
+    #expect(try Data(contentsOf: file) == original)
+    await store.shutdown()
+}
+
+@Test @MainActor func shutdownCancelsPendingRefreshAndPreventsRestart() async throws {
+    let root = try fixtureRoot(); defer { try? FileManager.default.removeItem(at: root) }
+    let store = AppStore(root: root, monitor: false, fetch: { _, _ in
+        try await Task.sleep(for: .seconds(30))
+        Issue.record("Cancelled read must not finish")
+        throw UsageError.server
+    })
+    store.accounts = [Account(name: "Test", kind: .codex)]
+    store.refresh()
+    #expect(store.refreshing)
+    let start = Date()
+    await store.shutdown()
+    #expect(Date().timeIntervalSince(start) < 2)
+    #expect(!store.refreshing)
+    #expect(store.snapshots.isEmpty)
+    store.refresh(force: true)
+    #expect(!store.refreshing)
+}
+
+@Test @MainActor func shutdownCancelsOwnedLoginAndClaudeConnectionChecks() async throws {
+    let root = try fixtureRoot(); defer { try? FileManager.default.removeItem(at: root) }
+    let store = AppStore(root: root, monitor: false, openExternal: { _ in Issue.record("Cancelled login must not open a browser"); return false })
+    let executable = try cli(root, "exec /bin/sleep 60")
+    store.executable = executable; store.claudeExecutable = executable
+    let account = try store.add(name: "OpenAI", kind: .codex, secret: "", existing: false, refreshAfter: false)
+    store.signIn(account)
+    try await Task.sleep(for: .milliseconds(100))
+    await store.shutdown()
+    #expect(store.signingIn == nil)
+    let claude = AppStore(root: root.appendingPathComponent("separate"), monitor: false)
+    claude.claudeExecutable = executable; claude.existingClaudeConfig = root.appendingPathComponent("existing")
+    claude.connectClaude(existing: true)
+    try await Task.sleep(for: .milliseconds(100))
+    await claude.shutdown()
+    #expect(!claude.connectingClaude)
+    #expect(claude.accounts.isEmpty)
+}

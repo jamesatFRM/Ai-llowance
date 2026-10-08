@@ -29,7 +29,7 @@ public enum UsageParser {
             }
         }
         return Snapshot(observedAt: now, windows: windows, identity: identity, source: "Codex app-server",
-            note: limited ? "The provider reports a usage or credit restriction. Percentages alone do not indicate availability." : (windows.isEmpty ? "No quota windows were returned for this account. This does not mean zero usage or unlimited access." : nil))
+            note: limited ? "The provider reports a usage or credit restriction. Percentages alone do not indicate availability." : (windows.isEmpty ? "No quota windows were returned for this account. This does not mean zero usage or unlimited access." : nil), providerRestricted: limited)
     }
 
     private struct ClaudeReport: Decodable {
@@ -82,6 +82,7 @@ public enum UsageParser {
             more = page.has_more; next = page.next_page
         default: throw UsageError.invalidData
         }
+        guard !total.isNaN else { throw UsageError.invalidData }
         guard !more || (next != nil && !next!.isEmpty) else { throw UsageError.invalidData }
         return CostPage(amount: total, nextPage: more ? next : nil)
     }

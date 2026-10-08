@@ -6,6 +6,8 @@ Do not post credentials, raw authentication responses, or private account detail
 
 ## Data and credentials
 
+- Writes create private temporary files before writing and atomically replace their destination. Saved settings are size-bounded and validated; invalid files are preserved instead of silently reset.
+- Share-image export loads only fictional in-memory accounts, without reading or replacing saved account settings.
 - Account labels and connection settings are local, under `~/Library/Application Support/UsageBar`, with private file permissions. Quota snapshots and email labels stay in process memory.
 - Organization API keys are stored in this Mac's non-synchronizing Keychain. Background reads do not prompt repeatedly if Keychain is locked.
 - Codex and Claude manage their own subscription credentials. App-owned Codex profiles require Keychain. New isolated Claude login launchers reject Claude's plaintext fallback. Existing CLI profiles keep their existing credential policy.

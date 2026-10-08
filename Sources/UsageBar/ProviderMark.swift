@@ -15,9 +15,12 @@ enum ProviderImages {
             // Convert the official black-on-white mark to an alpha template at load time.
             // Its geometry stays exact; native template rendering supplies the foreground color.
             guard let source = CIImage(contentsOf: url),
-                  let mask = CIContext().createCGImage(source.applyingFilter("CIColorInvert")
-                    .applyingFilter("CIMaskToAlpha"), from: source.extent) else { return nil }
-            image = NSImage(cgImage: mask, size: original.size)
+                  !source.extent.isEmpty else { return nil }
+            let sized = source.transformed(by: CGAffineTransform(scaleX: 64 / source.extent.width, y: 64 / source.extent.height))
+            let context = CIContext(options: [.useSoftwareRenderer: true, .cacheIntermediates: false])
+            guard let mask = context.createCGImage(sized.applyingFilter("CIColorInvert")
+                .applyingFilter("CIMaskToAlpha"), from: sized.extent) else { return nil }
+            image = NSImage(cgImage: mask, size: NSSize(width: 32, height: 32))
         } else { image = original }
         image.isTemplate = true
         return image

@@ -70,6 +70,7 @@ public enum MenuSummary {
         func entry(_ group: [Account], label: String, icon: MenuProvider?) -> MenuEntry {
             let values = group.compactMap { account -> Double? in
                 guard !unavailable.contains(account.id), let snapshot = snapshots[account.id],
+                      snapshot.providerRestricted != true,
                       let window = snapshot.primaryWeeklyWindow(for: account.kind),
                       !snapshot.isStale(at: now, windows: [window]) else { return nil }
                 return window.remainingPercent
@@ -90,7 +91,9 @@ public enum MenuSummary {
                 return group.isEmpty ? nil : entry(group, label: icon.title, icon: icon)
             }
         case .byAccount:
-            return selected.map { entry([$0], label: $0.name, icon: provider($0)) }
+            return [MenuProvider.claude, .openAI].flatMap { icon in
+                selected.filter { provider($0) == icon }.map { entry([$0], label: $0.name, icon: icon) }
+            }
         }
     }
 }

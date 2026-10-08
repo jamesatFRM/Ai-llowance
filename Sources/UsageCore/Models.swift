@@ -1,4 +1,5 @@
 import Foundation
+import Darwin
 
 public enum ConnectionKind: String, Codable, CaseIterable, Identifiable, Sendable {
     case codex, claudeCode, openAIAPI, claudeAPI
@@ -61,8 +62,21 @@ public struct QuotaWindow: Codable, Equatable, Sendable, Identifiable {
     public var durationMinutes: Int?
     public init(id: String, label: String, usedPercent: Double, resetsAt: Date? = nil, durationMinutes: Int? = nil) throws {
         guard usedPercent.isFinite, usedPercent >= 0, usedPercent <= 100 else { throw UsageError.invalidData }
+        guard !id.isEmpty, id.utf8.count <= 1024, label.utf8.count <= 4096,
+              durationMinutes.map({ $0 > 0 }) ?? true else { throw UsageError.invalidData }
+        if let reset = resetsAt {
+            guard reset.timeIntervalSince1970.isFinite, (0...253_402_300_799).contains(reset.timeIntervalSince1970) else { throw UsageError.invalidData }
+        }
         self.id = id; self.label = label; self.usedPercent = usedPercent; self.resetsAt = resetsAt
         self.durationMinutes = durationMinutes
+    }
+    private enum CodingKeys: String, CodingKey { case id, label, usedPercent, resetsAt, durationMinutes }
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        try self.init(id: values.decode(String.self, forKey: .id), label: values.decode(String.self, forKey: .label),
+                      usedPercent: values.decode(Double.self, forKey: .usedPercent),
+                      resetsAt: values.decodeIfPresent(Date.self, forKey: .resetsAt),
+                      durationMinutes: values.decodeIfPresent(Int.self, forKey: .durationMinutes))
     }
     public var remainingPercent: Double { max(0, 100 - usedPercent) }
 }
@@ -75,10 +89,11 @@ public struct Snapshot: Codable, Equatable, Sendable {
     public var identity: String?
     public var source: String
     public var note: String?
+    public var providerRestricted: Bool?
     public init(observedAt: Date, windows: [QuotaWindow] = [], costUSD: Decimal? = nil, periodStart: Date? = nil,
-                identity: String? = nil, source: String, note: String? = nil) {
+                identity: String? = nil, source: String, note: String? = nil, providerRestricted: Bool? = nil) {
         self.observedAt = observedAt; self.windows = windows; self.costUSD = costUSD; self.periodStart = periodStart
-        self.identity = identity; self.source = source; self.note = note
+        self.identity = identity; self.source = source; self.note = note; self.providerRestricted = providerRestricted
     }
     public var weeklyWindows: [QuotaWindow] {
         // Claude's stable row IDs also cover readings made before duration metadata was added.
@@ -139,9 +154,31 @@ public enum Paths {
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
     }
     public static func write<T: Encodable>(_ value: T, to url: URL) throws {
+        try writePrivate(JSONEncoder().encode(value), to: url)
+    }
+    public static func readData(_ url: URL, limit: Int = 2_000_000) throws -> Data {
+        let file = try FileHandle(forReadingFrom: url)
+        defer { try? file.close() }
+        let data = try file.read(upToCount: limit + 1) ?? Data()
+        guard data.count <= limit else { throw UsageError.invalidData }
+        return data
+    }
+    /// Create private before writing, then atomically replace. No world-readable temporary file.
+    public static func writePrivate(_ data: Data, to url: URL, executable: Bool = false) throws {
         try prepare(url.deletingLastPathComponent())
-        let data = try JSONEncoder().encode(value)
-        try data.write(to: url, options: .atomic)
-        try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
+        let temporary = url.deletingLastPathComponent().appendingPathComponent(".write-\(UUID().uuidString)")
+        let fd = open(temporary.path, O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC, executable ? 0o700 : 0o600)
+        guard fd >= 0 else { throw UsageError.storage }
+        defer { close(fd); unlink(temporary.path) }
+        try data.withUnsafeBytes { buffer in
+            var written = 0
+            while written < buffer.count {
+                let count = Darwin.write(fd, buffer.baseAddress!.advanced(by: written), buffer.count - written)
+                if count < 0 && errno == EINTR { continue }
+                guard count > 0 else { throw UsageError.storage }
+                written += count
+            }
+        }
+        guard fsync(fd) == 0, Darwin.rename(temporary.path, url.path) == 0 else { throw UsageError.storage }
     }
 }

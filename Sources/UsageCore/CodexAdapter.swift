@@ -32,10 +32,11 @@ final class CodexRPC {
         try? input.fileHandleForWriting.close()
         if process.isRunning {
             process.terminate()
-            let child = process
-            DispatchQueue.global().asyncAfter(deadline: .now() + 1) {
-                if child.isRunning { kill(child.processIdentifier, SIGKILL) }
-            }
+            // Runs on the worker. Finish cleanup before the app exits; a delayed
+            // dispatch callback would be lost when quitting during a stalled login.
+            let stopDeadline = Date().addingTimeInterval(1)
+            while process.isRunning && Date() < stopDeadline { Thread.sleep(forTimeInterval: 0.02) }
+            if process.isRunning { kill(process.processIdentifier, SIGKILL) }
         }
         try? output.fileHandleForReading.close()
     }

@@ -28,6 +28,7 @@ final class AppStore: ObservableObject {
     private var schedules: [UUID: PollState] = [:]
     private var refreshTask: Task<Void, Never>?
     private var loginTask: Task<Void, Never>?
+    private var connectionTask: Task<Void, Never>?
     private var heartbeat: DispatchSourceTimer?
     private var pendingManualRefresh = false
     private var connectionVersions: [UUID: UUID] = [:]
@@ -37,6 +38,7 @@ final class AppStore: ObservableObject {
     private let network = NWPathMonitor()
     private var sleeping = false
     private var readOnly = false
+    private var shuttingDown = false
     private let costs = CostAdapter()
     private let keychain = KeychainStore()
     private struct Saved: Codable { var accounts: [Account]; var paused: Bool; var menuPreferences: MenuPreferences? }
@@ -46,19 +48,26 @@ final class AppStore: ObservableObject {
          openExternal: @escaping (URL) -> Bool = { NSWorkspace.shared.open($0) }) {
         self.demo = demo; self.root = root; self.fetchOverride = fetch; self.openExternal = openExternal
         if demo {
-            let first = Account(name: "Personal", kind: .codex)
-            let second = Account(name: "Studio", kind: .claudeCode)
-            let third = Account(name: "Work organization", kind: .openAIAPI)
-            accounts = [first, second, third]
-            snapshots[first.id] = Snapshot(observedAt: now, windows: [try! QuotaWindow(id: "5h", label: "codex · 5h", usedPercent: 38, resetsAt: now.addingTimeInterval(7200), durationMinutes: 300), try! QuotaWindow(id: "7d", label: "codex · 7d", usedPercent: 65, resetsAt: now.addingTimeInterval(172800), durationMinutes: 10_080)], identity: "personal@example.com", source: "Sample data")
-            snapshots[second.id] = Snapshot(observedAt: now, windows: [try! QuotaWindow(id: "week.all models", label: "Week · 7d", usedPercent: 12, resetsAt: now.addingTimeInterval(432000), durationMinutes: 10_080)], identity: "studio@example.com", source: "Sample data", note: "Sample Claude plan limits.")
-            snapshots[third.id] = Snapshot(observedAt: now, costUSD: Decimal(string: "24.18"), periodStart: CostAdapter.monthStart(now), source: "Sample data")
+            accounts = [Account(name: "Personal", kind: .claudeCode), Account(name: "Work", kind: .claudeCode),
+                        Account(name: "Personal", kind: .codex), Account(name: "Work", kind: .codex)]
+            for (index, account) in accounts.enumerated() {
+                let claude = account.kind == .claudeCode
+                let remaining = [72.0, 24.0, 58.0, 16.0][index]
+                var windows = [try! QuotaWindow(id: claude ? "week.all models" : "codex.Secondary", label: "Week · 7d", usedPercent: 100 - remaining,
+                    resetsAt: now.addingTimeInterval(Double(index + 2) * 86400), durationMinutes: 10_080)]
+                if claude { windows.append(try! QuotaWindow(id: "session", label: "Session · 5h", usedPercent: index == 0 ? 18 : 52,
+                    resetsAt: now.addingTimeInterval(7200), durationMinutes: 300)) }
+                snapshots[account.id] = Snapshot(observedAt: now, windows: windows, identity: index % 2 == 0 ? "alex@example.com" : "work@example.com", source: "Sample data")
+            }
+            menuPreferences.display = .byAccount; menuPreferences.showAccountNames = false
             return
         }
         let url = root.appendingPathComponent("accounts.json")
         if FileManager.default.fileExists(atPath: url.path) {
             do {
-                let saved = try JSONDecoder().decode(Saved.self, from: Data(contentsOf: url))
+                let saved = try JSONDecoder().decode(Saved.self, from: Paths.readData(url))
+                guard saved.accounts.count <= 1000, Set(saved.accounts.map(\.id)).count == saved.accounts.count,
+                      saved.accounts.allSatisfy({ !$0.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && $0.name.utf8.count <= 4096 }) else { throw UsageError.invalidData }
                 accounts = saved.accounts; paused = saved.paused
                 menuPreferences = saved.menuPreferences ?? MenuPreferences()
             } catch { notice = "Account settings could not be read. The existing file was preserved. Restore accounts.json before adding accounts."; readOnly = true }
@@ -124,12 +133,15 @@ final class AppStore: ObservableObject {
     }
     private func persist() throws {
         guard !readOnly else { throw UsageError.storage }
-        if !demo { try Paths.write(Saved(accounts: accounts, paused: paused, menuPreferences: menuPreferences), to: root.appendingPathComponent("accounts.json")) }
+        if !demo {
+            do { try Paths.write(Saved(accounts: accounts, paused: paused, menuPreferences: menuPreferences), to: root.appendingPathComponent("accounts.json")) }
+            catch { throw UsageError.storage }
+        }
     }
     @discardableResult
     func add(name: String, kind: ConnectionKind, secret: String, existing: Bool, refreshAfter: Bool = true) throws -> Account {
         guard !demo, !readOnly else { throw UsageError.storage }
-        guard !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { throw UsageError.invalidData }
+        guard accounts.count < 1000, name.utf8.count <= 4096, !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { throw UsageError.invalidData }
         if kind == .codex && existing && accounts.contains(where: { $0.usesExistingCodex }) {
             throw UsageError.unavailable("The existing Codex CLI profile is already connected.")
         }
@@ -162,17 +174,18 @@ final class AppStore: ObservableObject {
             bundledBridge: Bundle.main.bundleURL.appendingPathComponent("Contents/MacOS/UsageBridge"), existingConfig: existingClaudeConfig)
     }
     func connectClaude(existing: Bool) {
-        guard !demo, !connectingClaude, !readOnly, !removing, signingIn == nil, waitingForClaude.isEmpty else { return }
+        guard !shuttingDown, accounts.count < 1000, !demo, !connectingClaude, !readOnly, !removing, signingIn == nil, waitingForClaude.isEmpty else { return }
         if existing && accounts.contains(where: { $0.kind == .claudeCode && $0.usesExistingClaude == true }) {
             notice = "Your current Claude Code is already connected. Use Add another Claude account for a separate login."; return
         }
         connectingClaude = true
-        Task {
+        connectionTask = Task {
             defer { connectingClaude = false }
             do {
                 let connection = try claudeConnection()
                 var account = Account(name: automaticName("Claude", kind: .claudeCode), kind: .claudeCode, usesExistingClaude: existing)
                 let signedIn = existing ? (try await connection.authStatus(account: account)) : false
+                try Task.checkCancellation()
                 // Reuse only a signed-in subscription. An API-billed or logged-out CLI stays untouched.
                 if existing && !signedIn { account.usesExistingClaude = false }
                 try Paths.prepare(connection.config(account))
@@ -227,7 +240,7 @@ final class AppStore: ObservableObject {
     func checkClaudeSignIns(at date: Date = Date()) {
         for (id, started) in waitingForClaude {
             guard let account = accounts.first(where: { $0.id == id }), let url = claudeCompletions[id] else { continue }
-            if let data = try? Data(contentsOf: url), data.count < 16 {
+            if let data = try? Paths.readData(url, limit: 15), data.count < 16 {
                 waitingForClaude[id] = nil; claudeCompletions[id] = nil
                 try? FileManager.default.removeItem(at: url)
                 if String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) == "0" {
@@ -255,12 +268,13 @@ final class AppStore: ObservableObject {
         return accounts.first { $0.id != account.id && $0.kind == account.kind && snapshots[$0.id]?.identity?.lowercased() == identity }?.name
     }
     func rename(_ account: Account, to name: String) {
-        guard let index = accounts.firstIndex(where: { $0.id == account.id }), !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        guard name.utf8.count <= 4096, let index = accounts.firstIndex(where: { $0.id == account.id }), !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
         let old = accounts[index].name
         accounts[index].name = name.trimmingCharacters(in: .whitespacesAndNewlines)
         do { try persist() } catch { accounts[index].name = old; notice = "Could not save the account name." }
     }
     func replaceKey(_ account: Account, secret: String) throws {
+        guard !demo, !readOnly, account.kind.isAPI, accounts.contains(where: { $0.id == account.id }) else { throw UsageError.storage }
         guard !refreshing, !removing else { throw UsageError.unavailable("Wait for the current refresh to finish, then save the key.") }
         try keychain.save(secret.trimmingCharacters(in: .whitespacesAndNewlines), for: account.id)
         schedules[account.id] = PollState(); snapshots[account.id] = nil; errors[account.id] = nil
@@ -282,6 +296,8 @@ final class AppStore: ObservableObject {
         removing = true
         defer { removing = false }
         do {
+            // Verify local settings are writable before changing any provider credentials.
+            try persist()
             if account.kind.isAPI { try keychain.delete(account.id) }
             if account.kind == .codex && !account.usesExistingCodex {
                 guard let executable else { throw UsageError.unavailable("Locate Codex CLI before removing this account so its stored sign-in can be cleared.") }
@@ -301,7 +317,7 @@ final class AppStore: ObservableObject {
     func refresh(force: Bool = false) {
         now = Date()
         checkClaudeSignIns(at: now)
-        guard !demo, !paused, !sleeping, !removing, !offline else { return }
+        guard !shuttingDown, !demo, !paused, !sleeping, !removing, !offline else { return }
         if refreshing { pendingManualRefresh = pendingManualRefresh || force; return }
         let due = accounts.filter {
             $0.enabled && signingIn != $0.id && waitingForClaude[$0.id] == nil && (schedules[$0.id] ?? PollState()).shouldRefresh(at: now, manual: force)
@@ -374,10 +390,11 @@ final class AppStore: ObservableObject {
         signingIn = account.id
         errors[account.id] = nil
         snapshots[account.id] = nil
-        loginTask = Task {
+        loginTask = Task { [self] in
             do {
                 try await CodexAdapter(executable: executable, root: root).login(account: account) { [weak self] url in
                     try await MainActor.run {
+                        try Task.checkCancellation()
                         guard let self, self.openExternal(url) else { throw UsageError.unavailable("Could not open the browser. Try signing in again after choosing a default browser.") }
                     }
                 }
@@ -391,6 +408,14 @@ final class AppStore: ObservableObject {
         }
     }
     func cancelSignIn() { loginTask?.cancel() }
+    func shutdown() async {
+        shuttingDown = true
+        heartbeat?.cancel(); heartbeat = nil; network.cancel()
+        refreshTask?.cancel(); loginTask?.cancel(); connectionTask?.cancel()
+        await refreshTask?.value
+        await loginTask?.value
+        await connectionTask?.value
+    }
     func chooseExecutable() {
         let panel = NSOpenPanel(); panel.canChooseDirectories = false; panel.allowsMultipleSelection = false
         panel.message = "Choose the installed Codex CLI executable."

@@ -9,7 +9,7 @@ A small native macOS menu bar app for multiple Claude and OpenAI accounts. Swift
 ## Install
 
 1. Install [Claude Code](https://code.claude.com/docs/en/setup) and/or [Codex CLI](https://developers.openai.com/codex/cli) and keep the provider CLI up to date.
-2. Download the Apple Silicon ZIP from this repository's **Releases** page. Extract it and move **Ai-llowance.app** into **Applications**.
+2. Build the preview from source below, or use its locally packaged Apple Silicon ZIP. A public GitHub release has not been published yet. Extract the ZIP and move **Ai-llowance.app** into **Applications**.
 3. Open Ai-llowance. Its icon appears in the menu bar; **Settings** manages connections.
 
 macOS may block the preview because it is not notarized. Review the source and release checksum before deciding whether to allow it through **System Settings → Privacy & Security → Open Anyway**. Follow [Apple's guidance](https://support.apple.com/102445); do not disable Gatekeeper globally. You can also build from source below.
@@ -41,7 +41,7 @@ Percentages are explicitly labeled **left**. Each account has one prominent over
 
 Choose Automatic, Light, or Dark appearance in Settings. Automatic follows macOS. Provider icons use native monochrome templates on transparent backgrounds.
 
-The menu bar can show an average across all accounts, one average per provider, or individual accounts. Individual-account mode can hide names for just provider icons and percentages; hover to identify accounts. Include all accounts or select specific ones. Averages give each account equal weight, regardless of plan size; they do not represent pooled credits. Only the overall weekly allowance is used in menu-bar summaries. Missing, failed, or stale accounts make their group unavailable instead of being silently excluded.
+The menu bar can show an average across all accounts, one average per provider, or individual accounts. Individual-account mode keeps Claude accounts together, followed by OpenAI accounts, preserving order within each provider. It can hide names for just provider icons and percentages; hover to identify accounts. Include all accounts or select specific ones. Averages give each account equal weight, regardless of plan size; they do not represent pooled credits. Only the overall weekly allowance is used in menu-bar summaries. Missing, failed, stale, or provider-restricted accounts make their group unavailable instead of being silently excluded.
 
 Opening the menu or Settings requests a new reading, capped at one healthy network read per 30 seconds. Background polling runs about once a minute, independently of menu interaction, with provider backoff. Sleeping, pausing, and offline status stop network reads. Old/error readings are visibly marked; reset times never fabricate replenished quota. Clicking outside the menu dismisses it. Pause/resume and Quit are direct icon buttons.
 
@@ -58,6 +58,8 @@ The JSON envelope is structured, but its plan rows are text. This is a version-d
 The previous status-line bridge is no longer needed. After a successful direct read, the app restores the pre-Ai-llowance status line only if its own setting is still present. Later user edits survive. New connections do not change status-line settings.
 
 ## Security and footprint
+
+See the [hardening and resource report](docs/hardening-and-resources.md) for measurements and verification limits. The native app is small, but short-lived provider CLIs add CPU and memory during refresh; “extremely lightweight” is not a claim about the entire process tree.
 
 - One coalescible timer and serial reads. Claude and Codex run short-lived CLI children; there is no persistent background agent or inference loop.
 - Network/API credentials are never logged. Claude's full local usage report stays in memory; only plan rows become app state. No transcript contents are read by Ai-llowance.
@@ -83,6 +85,14 @@ The locally built `Ai-llowance.app` opens directly. Close Settings to keep it in
 # Quit any running Ai-llowance instance first.
 open dist/Ai-llowance.app --args --preview
 ```
+
+Export shareable PNGs with fictional emails and readings in both appearances (no live account data is loaded):
+
+```sh
+dist/Ai-llowance.app/Contents/MacOS/UsageBar --export-preview ./share-images
+```
+
+The export reuses the actual dashboard rows without its scroll container, which cannot be captured by SwiftUI's image renderer. The menu strip illustrates the same ordered entries as the native menu bar.
 
 Optional isolated dummy-Keychain test:
 

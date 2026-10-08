@@ -12,16 +12,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     private var subscriptions: Set<AnyCancellable> = []
     private var outsideClickMonitor: Any?
     private var localClickMonitor: Any?
-    private let store = AppStore(demo: CommandLine.arguments.contains("--demo") || CommandLine.arguments.contains("--preview"))
+    private var renderedEntries: [MenuEntry]?
+    private var renderedPreferences: MenuPreferences?
+    private let store = AppStore(demo: CommandLine.arguments.contains("--demo") || CommandLine.arguments.contains("--preview") || CommandLine.arguments.contains("--export-preview"))
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
+        if let index = CommandLine.arguments.firstIndex(of: "--export-preview"), CommandLine.arguments.count > index + 1 {
+            do { try SharePreview.export(store: store, directory: URL(fileURLWithPath: CommandLine.arguments[index + 1])) }
+            catch { fputs("Could not render the sample preview.\n", stderr); exit(1) }
+            NSApp.terminate(nil); return
+        }
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         if let button = statusItem.button {
             button.image = NSImage(systemSymbolName: "gauge.with.dots.needle.33percent", accessibilityDescription: "Ai-llowance")
             button.imagePosition = .imageLeading
             button.title = " Usage"
             button.target = self; button.action = #selector(togglePopover)
-            button.toolTip = "Lowest remaining weekly quota across fresh, enabled accounts. Open for individual windows."
+            button.toolTip = "Weekly remaining quota for your selected accounts. Open for individual windows."
         }
         popover.behavior = .transient
         popover.delegate = self
@@ -39,6 +46,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
             previewWindow = preview
             NSApp.activate(ignoringOtherApps: true)
         } else if store.accounts.isEmpty || store.demo || CommandLine.arguments.contains("--accounts") { showAccounts() }
+        updateLabel()
         store.refresh()
         if CommandLine.arguments.contains("--show-menu") {
             DispatchQueue.main.async { [weak self] in self?.togglePopover() }
@@ -47,6 +55,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     private func updateLabel() {
         guard let button = statusItem?.button else { return }
         let entries = store.menuEntries
+        guard renderedEntries != entries || renderedPreferences != store.menuPreferences else { return }
+        renderedEntries = entries; renderedPreferences = store.menuPreferences
         guard !entries.isEmpty else {
             button.attributedTitle = NSAttributedString(string: "")
             button.image = NSImage(systemSymbolName: "gauge.with.dots.needle.33percent", accessibilityDescription: "Ai-llowance")
@@ -130,6 +140,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         window?.makeKeyAndOrderFront(nil); NSApp.activate(ignoringOtherApps: true)
     }
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool { showAccounts(); return true }
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        removeClickMonitors()
+        Task { await store.shutdown(); sender.reply(toApplicationShouldTerminate: true) }
+        return .terminateLater
+    }
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
 }
 

@@ -2,6 +2,13 @@
 
 ## 0.1.0 — Preview
 
+- Stable provider grouping for individual menu-bar accounts; Claude first, then OpenAI.
+- Validated decoded percentages/reset metadata, bounded saved settings, duplicate-ID rejection, private atomic file writes, and invalid cost-total rejection.
+- Quit cancels pending usage reads, sign-in, and initial connection checks. Codex cleanup finishes its forced-termination fallback before returning.
+- Provider restrictions cannot appear as a healthy menu percentage. Corrupt settings fail closed before removing credentials.
+- Smaller cached icon masks, unchanged-menu redraw suppression, and measured app/CLI resource use.
+- Shareable dark/light PNG export from fictional in-memory accounts.
+
 - Hardened account setup and recovery: explicit sign-in progress, completion detection, cancellation/timeout handling, expired-login recovery, duplicate-account warnings, and missing-CLI guidance.
 - Reconnects reject stale in-flight responses. Claude command reads enforce process deadlines, size limits, exit status, and Keychain-only app profiles.
 - First-time subscription setup preserves existing API-billed Claude profiles.
