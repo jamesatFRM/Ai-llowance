@@ -34,10 +34,10 @@ struct UsageBridge {
             // Only quota fields and observation time survive. No session text, paths, or tokens.
             try Paths.write(ClaudeFeed(accountID: id, snapshot: snapshot), to: Paths.feed(id))
             let label = snapshot.windows.map { "\($0.label): \(Int($0.remainingPercent))% left" }.joined(separator: " · ")
-            print(label.isEmpty ? "UsageBar: quota unavailable" : label)
+            print(label.isEmpty ? "Ai-llowance: quota unavailable" : label)
         } catch {
             // Fixed safe errors only; never echo the stdin payload or provider response.
-            let message = (error as? UsageError)?.localizedDescription ?? "UsageBar could not read usage data."
+            let message = (error as? UsageError)?.localizedDescription ?? "Ai-llowance could not read usage data."
             try? FileHandle.standardError.write(contentsOf: Data((message + "\n").utf8))
             exit(1)
         }

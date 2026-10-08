@@ -58,9 +58,9 @@ final class AppStore: ObservableObject {
             let offline = path.status != .satisfied
             Task { @MainActor in self?.offline = offline; if !offline { self?.refresh() } }
         }
-        network.start(queue: DispatchQueue(label: "UsageBar.network", qos: .utility))
+        network.start(queue: DispatchQueue(label: "Ai-llowance.network", qos: .utility))
         // Dispatch deadlines do not depend on AppKit's default/event-tracking run-loop mode.
-        let heartbeat = DispatchSource.makeTimerSource(queue: DispatchQueue(label: "UsageBar.heartbeat", qos: .utility))
+        let heartbeat = DispatchSource.makeTimerSource(queue: DispatchQueue(label: "Ai-llowance.heartbeat", qos: .utility))
         heartbeat.schedule(deadline: .now() + 15, repeating: 15, leeway: .seconds(3))
         heartbeat.setEventHandler { [weak self] in
             Task { @MainActor in self?.now = Date(); self?.refresh() }
@@ -168,7 +168,7 @@ final class AppStore: ObservableObject {
                 if !signedIn {
                     let launcher = try connection.launcher(account: account, login: true, loginOnly: true)
                     guard NSWorkspace.shared.open(launcher) else { throw UsageError.unavailable("Could not open Claude’s sign-in. Click Sign in to Claude to try again.") }
-                    notice = "Finish Claude’s browser sign-in once. UsageBar will read your limits automatically; no chat or open Terminal is needed afterward."
+                    notice = "Finish Claude’s browser sign-in once. Ai-llowance will read your limits automatically; no chat or open Terminal is needed afterward."
                 } else { notice = nil }
                 schedules[account.id] = PollState(); refresh(force: true)
             } catch { notice = safeMessage(error) }

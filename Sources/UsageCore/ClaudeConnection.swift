@@ -78,7 +78,7 @@ public struct ClaudeConnection: Sendable {
                 try writePrivate(Data((script + "\n").utf8), to: wrapper, executable: true)
                 command = ShellQuote.argument(wrapper.path)
             } else if settings["statusLine"] != nil {
-                throw UsageError.unavailable("This Claude profile has a status-line format UsageBar cannot preserve. Its settings were left unchanged.")
+                throw UsageError.unavailable("This Claude profile has a status-line format Ai-llowance cannot preserve. Its settings were left unchanged.")
             }
             record = Record(accountID: account.id, settingsPath: settingsURL.path, installedCommand: command, previousStatusLine: previous)
             try Paths.write(record, to: recordURL)
@@ -136,14 +136,14 @@ public struct ClaudeConnection: Sendable {
                 if [ -f \(ShellQuote.argument(profile.appendingPathComponent(".credentials.json").path)) ]; then
                   \(cli) auth logout >/dev/null 2>&1 || true
                   /bin/rm -f \(ShellQuote.argument(profile.appendingPathComponent(".credentials.json").path))
-                  printf '%s\\n' 'Claude could not store this new sign-in in Keychain. Unlock your login Keychain, then click Sign in again in UsageBar.'
+                  printf '%s\\n' 'Claude could not store this new sign-in in Keychain. Unlock your login Keychain, then click Sign in again in Ai-llowance.'
                   read -r 'usagebar_done?Press Return to close.'
                   exit 1
                 fi
                 """
             }
             if loginOnly {
-                script += "\nprintf '%s\\n' 'Sign-in complete. You can close this Terminal window. UsageBar will now read your limits automatically.'\n"
+                script += "\nprintf '%s\\n' 'Sign-in complete. You can close this Terminal window. Ai-llowance will now read your limits automatically.'\n"
             } else {
                 script += "\nexec \(cli)\n"
             }

@@ -8,15 +8,15 @@ import zipfile
 
 archive = pathlib.Path(sys.argv[1])
 allowed = {
-    'UsageBar.app/Contents/Info.plist',
-    'UsageBar.app/Contents/MacOS/UsageBar',
-    'UsageBar.app/Contents/MacOS/UsageBridge',
-    'UsageBar.app/Contents/Resources/UsageBar.icns',
-    'UsageBar.app/Contents/Resources/LICENSE',
-    'UsageBar.app/Contents/Resources/Claude.png',
-    'UsageBar.app/Contents/Resources/ChatGPT.png',
-    'UsageBar.app/Contents/Resources/THIRD_PARTY_NOTICES.md',
-    'UsageBar.app/Contents/_CodeSignature/CodeResources',
+    'Ai-llowance.app/Contents/Info.plist',
+    'Ai-llowance.app/Contents/MacOS/UsageBar',
+    'Ai-llowance.app/Contents/MacOS/UsageBridge',
+    'Ai-llowance.app/Contents/Resources/UsageBar.icns',
+    'Ai-llowance.app/Contents/Resources/LICENSE',
+    'Ai-llowance.app/Contents/Resources/Claude.png',
+    'Ai-llowance.app/Contents/Resources/ChatGPT.png',
+    'Ai-llowance.app/Contents/Resources/THIRD_PARTY_NOTICES.md',
+    'Ai-llowance.app/Contents/_CodeSignature/CodeResources',
 }
 secret_patterns = [
     rb'gh[pousr]_[A-Za-z0-9]{30,}',
@@ -37,11 +37,11 @@ with zipfile.ZipFile(archive) as z:
             raise SystemExit('Potential credential found; do not publish.')
         if b'/Users/' in data or b'/private/var/folders/' in data:
             raise SystemExit('Local machine path found; do not publish.')
-    info = plistlib.loads(z.read('UsageBar.app/Contents/Info.plist'))
-    if info.get('CFBundleIdentifier') != 'com.usagebar.app' or not info.get('LSUIElement'):
+    info = plistlib.loads(z.read('Ai-llowance.app/Contents/Info.plist'))
+    if info.get('CFBundleIdentifier') != 'com.usagebar.app' or info.get('CFBundleDisplayName') != 'Ai-llowance' or not info.get('LSUIElement'):
         raise SystemExit('Unexpected app identity or mode.')
     for executable in ['UsageBar', 'UsageBridge']:
-        mode = z.getinfo('UsageBar.app/Contents/MacOS/' + executable).external_attr >> 16
+        mode = z.getinfo('Ai-llowance.app/Contents/MacOS/' + executable).external_attr >> 16
         if not mode & 0o111:
             raise SystemExit('Executable permission missing.')
 print('Release archive passed: expected files, executable permissions, app identity, and sensitive-pattern checks.')

@@ -8,7 +8,7 @@ export CLANG_MODULE_CACHE_PATH="$build_dir/clang-cache"
 export SWIFTPM_MODULECACHE_OVERRIDE="$build_dir/swift-cache"
 swift build --package-path "$project_dir" --scratch-path "$build_dir" --cache-path "$build_dir/package-cache" --disable-sandbox -c release
 binary_dir="$(swift build --package-path "$project_dir" --scratch-path "$build_dir" --cache-path "$build_dir/package-cache" --disable-sandbox -c release --show-bin-path)"
-app_dir="$output_dir/UsageBar.app"
+app_dir="$output_dir/Ai-llowance.app"
 mkdir -p "$app_dir/Contents/MacOS" "$app_dir/Contents/Resources"
 cp "$binary_dir/UsageBar" "$app_dir/Contents/MacOS/UsageBar"
 cp "$binary_dir/UsageBridge" "$app_dir/Contents/MacOS/UsageBridge"
@@ -23,8 +23,8 @@ cat > "$app_dir/Contents/Info.plist" <<'PLIST'
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
   <key>CFBundleIdentifier</key><string>com.usagebar.app</string>
-  <key>CFBundleName</key><string>UsageBar</string>
-  <key>CFBundleDisplayName</key><string>UsageBar</string>
+  <key>CFBundleName</key><string>Ai-llowance</string>
+  <key>CFBundleDisplayName</key><string>Ai-llowance</string>
   <key>CFBundleExecutable</key><string>UsageBar</string>
   <key>CFBundleIconFile</key><string>UsageBar</string>
   <key>CFBundlePackageType</key><string>APPL</string>

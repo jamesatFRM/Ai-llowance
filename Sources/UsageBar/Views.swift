@@ -11,7 +11,7 @@ struct Dashboard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 9) {
             HStack(spacing: 6) {
-                Text("UsageBar").font(.system(size: 12, weight: .semibold))
+                Text("Ai-llowance").font(.system(size: 12, weight: .semibold))
                 Spacer()
                 if store.refreshing { ProgressView().controlSize(.mini) }
                 Text(store.refreshSummary)
@@ -45,7 +45,7 @@ struct Dashboard: View {
                     .accessibilityLabel(store.paused ? "Resume automatic refresh" : "Pause automatic refresh").disabled(store.demo)
                 Button { NSApplication.shared.terminate(nil) } label: {
                     Image(systemName: "power").frame(width: 22, height: 22)
-                }.help("Quit UsageBar").accessibilityLabel("Quit UsageBar")
+                }.help("Quit Ai-llowance").accessibilityLabel("Quit Ai-llowance")
             }.font(.system(size: 10)).buttonStyle(.plain).foregroundStyle(.secondary).padding(.horizontal, 9).padding(.bottom, 3)
         }.padding(7).frame(width: 350).background(Color(nsColor: .windowBackgroundColor)).preferredColorScheme(store.menuPreferences.theme.colorScheme)
     }
@@ -262,14 +262,14 @@ struct AccountsView: View {
                 Button { store.togglePause() } label: { Image(systemName: store.paused ? "play.fill" : "pause.fill").frame(width: 26, height: 26) }
                     .help(store.paused ? "Resume refresh" : "Pause refresh").accessibilityLabel(store.paused ? "Resume refresh" : "Pause refresh").disabled(store.demo)
                 Button { NSApplication.shared.terminate(nil) } label: { Image(systemName: "power").frame(width: 26, height: 26) }
-                    .help("Quit UsageBar").accessibilityLabel("Quit UsageBar")
+                    .help("Quit Ai-llowance").accessibilityLabel("Quit Ai-llowance")
             }.font(.system(size: 10)).buttonStyle(.plain).padding(.horizontal, 24).padding(.vertical, 10)
         }.frame(minWidth: 640, idealWidth: 680, minHeight: 620)
             .background(Color(nsColor: .windowBackgroundColor)).preferredColorScheme(store.menuPreferences.theme.colorScheme)
         .alert("Remove \(removing?.name ?? "account")?", isPresented: Binding(get: { removing != nil }, set: { if !$0 { removing = nil } })) {
             Button("Cancel", role: .cancel) { removing = nil }
             Button("Remove", role: .destructive) { if let account = removing { Task { await store.remove(account) } }; removing = nil }
-        } message: { Text("Its admin key or app-owned OpenAI sign-in will be cleared. Any legacy UsageBar status line is restored automatically. Claude sign-ins remain managed by Claude; use Sign out in Terminal first if you also want to clear that login.") }
+        } message: { Text("Its admin key or app-owned OpenAI sign-in will be cleared. Any legacy Ai-llowance status line is restored automatically. Claude sign-ins remain managed by Claude; use Sign out in Terminal first if you also want to clear that login.") }
         .sheet(item: $renaming) { account in
             VStack(alignment: .leading, spacing: 16) {
                 Text("Rename account").font(.headline)
@@ -461,7 +461,7 @@ struct AccountsView: View {
                         if store.executable == nil { Link("Install Codex ↗", destination: URL(string: "https://developers.openai.com/codex/cli")!) }
                         if store.claudeExecutable == nil { Link("Install Claude Code ↗", destination: URL(string: "https://code.claude.com/docs/en/setup")!) }
                     }
-                    Text("Preview release · not notarized. No UsageBar analytics or backend. Provider websites open with your browser’s current account.")
+                    Text("Preview release · not notarized. No Ai-llowance analytics or backend. Provider websites open with your browser’s current account.")
                         .font(.system(size: 10)).foregroundStyle(.secondary)
                 }.padding(.top, 12).disabled(store.demo)
             }.font(.system(size: 12, weight: .medium))

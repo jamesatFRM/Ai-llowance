@@ -1,6 +1,6 @@
 # Preview verification
 
-UsageBar 0.1.0 is a preview, not a production release. The downloadable app is ad-hoc signed, not Developer ID signed or notarized.
+Ai-llowance 0.1.0 is a preview, not a production release. The downloadable app is ad-hoc signed, not Developer ID signed or notarized.
 
 ## Verified locally
 
@@ -10,7 +10,7 @@ UsageBar 0.1.0 is a preview, not a production release. The downloadable app is a
 - Native compact-menu layout checked using fictional sample accounts.
 - Automatic reading timestamps advanced for all four accounts without clicking Refresh.
 - Direct Claude usage with Claude Code 2.1.294 returned a successful JSON envelope with zero model turns and zero model cost. No conversation or persistent Terminal session was required.
-- Legacy status-line migration preserved independent user changes and restored the previous setting when still owned by UsageBar.
+- Legacy status-line migration preserved independent user changes and restored the previous setting when still owned by Ai-llowance.
 
 ## Integration boundaries
 
@@ -45,3 +45,7 @@ All 36 tests passed, including equal-weight averages, account filtering, missing
 Native UI inspection verified Light, Dark, and Automatic controls; transparent monochrome marks; compact account mode without names; account selection; provider averages; the combined average; pause/resume; and the smaller bold five-hour rows. The dropdown was absent after an outside click. Readings refreshed for both Claude accounts and both Codex accounts. These checks were on this Mac only, not a clean install or public CI run.
 
 The current healthy-read scheduler uses a dispatch timer independent of AppKit event tracking. Manual refresh requests during a read are queued and remain subject to provider backoff. The earlier report of updates requiring Settings was not conclusively reproduced, so the scheduling fix is not proof of that report's root cause.
+
+## Ai-llowance rename
+
+The display name, native windows, accessibility labels, connection messages, docs, app bundle filename, and release archive use Ai-llowance. The bundle identifier, executable target, Keychain service, and Application Support directory retain their original identities for compatibility. The existing account/preferences file was byte-for-byte unchanged across replacement and launch. All 36 tests and the release archive checks passed after the rename; the renamed native Settings window opened with existing connections. This remains a local preview, not a public release.

@@ -2,6 +2,8 @@
 
 ## 0.1.0 — Preview
 
+- Renamed the app to Ai-llowance. Existing connections and preferences keep their original storage and Keychain identities.
+
 - Native macOS menu bar interface with compact provider groups.
 - Multiple Claude Code and OpenAI Codex subscription accounts with small email labels.
 - Weekly remaining quota, reset weekdays, one global refresh status, and clear unavailable/stale states. Five-hour session limits appear underneath and do not affect the menu-bar percentage.

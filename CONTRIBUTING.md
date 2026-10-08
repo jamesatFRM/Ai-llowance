@@ -1,8 +1,8 @@
 # Contributing
 
-UsageBar is a native macOS app with no third-party runtime dependencies. Keep the menu compact, account setup simple, and provider limits distinct from API spending.
+Ai-llowance is a native macOS app with no third-party runtime dependencies. Keep the menu compact, account setup simple, and provider limits distinct from API spending.
 
-Run `bash scripts/test.sh` and `bash scripts/package-release.sh` before opening a pull request. CI performs the same checks on a fresh macOS runner. `open dist/UsageBar.app --args --preview` shows fictional sample data; quit any running UsageBar instance first.
+Run `bash scripts/test.sh` and `bash scripts/package-release.sh` before opening a pull request. CI performs the same checks on a fresh macOS runner. `open dist/Ai-llowance.app --args --preview` shows fictional sample data; quit any running Ai-llowance instance first.
 
 Provider changes must identify their documented source or explicitly label a version-dependent CLI integration. Do not infer missing quotas, scrape credential files, log authentication payloads, or turn spending into a made-up remaining balance. Include representative synthetic fixtures and rejection cases when changing a parser.
 

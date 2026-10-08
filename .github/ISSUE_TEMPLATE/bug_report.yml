@@ -8,14 +8,14 @@ body:
     id: behavior
     attributes:
       label: What happened?
-      description: What did you expect, and what did UsageBar show?
+      description: What did you expect, and what did Ai-llowance show?
     validations:
       required: true
   - type: input
     id: versions
     attributes:
       label: Versions
-      description: UsageBar version, macOS version, Apple Silicon or Intel, and Claude Code / Codex CLI version.
+      description: Ai-llowance version, macOS version, Apple Silicon or Intel, and Claude Code / Codex CLI version.
     validations:
       required: true
   - type: textarea

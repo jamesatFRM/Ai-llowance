@@ -17,7 +17,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         NSApp.setActivationPolicy(.accessory)
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         if let button = statusItem.button {
-            button.image = NSImage(systemSymbolName: "gauge.with.dots.needle.33percent", accessibilityDescription: "UsageBar")
+            button.image = NSImage(systemSymbolName: "gauge.with.dots.needle.33percent", accessibilityDescription: "Ai-llowance")
             button.imagePosition = .imageLeading
             button.title = " Usage"
             button.target = self; button.action = #selector(togglePopover)
@@ -32,7 +32,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         if CommandLine.arguments.contains("--preview") {
             let controller = NSHostingController(rootView: Dashboard(store: store) { [weak self] in self?.showAccounts() })
             let preview = NSWindow(contentViewController: controller)
-            preview.title = "UsageBar · Sample preview"
+            preview.title = "Ai-llowance · Sample preview"
             preview.styleMask = [.titled, .closable]
             preview.isReleasedWhenClosed = false
             preview.center(); preview.makeKeyAndOrderFront(nil)
@@ -49,9 +49,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         let entries = store.menuEntries
         guard !entries.isEmpty else {
             button.attributedTitle = NSAttributedString(string: "")
-            button.image = NSImage(systemSymbolName: "gauge.with.dots.needle.33percent", accessibilityDescription: "UsageBar")
+            button.image = NSImage(systemSymbolName: "gauge.with.dots.needle.33percent", accessibilityDescription: "Ai-llowance")
             button.title = " Usage"
-            button.toolTip = "UsageBar · Choose accounts in Settings"
+            button.toolTip = "Ai-llowance · Choose accounts in Settings"
             return
         }
         button.image = nil
@@ -73,7 +73,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         title.addAttributes([.font: NSFont.monospacedDigitSystemFont(ofSize: 12, weight: .medium), .foregroundColor: NSColor.labelColor], range: NSRange(location: 0, length: title.length))
         button.attributedTitle = title
         button.toolTip = descriptions.joined(separator: "\n") + "\n\(store.menuPreferences.aggregation.title); each account has its own allowance."
-        button.setAccessibilityLabel("UsageBar. " + descriptions.joined(separator: ". "))
+        button.setAccessibilityLabel("Ai-llowance. " + descriptions.joined(separator: ". "))
     }
     @objc private func togglePopover() {
         if popover.isShown { closePopover() }
@@ -123,7 +123,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
                 self?.togglePopover()
             })
             let created = NSWindow(contentViewController: controller)
-            created.title = "UsageBar · Settings"; created.styleMask = [.titled, .closable, .miniaturizable, .resizable]
+            created.title = "Ai-llowance · Settings"; created.styleMask = [.titled, .closable, .miniaturizable, .resizable]
             created.setContentSize(NSSize(width: 680, height: 750)); created.center()
             created.isReleasedWhenClosed = false; window = created
         }

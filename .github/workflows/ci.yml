@@ -23,7 +23,7 @@ jobs:
         run: bash scripts/package-release.sh
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: UsageBar-preview-${{ runner.arch }}
+          name: Ai-llowance-preview-${{ runner.arch }}
           path: |
             dist/*.zip
             dist/SHA256SUMS
