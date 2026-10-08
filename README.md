@@ -35,7 +35,7 @@ The CLIs must be installed once; common installation locations are detected, wit
 | OpenAI API | Organization costs this UTC month | Official Admin Costs API |
 | Anthropic API | Organization costs this UTC month, excluding Priority Tier | Official Admin Cost Report API |
 
-Percentages are explicitly labeled **left**. Each subscription account shows its signed-in email when available, and every compact account shows how old its reading is. Opening the menu or Accounts requests a new reading, capped at one healthy network read per 30 seconds. Background polling is about once a minute with provider backoff. Sleeping, pausing, and offline status stop network reads. Old/error readings are visibly marked; reset times never fabricate replenished quota.
+Percentages are explicitly labeled **left**. Compact rows show only the time until reset (for example, “Resets in 4d”); hover or open Accounts for the quota-window name. Each subscription account shows its signed-in email when available, and every compact account shows how old its reading is. Opening the menu or Accounts requests a new reading, capped at one healthy network read per 30 seconds. Background polling is about once a minute with provider backoff. Sleeping, pausing, and offline status stop network reads. Old/error readings are visibly marked; reset times never fabricate replenished quota.
 
 Codex reports Codex's buckets, not a universal ChatGPT allowance. The Claude report is a direct plan-usage query, so usage elsewhere on that subscription can be reflected without another Claude Code conversation. It is still a point-in-time provider report, not a continuous live counter.
 

@@ -35,3 +35,5 @@ GitHub Actions is configured to run tests and package the app on a fresh macOS r
 The Apple Silicon ZIP passed a strict file allowlist, executable-permission and bundle-identity checks, sensitive-pattern checks, and a check for local machine paths. Archived executables match the packaged app that was opened and inspected natively. Public source was checked for real account identifiers, local home paths, and credential patterns. These focused checks do not constitute an independent security audit.
 
 The repository and release archive are prepared locally. Public GitHub publishing and its first CI run are pending repository-owner selection.
+
+Compact reset labels were simplified to “Resets in 4d” (hours/minutes below a day), with quota-window names retained in tooltips, accessibility labels, and Accounts. Release build, archive checks, and native sample-layout inspection passed. The prepared ZIP was updated and the normal app restored.

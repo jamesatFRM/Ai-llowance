@@ -109,11 +109,10 @@ private struct CompactRow: View {
         if error != nil { return "check account" }
         if stale { return "stale" }
         guard let window else { return snapshot?.costUSD == nil ? "no reading" : "API cost" }
-        let duration = window.label.replacingOccurrences(of: "codex · ", with: "").replacingOccurrences(of: "-hour", with: "h").replacingOccurrences(of: "-day", with: "d")
-        guard let reset = window.resetsAt else { return duration }
+        guard let reset = window.resetsAt else { return "Reset unknown" }
         let minutes = max(0, Int(reset.timeIntervalSince(now) / 60))
-        let remaining = minutes >= 1440 ? "\(minutes / 1440)d" : (minutes >= 60 ? "\(minutes / 60)h \(minutes % 60)m" : "\(minutes)m")
-        return "\(duration) ↻ \(remaining)"
+        let remaining = minutes >= 1440 ? "\(minutes / 1440)d" : (minutes >= 60 ? "\(minutes / 60)h \(minutes % 60)m" : (minutes == 0 ? "<1m" : "\(minutes)m"))
+        return "Resets in \(remaining)"
     }
     private var value: String {
         if let window { return "\(Int(window.remainingPercent))% left" }
