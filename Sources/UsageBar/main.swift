@@ -19,7 +19,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             button.imagePosition = .imageLeading
             button.title = " Usage"
             button.target = self; button.action = #selector(togglePopover)
-            button.toolTip = "Lowest remaining quota across fresh, enabled accounts. Open for individual windows."
+            button.toolTip = "Lowest remaining weekly quota across fresh, enabled accounts. Open for individual windows."
         }
         popover.behavior = .transient
         popover.contentViewController = NSHostingController(rootView: Dashboard(store: store) { [weak self] in self?.showAccounts() })

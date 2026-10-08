@@ -58,9 +58,11 @@ public struct QuotaWindow: Codable, Equatable, Sendable, Identifiable {
     public var label: String
     public var usedPercent: Double
     public var resetsAt: Date?
-    public init(id: String, label: String, usedPercent: Double, resetsAt: Date? = nil) throws {
+    public var durationMinutes: Int?
+    public init(id: String, label: String, usedPercent: Double, resetsAt: Date? = nil, durationMinutes: Int? = nil) throws {
         guard usedPercent.isFinite, usedPercent >= 0, usedPercent <= 100 else { throw UsageError.invalidData }
         self.id = id; self.label = label; self.usedPercent = usedPercent; self.resetsAt = resetsAt
+        self.durationMinutes = durationMinutes
     }
     public var remainingPercent: Double { max(0, 100 - usedPercent) }
 }
@@ -78,9 +80,13 @@ public struct Snapshot: Codable, Equatable, Sendable {
         self.observedAt = observedAt; self.windows = windows; self.costUSD = costUSD; self.periodStart = periodStart
         self.identity = identity; self.source = source; self.note = note
     }
-    public func isStale(at now: Date = Date()) -> Bool {
+    public var weeklyWindows: [QuotaWindow] {
+        // Claude's stable row IDs also cover readings made before duration metadata was added.
+        windows.filter { $0.durationMinutes == 10_080 || $0.id.hasPrefix("week.") || $0.id == "7-day" }
+    }
+    public func isStale(at now: Date = Date(), windows relevantWindows: [QuotaWindow]? = nil) -> Bool {
         now.timeIntervalSince(observedAt) > 900 || observedAt > now.addingTimeInterval(60)
-        || windows.contains { $0.resetsAt.map { $0 <= now } ?? false }
+        || (relevantWindows ?? windows).contains { $0.resetsAt.map { $0 <= now } ?? false }
     }
 }
 

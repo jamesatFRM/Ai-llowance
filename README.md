@@ -30,12 +30,12 @@ The CLIs must be installed once; common installation locations are detected, wit
 
 | Connection | Displays | Source |
 |---|---|---|
-| OpenAI Codex subscription | Reported quota windows and reset times | Official local Codex app-server |
-| Claude subscription | Session, weekly, and any model-specific weekly limits returned | Installed Claude Code's built-in `/usage` command |
+| OpenAI Codex subscription | Reported weekly quota windows and reset weekdays | Official local Codex app-server |
+| Claude subscription | Weekly and any model-specific weekly limits returned | Installed Claude Code's built-in `/usage` command |
 | OpenAI API | Organization costs this UTC month | Official Admin Costs API |
 | Anthropic API | Organization costs this UTC month, excluding Priority Tier | Official Admin Cost Report API |
 
-Percentages are explicitly labeled **left**. Compact rows show only the time until reset (for example, “Resets in 4d”); hover or open Accounts for the quota-window name. Each subscription account shows its signed-in email when available, and every compact account shows how old its reading is. Opening the menu or Accounts requests a new reading, capped at one healthy network read per 30 seconds. Background polling is about once a minute with provider backoff. Sleeping, pausing, and offline status stop network reads. Old/error readings are visibly marked; reset times never fabricate replenished quota.
+Percentages are explicitly labeled **left**. Only weekly windows are displayed, with the reset weekday (for example, “Resets Wed”). Five-hour session limits are hidden and do not affect the menu-bar percentage; hover or open Accounts for the weekly window name. Each subscription account shows its signed-in email when available, and every compact account shows how old its reading is. Opening the menu or Accounts requests a new reading, capped at one healthy network read per 30 seconds. Background polling is about once a minute with provider backoff. Sleeping, pausing, and offline status stop network reads. Old/error readings are visibly marked; reset times never fabricate replenished quota.
 
 Codex reports Codex's buckets, not a universal ChatGPT allowance. The Claude report is a direct plan-usage query, so usage elsewhere on that subscription can be reflected without another Claude Code conversation. It is still a point-in-time provider report, not a continuous live counter.
 

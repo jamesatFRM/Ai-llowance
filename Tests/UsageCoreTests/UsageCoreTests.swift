@@ -212,3 +212,16 @@ private actor MockHTTP: HTTPTransport {
     #expect(!state.shouldRefresh(at: referenceTime.addingTimeInterval(7199), manual: true))
     #expect(state.shouldRefresh(at: referenceTime.addingTimeInterval(7200)))
 }
+
+@Test func weeklyDisplayExcludesSessionAndUnknownWindowsWithoutMaskingWeeklyData() throws {
+    let data = json(#"{"rateLimits":{"primary":{"usedPercent":99,"windowDurationMins":300,"resetsAt":1},"secondary":{"usedPercent":25,"windowDurationMins":10080,"resetsAt":1790003600}}}"#)
+    let snapshot = try UsageParser.codex(data, at: referenceTime)
+    #expect(snapshot.weeklyWindows.count == 1)
+    #expect(snapshot.weeklyWindows[0].remainingPercent == 75)
+    #expect(snapshot.isStale(at: referenceTime))
+    #expect(!snapshot.isStale(at: referenceTime, windows: snapshot.weeklyWindows))
+    let missingWeekly = try UsageParser.codex(json(#"{"rateLimits":{"primary":{"usedPercent":99,"windowDurationMins":300}}}"#), at: referenceTime)
+    #expect(missingWeekly.weeklyWindows.isEmpty)
+    let unknown = try UsageParser.codex(json(#"{"rateLimits":{"secondary":{"usedPercent":20}}}"#), at: referenceTime)
+    #expect(unknown.weeklyWindows.isEmpty)
+}

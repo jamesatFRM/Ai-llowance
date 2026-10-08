@@ -50,7 +50,7 @@ struct Dashboard: View {
     private func providerGroups(_ name: String, subscription: ConnectionKind, api: ConnectionKind) -> some View {
         let subscriptions = store.accounts.filter { $0.kind == subscription }
         let billing = store.accounts.filter { $0.kind == api }
-        if !subscriptions.isEmpty { compactGroup(name, trailing: "Remaining", accounts: subscriptions) }
+        if !subscriptions.isEmpty { compactGroup(name, trailing: "Weekly remaining", accounts: subscriptions) }
         if !billing.isEmpty { compactGroup("\(name) API spending", trailing: "This month · UTC", accounts: billing) }
     }
     @ViewBuilder
@@ -71,7 +71,7 @@ struct Dashboard: View {
             }.foregroundStyle(.secondary).padding(.bottom, 4)
             ForEach(accounts) { account in
                 let snapshot = store.snapshots[account.id]
-                let windows = snapshot?.windows ?? []
+                let windows = snapshot?.weeklyWindows ?? []
                 if windows.isEmpty {
                     CompactRow(account: account, snapshot: snapshot, window: nil, error: store.errors[account.id], now: store.now, claudeSignedIn: store.claudeSignedIn[account.id], action: manage)
                     accountEmail(snapshot)
@@ -101,18 +101,16 @@ private struct CompactRow: View {
     let now: Date
     let claudeSignedIn: Bool?
     let action: () -> Void
-    private var stale: Bool { snapshot?.isStale(at: now) ?? false }
+    private var stale: Bool { snapshot?.isStale(at: now, windows: snapshot?.weeklyWindows) ?? false }
     private var color: Color { account.kind == .codex || account.kind == .openAIAPI ? .cyan : .orange }
     private var detail: String {
         if !account.enabled { return "paused" }
         if account.kind == .claudeCode && snapshot == nil, let claudeSignedIn { return claudeSignedIn ? "refresh" : "sign in" }
         if error != nil { return "check account" }
         if stale { return "stale" }
-        guard let window else { return snapshot?.costUSD == nil ? "no reading" : "API cost" }
+        guard let window else { return snapshot?.costUSD == nil ? (snapshot == nil ? "no reading" : "Weekly unavailable") : "API cost" }
         guard let reset = window.resetsAt else { return "Reset unknown" }
-        let minutes = max(0, Int(reset.timeIntervalSince(now) / 60))
-        let remaining = minutes >= 1440 ? "\(minutes / 1440)d" : (minutes >= 60 ? "\(minutes / 60)h \(minutes % 60)m" : (minutes == 0 ? "<1m" : "\(minutes)m"))
-        return "Resets in \(remaining)"
+        return "Resets \(reset.formatted(.dateTime.weekday(.abbreviated)))"
     }
     private var value: String {
         if let window { return "\(Int(window.remainingPercent))% left" }
@@ -150,7 +148,7 @@ struct UsageCard: View {
     let snapshot: Snapshot?
     let error: String?
     let now: Date
-    private var stale: Bool { snapshot?.isStale(at: now) ?? false }
+    private var stale: Bool { snapshot?.isStale(at: now, windows: snapshot?.weeklyWindows) ?? false }
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(alignment: .top) {
@@ -174,7 +172,7 @@ struct UsageCard: View {
                         Text("Organization · month to date").font(.caption).foregroundStyle(.secondary)
                     }
                 }
-                ForEach(snapshot.windows) { window in
+                ForEach(snapshot.weeklyWindows) { window in
                     VStack(alignment: .leading, spacing: 5) {
                         HStack {
                             Text(window.label).font(.caption)
@@ -185,10 +183,13 @@ struct UsageCard: View {
                             .tint(stale || error != nil ? .gray : (window.usedPercent >= 90 ? .orange : .teal))
                             .accessibilityLabel("\(window.label): \(Int(window.usedPercent)) percent used")
                         if let reset = window.resetsAt {
-                            Text(reset <= now ? "Reset time passed · waiting for a new reading" : "Resets \(reset.formatted(date: .abbreviated, time: .shortened))")
+                            Text(reset <= now ? "Reset time passed · waiting for a new reading" : "Resets \(reset.formatted(.dateTime.weekday(.wide)))")
                                 .font(.caption2).foregroundStyle(.secondary)
                         }
                     }
+                }
+                if !account.kind.isAPI && snapshot.weeklyWindows.isEmpty {
+                    Text("Weekly usage is unavailable for this account.").font(.caption).foregroundStyle(.secondary)
                 }
                 if let note = snapshot.note { Text(note).font(.caption2).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true) }
                 HStack {

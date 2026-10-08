@@ -22,6 +22,7 @@ private func envelope(_ text: String, turns: Int = 0, cost: Double = 0) throws -
     let snapshot = try ClaudeUsageReport.parse(envelope(planText), at: checkTime)
     #expect(snapshot.windows.map(\.usedPercent) == [38, 81, 0])
     #expect(snapshot.windows.map(\.remainingPercent) == [62, 19, 100])
+    #expect(snapshot.weeklyWindows.map(\.remainingPercent) == [19, 100])
     #expect(snapshot.windows.map(\.label) == ["Session · 5h", "Week · 7d", "Fable · 7d"])
     #expect(snapshot.windows[0].resetsAt == ISO8601DateFormatter().date(from: "2026-10-08T18:10:00Z"))
     #expect(snapshot.windows[1].resetsAt == ISO8601DateFormatter().date(from: "2026-10-13T16:00:00Z"))

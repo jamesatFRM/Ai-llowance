@@ -39,8 +39,8 @@ final class AppStore: ObservableObject {
             let second = Account(name: "Studio", kind: .claudeCode)
             let third = Account(name: "Work organization", kind: .openAIAPI)
             accounts = [first, second, third]
-            snapshots[first.id] = Snapshot(observedAt: now, windows: [try! QuotaWindow(id: "5h", label: "codex · 5h", usedPercent: 38, resetsAt: now.addingTimeInterval(7200)), try! QuotaWindow(id: "7d", label: "codex · 7d", usedPercent: 65, resetsAt: now.addingTimeInterval(172800))], identity: "personal@example.com", source: "Sample data")
-            snapshots[second.id] = Snapshot(observedAt: now, windows: [try! QuotaWindow(id: "5h", label: "5-hour", usedPercent: 12, resetsAt: now.addingTimeInterval(3600))], identity: "studio@example.com", source: "Sample data", note: "Sample Claude plan limits.")
+            snapshots[first.id] = Snapshot(observedAt: now, windows: [try! QuotaWindow(id: "5h", label: "codex · 5h", usedPercent: 38, resetsAt: now.addingTimeInterval(7200), durationMinutes: 300), try! QuotaWindow(id: "7d", label: "codex · 7d", usedPercent: 65, resetsAt: now.addingTimeInterval(172800), durationMinutes: 10_080)], identity: "personal@example.com", source: "Sample data")
+            snapshots[second.id] = Snapshot(observedAt: now, windows: [try! QuotaWindow(id: "week.all models", label: "Week · 7d", usedPercent: 12, resetsAt: now.addingTimeInterval(432000), durationMinutes: 10_080)], identity: "studio@example.com", source: "Sample data", note: "Sample Claude plan limits.")
             snapshots[third.id] = Snapshot(observedAt: now, costUSD: Decimal(string: "24.18"), periodStart: CostAdapter.monthStart(now), source: "Sample data")
             return
         }
@@ -70,7 +70,7 @@ final class AppStore: ObservableObject {
         }
     }
     var menuLabel: String {
-        let values = accounts.filter { $0.enabled && errors[$0.id] == nil }.compactMap { snapshots[$0.id] }.filter { !$0.isStale(at: now) }.flatMap(\.windows)
+        let values = accounts.filter { $0.enabled && errors[$0.id] == nil }.compactMap { snapshots[$0.id] }.filter { !$0.isStale(at: now, windows: $0.weeklyWindows) }.flatMap(\.weeklyWindows)
         guard let remaining = values.map(\.remainingPercent).min() else { return "Usage" }
         return "\(Int(remaining))% left"
     }

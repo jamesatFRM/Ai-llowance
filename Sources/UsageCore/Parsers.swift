@@ -25,7 +25,7 @@ public enum UsageParser {
                 guard let window else { continue }
                 let duration = window.windowDurationMins.map { $0 % 1440 == 0 ? "\($0 / 1440)d" : ($0 % 60 == 0 ? "\($0 / 60)h" : "\($0)m") } ?? slot
                 windows.append(try QuotaWindow(id: "\(key).\(slot)", label: "\(bucket.limitName ?? key) · \(duration)",
-                    usedPercent: window.usedPercent, resetsAt: window.resetsAt.map { Date(timeIntervalSince1970: $0) }))
+                    usedPercent: window.usedPercent, resetsAt: window.resetsAt.map { Date(timeIntervalSince1970: $0) }, durationMinutes: window.windowDurationMins))
             }
         }
         return Snapshot(observedAt: now, windows: windows, identity: identity, source: "Codex app-server",
@@ -45,7 +45,7 @@ public enum UsageParser {
         for (label, value) in [("5-hour", report.rate_limits?.five_hour), ("7-day", report.rate_limits?.seven_day)] {
             guard let percent = value?.used_percentage else { continue }
             windows.append(try QuotaWindow(id: label, label: label, usedPercent: percent,
-                resetsAt: value?.resets_at.map { Date(timeIntervalSince1970: $0) }))
+                resetsAt: value?.resets_at.map { Date(timeIntervalSince1970: $0) }, durationMinutes: label == "5-hour" ? 300 : 10_080))
         }
         return Snapshot(observedAt: now, windows: windows, source: "Claude Code status-line feed",
             note: windows.isEmpty ? "Claude Code has not supplied subscription quota data. It may require an eligible Pro/Max plan, a newer version, and a completed response. Context tokens and session cost are not subscription quotas." : "Observed while Claude Code was active. Account assignment is manual; the feed does not verify your signed-in identity.")

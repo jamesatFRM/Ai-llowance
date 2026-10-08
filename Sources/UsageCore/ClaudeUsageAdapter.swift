@@ -88,7 +88,7 @@ public enum ClaudeUsageReport {
             guard ids.insert(id).inserted else { throw UsageError.invalidData }
             let label = model.map { $0 == "all models" ? "Week · 7d" : "\($0) · 7d" } ?? "Session · 5h"
             windows.append(try QuotaWindow(id: id, label: label, usedPercent: percent,
-                                          resetsAt: group(4).flatMap { resetDate($0, now: now) }))
+                                          resetsAt: group(4).flatMap { resetDate($0, now: now) }, durationMinutes: model == nil ? 300 : 10_080))
         }
         guard !windows.isEmpty, ids.contains("session"), ids.contains("week.all models") else {
             throw UsageError.unavailable("Claude Code did not return plan limits. Update Claude Code to a version that supports /usage in print mode, then refresh.")

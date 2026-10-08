@@ -4,7 +4,7 @@
 
 - Native macOS menu bar interface with compact provider groups.
 - Multiple Claude Code and OpenAI Codex subscription accounts with small email labels.
-- Remaining quota, reset times, reading age, and clear unavailable/stale states.
+- Weekly remaining quota, reset weekdays, reading age, and clear unavailable/stale states. Five-hour session limits do not affect the displayed percentage.
 - Automatic refresh about once a minute, manual refresh, pause, and provider backoff.
 - Browser-assisted account setup through installed provider CLIs.
 - Optional organization API spending, kept separate from subscription limits.

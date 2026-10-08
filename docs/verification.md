@@ -5,7 +5,7 @@ UsageBar 0.1.0 is a preview, not a production release. The downloadable app is a
 ## Verified locally
 
 - Apple Silicon release build with Swift 6.4, targeting macOS 14+.
-- 29 Swift Testing tests: quota parsing, units, multiple windows, rejection of missing/malformed/cached reports, cost pagination, account isolation, process timeouts, credential handling, legacy settings restoration, identity propagation, polling boundaries, and provider backoff. The final local release run enabled the optional isolated dummy-Keychain round trip with `USAGEBAR_TEST_KEYCHAIN=1`.
+- 30 Swift Testing tests: quota parsing, units, multiple windows, rejection of missing/malformed/cached reports, cost pagination, account isolation, process timeouts, credential handling, legacy settings restoration, identity propagation, polling boundaries, and provider backoff. The final local release run enabled the optional isolated dummy-Keychain round trip with `USAGEBAR_TEST_KEYCHAIN=1`.
 - Real subscription reads for two Claude accounts and two Codex accounts, with separate email labels in the native UI.
 - Native compact-menu layout checked using fictional sample accounts.
 - Automatic reading timestamps advanced for all four accounts without clicking Refresh.
@@ -37,3 +37,9 @@ The Apple Silicon ZIP passed a strict file allowlist, executable-permission and 
 The repository and release archive are prepared locally. Public GitHub publishing and its first CI run are pending repository-owner selection.
 
 Compact reset labels were simplified to “Resets in 4d” (hours/minutes below a day), with quota-window names retained in tooltips, accessibility labels, and Accounts. Release build, archive checks, and native sample-layout inspection passed. The prepared ZIP was updated and the normal app restored.
+
+## Weekly-only display
+
+The compact menu, account details, and menu-bar percentage now use only weekly limits. Five-hour windows are retained in provider parsing but are not displayed or included in the summary; their reset does not make a valid weekly reading stale. Reset labels show weekdays in the Mac's local timezone. Missing weekly windows are explicitly unavailable rather than substituted with session data.
+
+All 30 tests passed, including typed window selection, missing-duration handling, and expiry isolation. The release build and archive checks passed. Native accessibility and screenshot inspection confirmed weekly-only rows and weekday labels; the normal app was restored and the prepared release archive updated. Still local; not publicly released.
