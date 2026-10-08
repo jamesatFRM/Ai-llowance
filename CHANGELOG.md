@@ -2,6 +2,10 @@
 
 ## 0.1.0 — Preview
 
+- Hardened account setup and recovery: explicit sign-in progress, completion detection, cancellation/timeout handling, expired-login recovery, duplicate-account warnings, and missing-CLI guidance.
+- Reconnects reject stale in-flight responses. Claude command reads enforce process deadlines, size limits, exit status, and Keychain-only app profiles.
+- First-time subscription setup preserves existing API-billed Claude profiles.
+
 - Renamed the app to Ai-llowance. Existing connections and preferences keep their original storage and Keychain identities.
 
 - Native macOS menu bar interface with compact provider groups.

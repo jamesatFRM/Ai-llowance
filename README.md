@@ -123,3 +123,11 @@ Bug reports should include app/macOS/CLI versions and reproducible steps, with e
 [MIT](LICENSE). Ai-llowance is an independent project and is not affiliated with or endorsed by Anthropic or OpenAI. Provider names identify the services it connects to.
 
 Provider logos belong to their respective owners and are excluded from the MIT license. See [third-party notices](THIRD_PARTY_NOTICES.md).
+
+### Connection recovery
+
+- A current signed-in Claude subscription can be reused. A logged-out or API-billed Claude CLI gets a separate subscription profile, leaving the original profile untouched.
+- During sign-in the account says **Finish sign-in in your browser**. Claude completion is detected on the next local check (normally within 15 seconds), so it does not wait through an earlier authentication backoff. Unfinished Claude attempts stop waiting after ten minutes; close their Terminal window before retrying. Codex browser login can be cancelled in the app and times out after five minutes.
+- Expired sign-ins show **Sign in** even if the last reading is still visible. Existing Codex CLI profiles are reauthenticated in Codex, then **Check sign-in** rereads them. Missing or unauthorized API credentials show **Replace key**.
+- Duplicate emails are flagged for review instead of silently counting multiple connections to the same plan. A shared email can also belong to different organizations; the app does not automatically delete or merge those connections.
+- Provider outages and rate limits retain their backoff. A late response from before a reconnect cannot replace the new connection state.

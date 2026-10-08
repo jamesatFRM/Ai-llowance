@@ -204,7 +204,7 @@ private struct AccountReading: View {
                 Text(amount, format: .currency(code: "USD")).font(.system(size: 26, weight: .semibold, design: .rounded))
                 Text("API spending · this UTC month").font(.system(size: 10)).foregroundStyle(.secondary)
             } else {
-                Text(snapshot == nil ? "Connecting…" : "Weekly limit unavailable").font(.system(size: 12)).foregroundStyle(.secondary).padding(.vertical, 8)
+                Text(error != nil ? "Needs attention" : (snapshot == nil ? "Waiting for a reading" : "Weekly limit unavailable")).font(.system(size: 12)).foregroundStyle(.secondary).padding(.vertical, 8)
             }
             if let error { Text(error).font(.system(size: 10)).foregroundStyle(.orange).fixedSize(horizontal: false, vertical: true) }
         }
@@ -380,7 +380,23 @@ struct AccountsView: View {
                     else { store.connectOpenAI() }
                 } label: { Label("Add account", systemImage: "plus").font(.system(size: 11)) }
                     .buttonStyle(.bordered).controlSize(.small)
-                    .disabled(store.demo || store.connectingClaude || store.signingIn != nil || store.refreshing)
+                    .disabled(store.demo || store.connectingClaude || store.signingIn != nil || !store.waitingForClaude.isEmpty)
+            }
+            if (provider == .claude ? store.claudeExecutable == nil : store.executable == nil) {
+                SettingsCard {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text(provider == .claude ? "Claude Code is needed to connect." : "Codex is needed to connect.")
+                            .font(.system(size: 12, weight: .medium))
+                        Text("Install it once, then return here. Already installed? Choose its location.")
+                            .font(.system(size: 11)).foregroundStyle(.secondary)
+                        HStack {
+                            Link("Installation guide ↗", destination: URL(string: provider == .claude ? "https://code.claude.com/docs/en/setup" : "https://developers.openai.com/codex/cli")!)
+                            Button("Choose installed app…") {
+                                if provider == .claude { store.chooseClaudeExecutable() } else { store.chooseExecutable() }
+                            }
+                        }.font(.system(size: 11))
+                    }
+                }
             }
             if accounts.isEmpty {
                 SettingsCard { Text("Connect \(title) to see your weekly usage here.").font(.system(size: 12)).foregroundStyle(.secondary) }
@@ -390,6 +406,10 @@ struct AccountsView: View {
                         SettingsCard {
                             VStack(alignment: .leading, spacing: 14) {
                                 AccountReading(account: account, snapshot: store.snapshots[account.id], error: store.errors[account.id], now: store.now)
+                                if let other = store.duplicateIdentity(account) {
+                                    Text("Same email as \(other). If these use the same plan, keep just one connection to avoid counting it twice.")
+                                        .font(.system(size: 10)).foregroundStyle(.secondary)
+                                }
                                 Divider().opacity(0.4)
                                 accountActions(account)
                             }
@@ -401,12 +421,29 @@ struct AccountsView: View {
     }
     private func accountActions(_ account: Account) -> some View {
         HStack(spacing: 11) {
-            if store.signingIn == account.id {
-                Button("Cancel sign-in") { store.cancelSignIn() }
-            } else if account.kind == .claudeCode && store.claudeSignedIn[account.id] == false {
-                Button("Sign in") { store.openClaude(account, login: true) }
-            } else if account.kind == .codex && store.snapshots[account.id] == nil && !account.usesExistingCodex {
-                Button("Sign in") { store.signIn(account) }.disabled(store.refreshing || store.signingIn != nil)
+            if store.waitingForClaude[account.id] != nil {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Finish sign-in in your browser").foregroundStyle(.secondary)
+                    Button("Stop waiting") { store.cancelClaudeSignIn(account) }.help("Close the sign-in Terminal window before retrying.")
+                }
+            } else if store.signingIn == account.id {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Finish sign-in in your browser").foregroundStyle(.secondary)
+                    Button("Cancel sign-in") { store.cancelSignIn() }
+                }
+            } else if store.needsSignIn(account) {
+                if account.kind.isAPI {
+                    Button("Replace key") { replacement = ""; keyAccount = account }
+                } else if account.kind == .claudeCode {
+                    Button("Sign in") { store.openClaude(account, login: true) }
+                } else if account.kind == .codex && !account.usesExistingCodex {
+                    Button("Sign in") { store.signIn(account) }.disabled(store.signingIn != nil)
+                } else if account.kind == .codex {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Sign in through Codex CLI.").foregroundStyle(.secondary)
+                        Button("Check sign-in") { store.retryConnection(account) }
+                    }
+                }
             } else {
                 Link("View usage ↗", destination: account.kind.dashboard).foregroundStyle(.secondary)
             }
@@ -421,7 +458,7 @@ struct AccountsView: View {
             } else if account.kind.isAPI {
                 Button { replacement = ""; keyAccount = account } label: { Image(systemName: "key") }.help("Replace API key")
             } else if !account.usesExistingCodex {
-                Button { store.signIn(account) } label: { Image(systemName: "person.crop.circle.badge.checkmark") }.help("Sign in again").disabled(store.refreshing || store.signingIn != nil)
+                Button { store.signIn(account) } label: { Image(systemName: "person.crop.circle.badge.checkmark") }.help("Sign in again").disabled(store.signingIn != nil || !store.waitingForClaude.isEmpty)
             }
             Button { newName = account.name; renaming = account } label: { Image(systemName: "pencil") }.help("Rename account").accessibilityLabel("Rename \(account.name)")
             Button { store.toggle(account) } label: { Image(systemName: account.enabled ? "pause.fill" : "play.fill") }

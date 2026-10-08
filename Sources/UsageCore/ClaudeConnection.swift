@@ -113,7 +113,7 @@ public struct ClaudeConnection: Sendable {
         }
         try FileManager.default.removeItem(at: recordURL)
     }
-    public func launcher(account: Account, login: Bool, project: URL? = nil, logout: Bool = false, loginOnly: Bool = false) throws -> URL {
+    public func launcher(account: Account, login: Bool, project: URL? = nil, logout: Bool = false, loginOnly: Bool = false, completion: URL? = nil) throws -> URL {
         let url = folder(account).appendingPathComponent(logout ? "Sign Out.command" : (login ? "Connect Claude.command" : "Open Claude.command"))
         let work = project ?? folder(account).appendingPathComponent("Workspace")
         try Paths.prepare(work)
@@ -127,6 +127,21 @@ public struct ClaudeConnection: Sendable {
         export CLAUDE_CONFIG_DIR=\(ShellQuote.argument(profile.path))
         cd \(ShellQuote.argument(work.path))
         """
+        if let completion {
+            try Paths.prepare(completion.deletingLastPathComponent())
+            let temporary = completion.appendingPathExtension("tmp")
+            script += """
+
+            umask 077
+            function usagebar_finished() {
+              local result=$?
+              trap - EXIT
+              printf '%s\\n' "$result" > \(ShellQuote.argument(temporary.path))
+              /bin/mv -f \(ShellQuote.argument(temporary.path)) \(ShellQuote.argument(completion.path))
+            }
+            trap usagebar_finished EXIT
+            """
+        }
         if logout { script += "\n\(cli) auth logout\n" }
         else {
             if login { script += "\n\(cli) auth login --claudeai\n" }
@@ -156,6 +171,8 @@ public struct ClaudeConnection: Sendable {
     }
     public func authIdentity(account: Account) async throws -> ClaudeAuthIdentity {
         let cli = executable; let profile = config(account)
+        if account.usesExistingClaude != true,
+           FileManager.default.fileExists(atPath: profile.appendingPathComponent(".credentials.json").path) { throw UsageError.storage }
         let worker = Task.detached(priority: .utility) {
             let process = Process(); let output = Pipe()
             process.executableURL = cli; process.arguments = ["auth", "status", "--json"]
@@ -169,21 +186,11 @@ public struct ClaudeConnection: Sendable {
             process.currentDirectoryURL = profile
             try Paths.prepare(profile)
             try process.run()
-            defer { if process.isRunning { process.terminate() }; try? output.fileHandleForReading.close() }
-            let deadline = Date().addingTimeInterval(10)
-            var data = Data()
-            while true {
-                try Task.checkCancellation()
-                guard Date() < deadline else { kill(process.processIdentifier, SIGKILL); throw UsageError.timeout }
-                var fd = pollfd(fd: output.fileHandleForReading.fileDescriptor, events: Int16(POLLIN), revents: 0)
-                if poll(&fd, 1, 200) <= 0 { continue }
-                var chunk = [UInt8](repeating: 0, count: 4096)
-                let count = Darwin.read(fd.fd, &chunk, chunk.count)
-                if count <= 0 { break }
-                guard data.count + count <= 65_536 else { throw UsageError.invalidData }
-                data.append(contentsOf: chunk.prefix(count))
-            }
-            return try ClaudeAuthIdentity.parse(data)
+            let result = try CommandOutput.read(process, output: output, timeout: 10, limit: 65_536)
+            let identity = try ClaudeAuthIdentity.parse(result.data)
+            // Claude returns a nonzero exit status for a valid logged-out report.
+            guard result.exitCode == 0 || !identity.signedIn else { throw UsageError.server }
+            return identity
         }
         return try await withTaskCancellationHandler { try await worker.value } onCancel: { worker.cancel() }
     }
@@ -195,7 +202,7 @@ public struct ClaudeAuthIdentity: Sendable {
     public let email: String?
 
     public static func parse(_ data: Data) throws -> Self {
-        struct Status: Decodable { let loggedIn: Bool; let authMethod: String; let email: String? }
+        struct Status: Decodable { let loggedIn: Bool; let authMethod: String?; let email: String? }
         let status = try JSONDecoder().decode(Status.self, from: data)
         let signedIn = status.loggedIn && status.authMethod == "claude.ai"
         let email = status.email?.trimmingCharacters(in: .whitespacesAndNewlines)

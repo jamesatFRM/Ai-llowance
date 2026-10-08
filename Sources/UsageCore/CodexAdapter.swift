@@ -80,7 +80,10 @@ final class CodexRPC {
                 guard let result = message["result"] as? [String: Any] else { throw UsageError.invalidData }
                 return result
             }
-            if message["method"] as? String == "account/login/completed" { queuedNotifications.append(message) }
+            if message["method"] as? String == "account/login/completed" {
+                guard queuedNotifications.count < 32 else { throw UsageError.invalidData }
+                queuedNotifications.append(message)
+            }
         }
     }
     func initialize() throws {
@@ -92,7 +95,10 @@ final class CodexRPC {
 public struct CodexAdapter: UsageAdapter {
     public let executable: URL
     public let root: URL
-    public init(executable: URL, root: URL = Paths.root) { self.executable = executable; self.root = root }
+    public let loginTimeout: TimeInterval
+    public init(executable: URL, root: URL = Paths.root, loginTimeout: TimeInterval = 300) {
+        self.executable = executable; self.root = root; self.loginTimeout = loginTimeout
+    }
     public static func findExecutable() -> URL? {
         ["/opt/homebrew/bin/codex", "/usr/local/bin/codex", "/Applications/Codex.app/Contents/Resources/codex"]
             .first(where: { FileManager.default.isExecutableFile(atPath: $0) }).map { URL(fileURLWithPath: $0) }
@@ -117,19 +123,20 @@ public struct CodexAdapter: UsageAdapter {
         }
         return try await withTaskCancellationHandler { try await worker.value } onCancel: { worker.cancel() }
     }
-    public func login(account: Account, openURL: @escaping @Sendable (URL) -> Void) async throws {
+    public func login(account: Account, openURL: @escaping @Sendable (URL) async throws -> Void) async throws {
         guard !account.usesExistingCodex else { throw UsageError.unavailable("Manage sign-in for the existing profile in Codex CLI.") }
         let home = home(account)
         try Paths.prepare(home)
         let worker = Task.detached(priority: .utility) {
-            let rpc = try CodexRPC(executable: executable, home: home, existing: false, timeout: 180)
+            let rpc = try CodexRPC(executable: executable, home: home, existing: false, timeout: loginTimeout)
             defer { rpc.stop() }
             try rpc.initialize()
             let result = try rpc.call("account/login/start", params: ["type": "chatgpt"])
             guard let link = result["authUrl"] as? String, let url = URL(string: link), url.scheme == "https",
                   let host = url.host, ["auth.openai.com", "auth0.openai.com", "chatgpt.com"].contains(host),
                   let loginID = result["loginId"] as? String else { throw UsageError.invalidData }
-            openURL(url)
+            try Task.checkCancellation()
+            try await openURL(url)
             while true {
                 let message = try rpc.queuedNotifications.isEmpty ? rpc.next() : rpc.queuedNotifications.removeFirst()
                 if message["method"] as? String == "account/login/completed",

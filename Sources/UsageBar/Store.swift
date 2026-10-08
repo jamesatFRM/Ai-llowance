@@ -12,6 +12,8 @@ final class AppStore: ObservableObject {
     @Published var signingIn: UUID?
     @Published var removing = false
     @Published var connectingClaude = false
+    @Published private(set) var waitingForClaude: [UUID: Date] = [:]
+    @Published private(set) var authenticationRequired: Set<UUID> = []
     @Published var claudeSignedIn: [UUID: Bool] = [:]
     @Published var notice: String?
     @Published var paused = false
@@ -22,11 +24,16 @@ final class AppStore: ObservableObject {
     let root: URL
     var executable = CodexAdapter.findExecutable()
     var claudeExecutable = ClaudeConnection.findExecutable()
+    var existingClaudeConfig = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".claude")
     private var schedules: [UUID: PollState] = [:]
     private var refreshTask: Task<Void, Never>?
     private var loginTask: Task<Void, Never>?
     private var heartbeat: DispatchSourceTimer?
     private var pendingManualRefresh = false
+    private var connectionVersions: [UUID: UUID] = [:]
+    private var claudeCompletions: [UUID: URL] = [:]
+    private let fetchOverride: (@Sendable (Account, Date) async throws -> Snapshot)?
+    private let openExternal: (URL) -> Bool
     private let network = NWPathMonitor()
     private var sleeping = false
     private var readOnly = false
@@ -34,8 +41,10 @@ final class AppStore: ObservableObject {
     private let keychain = KeychainStore()
     private struct Saved: Codable { var accounts: [Account]; var paused: Bool; var menuPreferences: MenuPreferences? }
 
-    init(demo: Bool = false, root: URL = Paths.root) {
-        self.demo = demo; self.root = root
+    init(demo: Bool = false, root: URL = Paths.root, monitor: Bool = true,
+         fetch: (@Sendable (Account, Date) async throws -> Snapshot)? = nil,
+         openExternal: @escaping (URL) -> Bool = { NSWorkspace.shared.open($0) }) {
+        self.demo = demo; self.root = root; self.fetchOverride = fetch; self.openExternal = openExternal
         if demo {
             let first = Account(name: "Personal", kind: .codex)
             let second = Account(name: "Studio", kind: .claudeCode)
@@ -54,6 +63,7 @@ final class AppStore: ObservableObject {
                 menuPreferences = saved.menuPreferences ?? MenuPreferences()
             } catch { notice = "Account settings could not be read. The existing file was preserved. Restore accounts.json before adding accounts."; readOnly = true }
         }
+        guard monitor else { return }
         network.pathUpdateHandler = { [weak self] path in
             let offline = path.status != .satisfied
             Task { @MainActor in self?.offline = offline; if !offline { self?.refresh() } }
@@ -78,6 +88,7 @@ final class AppStore: ObservableObject {
         if demo { return "Sample data" }
         if paused { return "Paused" }
         if offline { return "Offline" }
+        if signingIn != nil || !waitingForClaude.isEmpty { return "Finish sign-in" }
         if refreshing { return "Updating…" }
         let active = accounts.filter { $0.enabled }
         if active.contains(where: { errors[$0.id] != nil }) { return "Check accounts" }
@@ -132,11 +143,13 @@ final class AppStore: ObservableObject {
         return account
     }
     private func automaticName(_ provider: String, kind: ConnectionKind) -> String {
-        let count = accounts.filter { $0.kind == kind }.count
-        return count == 0 ? provider : "\(provider) \(count + 1)"
+        let names = Set(accounts.filter { $0.kind == kind }.map { $0.name.lowercased() })
+        var index = 1
+        while names.contains((index == 1 ? provider : "\(provider) \(index)").lowercased()) { index += 1 }
+        return index == 1 ? provider : "\(provider) \(index)"
     }
     func connectOpenAI(existing: Bool = false) {
-        guard !demo, signingIn == nil, !refreshing else { return }
+        guard !demo, !readOnly, !removing, signingIn == nil, waitingForClaude.isEmpty else { return }
         guard executable != nil else { notice = "Install Codex CLI once, then click Connect OpenAI. If it is already installed, use Choose Codex CLI below."; return }
         do {
             let account = try add(name: automaticName("OpenAI", kind: .codex), kind: .codex, secret: "", existing: existing, refreshAfter: false)
@@ -146,10 +159,10 @@ final class AppStore: ObservableObject {
     private func claudeConnection() throws -> ClaudeConnection {
         guard let claudeExecutable else { throw UsageError.unavailable("Install Claude Code once, then click Connect Claude. If it is installed elsewhere, use Choose Claude CLI below.") }
         return ClaudeConnection(root: root, executable: claudeExecutable,
-            bundledBridge: Bundle.main.bundleURL.appendingPathComponent("Contents/MacOS/UsageBridge"))
+            bundledBridge: Bundle.main.bundleURL.appendingPathComponent("Contents/MacOS/UsageBridge"), existingConfig: existingClaudeConfig)
     }
     func connectClaude(existing: Bool) {
-        guard !demo, !connectingClaude, !readOnly else { return }
+        guard !demo, !connectingClaude, !readOnly, !removing, signingIn == nil, waitingForClaude.isEmpty else { return }
         if existing && accounts.contains(where: { $0.kind == .claudeCode && $0.usesExistingClaude == true }) {
             notice = "Your current Claude Code is already connected. Use Add another Claude account for a separate login."; return
         }
@@ -158,26 +171,30 @@ final class AppStore: ObservableObject {
             defer { connectingClaude = false }
             do {
                 let connection = try claudeConnection()
-                let account = Account(name: automaticName("Claude", kind: .claudeCode), kind: .claudeCode, usesExistingClaude: existing)
-                let signedIn = existing ? ((try? await connection.authStatus(account: account)) ?? false) : false
+                var account = Account(name: automaticName("Claude", kind: .claudeCode), kind: .claudeCode, usesExistingClaude: existing)
+                let signedIn = existing ? (try await connection.authStatus(account: account)) : false
+                // Reuse only a signed-in subscription. An API-billed or logged-out CLI stays untouched.
+                if existing && !signedIn { account.usesExistingClaude = false }
                 try Paths.prepare(connection.config(account))
                 claudeSignedIn[account.id] = signedIn
                 accounts.append(account)
                 do { try persist() }
                 catch { accounts.removeAll { $0.id == account.id }; try? connection.uninstall(account: account); throw error }
                 if !signedIn {
-                    let launcher = try connection.launcher(account: account, login: true, loginOnly: true)
-                    guard NSWorkspace.shared.open(launcher) else { throw UsageError.unavailable("Could not open Claude’s sign-in. Click Sign in to Claude to try again.") }
-                    notice = "Finish Claude’s browser sign-in once. Ai-llowance will read your limits automatically; no chat or open Terminal is needed afterward."
+                    openClaude(account, login: true)
                 } else { notice = nil }
                 schedules[account.id] = PollState(); refresh(force: true)
             } catch { notice = safeMessage(error) }
         }
     }
     func openClaude(_ account: Account, login: Bool = false, chooseProject: Bool = false, logout: Bool = false) {
+        guard !demo, !removing, accounts.contains(where: { $0.id == account.id }) else { return }
+        if login && (waitingForClaude[account.id] != nil || signingIn != nil) { return }
         do {
             let connection = try claudeConnection()
             if login || logout {
+                connectionVersions[account.id] = UUID()
+                authenticationRequired.insert(account.id)
                 snapshots[account.id] = nil; errors[account.id] = nil; schedules[account.id] = PollState()
                 claudeSignedIn[account.id] = false
                 try? FileManager.default.removeItem(at: Paths.feed(account.id, root: root))
@@ -189,9 +206,53 @@ final class AppStore: ObservableObject {
                 guard panel.runModal() == .OK else { return }
                 project = panel.url
             }
-            let launcher = try connection.launcher(account: account, login: login, project: project, logout: logout, loginOnly: login)
-            guard NSWorkspace.shared.open(launcher) else { throw UsageError.unavailable("Could not open Terminal. Make sure Terminal can open .command files.") }
-        } catch { notice = safeMessage(error) }
+            let completion = login ? root.appendingPathComponent("ClaudeConnections/\(account.id.uuidString)/Login-\(UUID().uuidString).result") : nil
+            let launcher = try connection.launcher(account: account, login: login, project: project, logout: logout, loginOnly: login, completion: completion)
+            guard openExternal(launcher) else { throw UsageError.unavailable("Could not open Terminal. Click Sign in to try again, or allow Terminal to open .command files.") }
+            if let completion {
+                claudeCompletions[account.id] = completion
+                waitingForClaude[account.id] = Date()
+                notice = "Finish Claude’s browser sign-in once. Ai-llowance will read your limits automatically; no chat or open Terminal is needed afterward."
+            }
+        } catch { notice = safeMessage(error); errors[account.id] = safeMessage(error) }
+    }
+    func cancelClaudeSignIn(_ account: Account) {
+        waitingForClaude[account.id] = nil
+        if let url = claudeCompletions.removeValue(forKey: account.id) { try? FileManager.default.removeItem(at: url) }
+        errors[account.id] = "Sign-in not completed. Close its Terminal window before trying again."
+        authenticationRequired.insert(account.id)
+        var schedule = PollState(); schedule.failed(UsageError.authentication, at: Date()); schedules[account.id] = schedule
+        notice = nil
+    }
+    func checkClaudeSignIns(at date: Date = Date()) {
+        for (id, started) in waitingForClaude {
+            guard let account = accounts.first(where: { $0.id == id }), let url = claudeCompletions[id] else { continue }
+            if let data = try? Data(contentsOf: url), data.count < 16 {
+                waitingForClaude[id] = nil; claudeCompletions[id] = nil
+                try? FileManager.default.removeItem(at: url)
+                if String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) == "0" {
+                    schedules[id] = PollState(); errors[id] = nil
+                    authenticationRequired.remove(id); claudeSignedIn[id] = true
+                } else {
+                    errors[id] = "Claude sign-in did not finish. Try again; if Keychain is locked, unlock it first."
+                    authenticationRequired.insert(id)
+                    var schedule = PollState(); schedule.failed(UsageError.authentication, at: date); schedules[id] = schedule
+                }
+                notice = nil
+            } else if date.timeIntervalSince(started) >= 600 { cancelClaudeSignIn(account) }
+        }
+    }
+    func retryConnection(_ account: Account) {
+        if authenticationRequired.contains(account.id) { schedules[account.id] = PollState() }
+        refresh(force: true)
+    }
+    func needsSignIn(_ account: Account) -> Bool {
+        authenticationRequired.contains(account.id) || (account.kind == .claudeCode && claudeSignedIn[account.id] == false)
+            || (account.kind == .codex && !account.usesExistingCodex && snapshots[account.id] == nil && errors[account.id] == nil)
+    }
+    func duplicateIdentity(_ account: Account) -> String? {
+        guard let identity = snapshots[account.id]?.identity?.lowercased(), !identity.isEmpty else { return nil }
+        return accounts.first { $0.id != account.id && $0.kind == account.kind && snapshots[$0.id]?.identity?.lowercased() == identity }?.name
     }
     func rename(_ account: Account, to name: String) {
         guard let index = accounts.firstIndex(where: { $0.id == account.id }), !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
@@ -231,16 +292,19 @@ final class AppStore: ObservableObject {
             accounts.removeAll { $0.id == account.id }
             do { try persist() } catch { accounts = old; throw error }
             snapshots[account.id] = nil; errors[account.id] = nil; schedules[account.id] = nil; claudeSignedIn[account.id] = nil
+            authenticationRequired.remove(account.id); connectionVersions[account.id] = nil
+            waitingForClaude[account.id] = nil; claudeCompletions[account.id] = nil
             if account.kind == .claudeCode { try? FileManager.default.removeItem(at: Paths.feed(account.id, root: root)) }
             if account.kind == .codex && !account.usesExistingCodex { try? FileManager.default.removeItem(at: Paths.profile(account.id, root: root)) }
         } catch { notice = safeMessage(error) }
     }
     func refresh(force: Bool = false) {
         now = Date()
+        checkClaudeSignIns(at: now)
         guard !demo, !paused, !sleeping, !removing, !offline else { return }
         if refreshing { pendingManualRefresh = pendingManualRefresh || force; return }
         let due = accounts.filter {
-            $0.enabled && signingIn != $0.id && (schedules[$0.id] ?? PollState()).shouldRefresh(at: now, manual: force)
+            $0.enabled && signingIn != $0.id && waitingForClaude[$0.id] == nil && (schedules[$0.id] ?? PollState()).shouldRefresh(at: now, manual: force)
         }
         guard !due.isEmpty else { return }
         refreshing = true
@@ -253,24 +317,16 @@ final class AppStore: ObservableObject {
             }
             for account in due {
                 if Task.isCancelled || paused || sleeping || offline { return }
-                guard accounts.contains(where: { $0.id == account.id && $0.enabled }) else { continue }
+                guard accounts.contains(where: { $0.id == account.id && $0.enabled }), signingIn != account.id, waitingForClaude[account.id] == nil else { continue }
+                let version = connectionVersions[account.id]
                 let start = Date()
                 var schedule = schedules[account.id] ?? PollState()
                 do {
-                    let adapter: any UsageAdapter
-                    switch account.kind {
-                    case .openAIAPI, .claudeAPI: adapter = costs
-                    case .claudeCode:
-                        guard let claudeExecutable else { throw UsageError.unavailable("Install or locate Claude Code to read this account’s usage.") }
-                        adapter = ClaudeUsageAdapter(executable: claudeExecutable, root: root)
-                    case .codex:
-                        guard let executable else { throw UsageError.unavailable("Install Codex CLI, or choose its executable in Accounts.") }
-                        adapter = CodexAdapter(executable: executable, root: root)
-                    }
-                    let snapshot = try await adapter.fetch(account: account, now: start)
+                    let snapshot = try await fetchAccount(account, at: start)
                     try Task.checkCancellation()
-                    guard accounts.contains(where: { $0.id == account.id && $0.enabled }) else { continue }
-                    snapshots[account.id] = snapshot; errors[account.id] = nil
+                    guard accounts.contains(where: { $0.id == account.id && $0.enabled }), connectionVersions[account.id] == version,
+                          signingIn != account.id, waitingForClaude[account.id] == nil else { continue }
+                    snapshots[account.id] = snapshot; errors[account.id] = nil; authenticationRequired.remove(account.id)
                     schedule.succeeded(at: Date())
                     if account.kind == .claudeCode {
                         claudeSignedIn[account.id] = true
@@ -281,6 +337,9 @@ final class AppStore: ObservableObject {
                     }
                 } catch is CancellationError { return }
                 catch {
+                    guard !Task.isCancelled, connectionVersions[account.id] == version,
+                          accounts.contains(where: { $0.id == account.id && $0.enabled }) else { continue }
+                    if [.authentication, .missingCredential, .forbidden].contains(error as? UsageError) { authenticationRequired.insert(account.id) }
                     errors[account.id] = safeMessage(error); schedule.failed(error, at: Date())
                     if account.kind == .claudeCode && error as? UsageError == .authentication {
                         claudeSignedIn[account.id] = false
@@ -292,20 +351,42 @@ final class AppStore: ObservableObject {
             now = Date()
         }
     }
+    private func fetchAccount(_ account: Account, at date: Date) async throws -> Snapshot {
+        if let fetchOverride { return try await fetchOverride(account, date) }
+        let adapter: any UsageAdapter
+        switch account.kind {
+        case .openAIAPI, .claudeAPI: adapter = costs
+        case .claudeCode:
+            guard let claudeExecutable else { throw UsageError.unavailable("Install or locate Claude Code in Advanced connections to read usage.") }
+            adapter = ClaudeUsageAdapter(executable: claudeExecutable, root: root)
+        case .codex:
+            guard let executable else { throw UsageError.unavailable("Install or locate Codex CLI in Advanced connections to read usage.") }
+            adapter = CodexAdapter(executable: executable, root: root)
+        }
+        return try await adapter.fetch(account: account, now: date)
+    }
     func signIn(_ account: Account) {
-        guard signingIn == nil, !refreshing, !removing, let executable, !demo else {
+        guard signingIn == nil, waitingForClaude.isEmpty, !removing, let executable, !demo, !readOnly,
+              accounts.contains(where: { $0.id == account.id }) else {
             notice = "Wait for refresh to finish and make sure Codex CLI is installed."; return
         }
+        connectionVersions[account.id] = UUID()
         signingIn = account.id
+        errors[account.id] = nil
         snapshots[account.id] = nil
         loginTask = Task {
             do {
-                try await CodexAdapter(executable: executable, root: root).login(account: account) { url in
-                    Task { @MainActor in NSWorkspace.shared.open(url) }
+                try await CodexAdapter(executable: executable, root: root).login(account: account) { [weak self] url in
+                    try await MainActor.run {
+                        guard let self, self.openExternal(url) else { throw UsageError.unavailable("Could not open the browser. Try signing in again after choosing a default browser.") }
+                    }
                 }
-                schedules[account.id] = PollState(); errors[account.id] = nil
-            } catch is CancellationError { errors[account.id] = "Sign-in cancelled." }
-            catch { errors[account.id] = safeMessage(error) }
+                schedules[account.id] = PollState(); errors[account.id] = nil; authenticationRequired.remove(account.id)
+            } catch {
+                errors[account.id] = error is CancellationError ? "Sign-in cancelled. Click Sign in to try again." : safeMessage(error)
+                authenticationRequired.insert(account.id)
+                var schedule = PollState(); schedule.failed(UsageError.authentication, at: Date()); schedules[account.id] = schedule
+            }
             signingIn = nil; refresh(force: true)
         }
     }

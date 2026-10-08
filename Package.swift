@@ -13,6 +13,7 @@ let package = Package(
         .target(name: "UsageCore"),
         .executableTarget(name: "UsageBar", dependencies: ["UsageCore"]),
         .executableTarget(name: "UsageBridge", dependencies: ["UsageCore"]),
-        .testTarget(name: "UsageCoreTests", dependencies: ["UsageCore"])
+        .testTarget(name: "UsageCoreTests", dependencies: ["UsageCore"]),
+        .testTarget(name: "UsageBarTests", dependencies: ["UsageBar", "UsageCore"])
     ]
 )

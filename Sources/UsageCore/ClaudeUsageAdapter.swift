@@ -27,24 +27,9 @@ public struct ClaudeUsageAdapter: UsageAdapter, Sendable {
             process.standardOutput = output; process.standardError = FileHandle.nullDevice
             process.standardInput = FileHandle.nullDevice
             try process.run()
-            defer {
-                if process.isRunning { kill(process.processIdentifier, SIGKILL) }
-                try? output.fileHandleForReading.close()
-            }
-            let deadline = Date().addingTimeInterval(25)
-            var data = Data()
-            while true {
-                try Task.checkCancellation()
-                guard Date() < deadline else { throw UsageError.timeout }
-                var fd = pollfd(fd: output.fileHandleForReading.fileDescriptor, events: Int16(POLLIN), revents: 0)
-                if poll(&fd, 1, 200) <= 0 { continue }
-                var bytes = [UInt8](repeating: 0, count: 8192)
-                let count = Darwin.read(fd.fd, &bytes, bytes.count)
-                if count <= 0 { break }
-                guard data.count + count <= 1_048_576 else { throw UsageError.invalidData }
-                data.append(contentsOf: bytes.prefix(count))
-            }
-            var snapshot = try ClaudeUsageReport.parse(data, at: Date())
+            let result = try CommandOutput.read(process, output: output, timeout: 25, limit: 1_048_576)
+            guard result.exitCode == 0 else { throw UsageError.unavailable("Claude could not finish its usage check. Try refreshing; if this continues, sign in again.") }
+            var snapshot = try ClaudeUsageReport.parse(result.data, at: Date())
             snapshot.identity = identity.email
             return snapshot
         }

@@ -49,3 +49,7 @@ The current healthy-read scheduler uses a dispatch timer independent of AppKit e
 ## Ai-llowance rename
 
 The display name, native windows, accessibility labels, connection messages, docs, app bundle filename, and release archive use Ai-llowance. The bundle identifier, executable target, Keychain service, and Application Support directory retain their original identities for compatibility. The existing account/preferences file was byte-for-byte unchanged across replacement and launch. All 36 tests and the release archive checks passed after the rename; the renamed native Settings window opened with existing connections. This remains a local preview, not a public release.
+
+## Account connection pressure test
+
+The latest run passed 58 tests, including the isolated dummy-Keychain test, and the updated app read all four existing subscription accounts successfully. See [connection pressure-test details](connection-pressure-test.md) for fixes, test boundaries, and remaining real-world checks. The preview remains local and unpublished.
