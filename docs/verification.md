@@ -7,6 +7,7 @@ Ai-llowance 0.1.0 is an ad-hoc signed, unnotarized preview, not a production rel
 - Fresh validation: 75 fixture tests passed, including real network/heartbeat utility-queue delivery across a full 15-second monitoring cycle. This exposed and fixed a Swift actor-isolation startup crash; the callbacks explicitly cross to the main actor before touching UI state.
 - This Mac's default SDK cache helper stalled and the native backend did not discover Swift Testing automatically. Validation used the native backend with the installed Testing framework supplied explicitly; no global toolchain settings or project build scripts changed.
 - Release build, strict code-signature validation, and packaged-archive privacy/content checks passed. Installed and launched the matching signed build with account settings preserved byte-for-byte.
+- CI checks the actual PR head rather than temporary GitHub merge metadata. The privacy guard permits only GitHub’s exact no-reply service email; other non-example emails remain rejected.
 - Source changes go through the protected main branch's pull request and required macOS checks. The public v0.1.0 preview download remains unchanged; this is not a production release.
 
 ## Menu-bar display — October 10, 2026
