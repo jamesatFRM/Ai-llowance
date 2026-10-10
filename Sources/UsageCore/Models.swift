@@ -48,6 +48,8 @@ public struct Account: Codable, Identifiable, Equatable, Sendable {
     public var enabled: Bool
     public var usesExistingCodex: Bool
     public var usesExistingClaude: Bool?
+    // Non-secret identity binding; old settings decode without a binding.
+    public var expectedIdentity: String?
     public init(id: UUID = UUID(), name: String, kind: ConnectionKind, enabled: Bool = true, usesExistingCodex: Bool = false, usesExistingClaude: Bool = false) {
         self.id = id; self.name = name; self.kind = kind; self.enabled = enabled; self.usesExistingCodex = usesExistingCodex
         self.usesExistingClaude = usesExistingClaude
@@ -107,10 +109,13 @@ public struct Snapshot: Codable, Equatable, Sendable {
 
 public enum UsageError: Error, LocalizedError, Sendable, Equatable {
     case missingCredential, authentication, forbidden, rateLimited(TimeInterval), server, invalidData, unavailable(String), timeout, storage
+    case accountChanged(String), duplicateAccount(String)
     public var errorDescription: String? {
         switch self {
         case .missingCredential: "Add an admin key to connect API spending."
         case .authentication: "Sign in again or replace the expired credential."
+        case .accountChanged(let expected): "This connection needs \(expected). Its current sign-in belongs to another account. Sign in with the expected account."
+        case .duplicateAccount(let other): "This email is already connected as \(other). Sign in with your other account; this duplicate is not counted."
         case .forbidden: "This credential cannot read organization costs. An admin credential with reporting access is required."
         case .rateLimited: "The provider asked us to wait. Automatic refresh will back off."
         case .server: "The provider is temporarily unavailable. Last known data is preserved."

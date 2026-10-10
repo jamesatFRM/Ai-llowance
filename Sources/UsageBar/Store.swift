@@ -10,6 +10,7 @@ final class AppStore: ObservableObject {
     @Published var errors: [UUID: String] = [:]
     @Published var refreshing = false
     @Published var signingIn: UUID?
+    @Published private(set) var codexSignInURL: URL?
     @Published var removing = false
     @Published var connectingClaude = false
     @Published private(set) var waitingForClaude: [UUID: Date] = [:]
@@ -73,7 +74,7 @@ final class AppStore: ObservableObject {
             } catch { notice = "Account settings could not be read. The existing file was preserved. Restore accounts.json before adding accounts."; readOnly = true }
         }
         guard monitor else { return }
-        network.pathUpdateHandler = { [weak self] path in
+        network.pathUpdateHandler = { @Sendable [weak self] path in
             let offline = path.status != .satisfied
             Task { @MainActor in self?.offline = offline; if !offline { self?.refresh() } }
         }
@@ -81,7 +82,7 @@ final class AppStore: ObservableObject {
         // Dispatch deadlines do not depend on AppKit's default/event-tracking run-loop mode.
         let heartbeat = DispatchSource.makeTimerSource(queue: DispatchQueue(label: "Ai-llowance.heartbeat", qos: .utility))
         heartbeat.schedule(deadline: .now() + 15, repeating: 15, leeway: .seconds(3))
-        heartbeat.setEventHandler { [weak self] in
+        heartbeat.setEventHandler { @Sendable [weak self] in
             Task { @MainActor in self?.now = Date(); self?.refresh() }
         }
         self.heartbeat = heartbeat
@@ -342,6 +343,14 @@ final class AppStore: ObservableObject {
                     try Task.checkCancellation()
                     guard accounts.contains(where: { $0.id == account.id && $0.enabled }), connectionVersions[account.id] == version,
                           signingIn != account.id, waitingForClaude[account.id] == nil else { continue }
+                    if account.kind == .codex, let index = accounts.firstIndex(where: { $0.id == account.id }) {
+                        let identity = try CodexIdentity.validate(snapshot, for: accounts[index], accounts: accounts, snapshots: snapshots)
+                        if accounts[index].expectedIdentity == nil {
+                            accounts[index].expectedIdentity = identity
+                            do { try persist() }
+                            catch { accounts[index].expectedIdentity = nil; throw error }
+                        }
+                    }
                     snapshots[account.id] = snapshot; errors[account.id] = nil; authenticationRequired.remove(account.id)
                     schedule.succeeded(at: Date())
                     if account.kind == .claudeCode {
@@ -356,6 +365,14 @@ final class AppStore: ObservableObject {
                     guard !Task.isCancelled, connectionVersions[account.id] == version,
                           accounts.contains(where: { $0.id == account.id && $0.enabled }) else { continue }
                     if [.authentication, .missingCredential, .forbidden].contains(error as? UsageError) { authenticationRequired.insert(account.id) }
+                    if let identityError = error as? UsageError {
+                        switch identityError {
+                        case .accountChanged, .duplicateAccount:
+                            snapshots[account.id] = nil
+                            authenticationRequired.insert(account.id)
+                        default: break
+                        }
+                    }
                     errors[account.id] = safeMessage(error); schedule.failed(error, at: Date())
                     if account.kind == .claudeCode && error as? UsageError == .authentication {
                         claudeSignedIn[account.id] = false
@@ -381,12 +398,13 @@ final class AppStore: ObservableObject {
         }
         return try await adapter.fetch(account: account, now: date)
     }
-    func signIn(_ account: Account) {
+    func signIn(_ account: Account, openBrowser: Bool = true) {
         guard signingIn == nil, waitingForClaude.isEmpty, !removing, let executable, !demo, !readOnly,
               accounts.contains(where: { $0.id == account.id }) else {
             notice = "Wait for refresh to finish and make sure Codex CLI is installed."; return
         }
         connectionVersions[account.id] = UUID()
+        codexSignInURL = nil
         signingIn = account.id
         errors[account.id] = nil
         snapshots[account.id] = nil
@@ -395,7 +413,11 @@ final class AppStore: ObservableObject {
                 try await CodexAdapter(executable: executable, root: root).login(account: account) { [weak self] url in
                     try await MainActor.run {
                         try Task.checkCancellation()
-                        guard let self, self.openExternal(url) else { throw UsageError.unavailable("Could not open the browser. Try signing in again after choosing a default browser.") }
+                        guard let self else { throw CancellationError() }
+                        self.codexSignInURL = url
+                        if openBrowser && !self.openExternal(url) {
+                            self.notice = "Browser did not open. Copy the sign-in link into the browser profile for this account."
+                        }
                     }
                 }
                 schedules[account.id] = PollState(); errors[account.id] = nil; authenticationRequired.remove(account.id)
@@ -404,8 +426,14 @@ final class AppStore: ObservableObject {
                 authenticationRequired.insert(account.id)
                 var schedule = PollState(); schedule.failed(UsageError.authentication, at: Date()); schedules[account.id] = schedule
             }
+            codexSignInURL = nil
             signingIn = nil; refresh(force: true)
         }
+    }
+    func copyCodexSignInLink() {
+        guard signingIn != nil, let url = codexSignInURL else { return }
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(url.absoluteString, forType: .string)
     }
     func cancelSignIn() { loginTask?.cancel() }
     func shutdown() async {
