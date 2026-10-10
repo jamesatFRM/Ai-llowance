@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased — Account connections and menu display
+
+- Fix a startup/heartbeat crash by making utility-queue callbacks explicitly sendable before updating the UI.
+- Show 0% in the menu bar and its previews when a reading is unavailable; retain the actual unavailable state and connection details.
+- Bind Codex connections to their verified email and reject unexpected account changes.
+- Prevent a second connection to the same email from displaying a second quota allowance.
+- Preserve connection IDs and preferences, with explicit sign-in recovery.
+- Show a short browser-profile/email reminder when connecting additional subscription accounts.
+- Copy the pending sign-in link into a chosen Chrome profile; the link is kept only in memory and cleared on completion/cancellation.
+
 ## 0.1.0 — Preview
 
 - Published privacy policy, process-scoped provider telemetry opt-outs, metadata-only probes, and automated source/history privacy checks.

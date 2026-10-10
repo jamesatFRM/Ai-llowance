@@ -173,7 +173,7 @@ private struct AccountReading: View {
                 if !account.enabled { Image(systemName: "pause.fill").foregroundStyle(.secondary).help("Paused") }
                 else if error != nil { Image(systemName: "exclamationmark.circle.fill").foregroundStyle(.orange).help("Connection needs attention") }
             }
-            if let email = snapshot?.identity {
+            if let email = account.expectedIdentity ?? snapshot?.identity {
                 Text(email).font(.system(size: 10)).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle).help(email).textSelection(.enabled)
             }
             if let snapshot, let window = snapshot.primaryWeeklyWindow(for: account.kind) {
@@ -325,7 +325,7 @@ struct AccountsView: View {
                         HStack(spacing: 5) {
                             ProviderMark(provider: entry.provider)
                             if store.menuPreferences.display == .byAccount && store.menuPreferences.showAccountNames { Text(entry.label).lineLimit(1) }
-                            Text(entry.remainingPercent.map { "\(Int($0))%" } ?? "—").monospacedDigit()
+                            Text(entry.remainingPercent.map { "\(Int($0))%" } ?? "0%").monospacedDigit()
                         }.accessibilityLabel("\(entry.label): \(entry.remainingPercent.map { "\(Int($0)) percent weekly remaining" } ?? "unavailable")")
                     }
                     Spacer(minLength: 0)
@@ -393,6 +393,10 @@ struct AccountsView: View {
                     .buttonStyle(.bordered).controlSize(.small)
                     .disabled(store.demo || store.connectingClaude || store.signingIn != nil || !store.waitingForClaude.isEmpty)
             }
+            if store.accounts.contains(where: { $0.kind == (provider == .claude ? .claudeCode : .codex) }) && store.signingIn == nil && store.waitingForClaude.isEmpty {
+                Text("Adding another account? Use a different Chrome profile or private window, and check the email before continuing.")
+                    .font(.system(size: 10)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            }
             if (provider == .claude ? store.claudeExecutable == nil : store.executable == nil) {
                 SettingsCard {
                     VStack(alignment: .leading, spacing: 8) {
@@ -435,11 +439,23 @@ struct AccountsView: View {
             if store.waitingForClaude[account.id] != nil {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("Finish sign-in in your browser").foregroundStyle(.secondary)
+                    if store.accounts.first(where: { $0.kind == account.kind })?.id != account.id {
+                        Text("Use a different Chrome profile or private window. Check that you’re signing into the other email.")
+                            .foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                    }
                     Button("Stop waiting") { store.cancelClaudeSignIn(account) }.help("Close the sign-in Terminal window before retrying.")
                 }
             } else if store.signingIn == account.id {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("Finish sign-in in your browser").foregroundStyle(.secondary)
+                    if store.accounts.first(where: { $0.kind == account.kind })?.id != account.id {
+                        Text("Use a different Chrome profile or private window. Check that you’re signing into the other email.")
+                            .foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                    }
+                    if store.codexSignInURL != nil {
+                        Button("Copy sign-in link") { store.copyCodexSignInLink() }
+                        Text("Open it in the Chrome profile for this account.").foregroundStyle(.secondary)
+                    }
                     Button("Cancel sign-in") { store.cancelSignIn() }
                 }
             } else if store.needsSignIn(account) {
@@ -448,7 +464,10 @@ struct AccountsView: View {
                 } else if account.kind == .claudeCode {
                     Button("Sign in") { store.openClaude(account, login: true) }
                 } else if account.kind == .codex && !account.usesExistingCodex {
-                    Button("Sign in") { store.signIn(account) }.disabled(store.signingIn != nil)
+                    VStack(alignment: .leading, spacing: 4) {
+                        Button("Sign in") { store.signIn(account) }
+                        Button("Use another browser profile") { store.signIn(account, openBrowser: false) }
+                    }.disabled(store.signingIn != nil)
                 } else if account.kind == .codex {
                     VStack(alignment: .leading, spacing: 4) {
                         Text("Sign in through Codex CLI.").foregroundStyle(.secondary)

@@ -15,12 +15,15 @@ For processes it starts, Ai-llowance sets Claude's `DISABLE_TELEMETRY=1` and `DI
 | Data | Storage |
 |---|---|
 | Account nicknames, connection choices, preferences | Private files under `~/Library/Application Support/UsageBar` |
-| Signed-in email and current quota readings | Normal app state in memory; visible in the interface |
+| Expected Codex email | Saved privately with connection settings to detect account changes |
+| Current signed-in email and quota readings | Normal app state in memory; visible in the interface |
 | Organization reporting API keys | Non-synchronizing, device-only macOS Keychain items |
 | Subscription credentials | Provider-managed authentication; new app-owned Codex profiles require Keychain |
 | Provider CLI profiles, caches and logs | Provider-managed directories; additional accounts use separate profiles under the app's Application Support folder |
 
 For new isolated Claude profiles, Ai-llowance detects a plaintext credential fallback after login and before usage reads, logs out and removes the detected fallback. This does **not** guarantee the CLI never temporarily writes credentials. Existing Claude/Codex profiles keep their existing provider credential policy. Ai-llowance does not extract subscription tokens.
+
+Pending Codex authorization links stay in memory until completion, cancellation, or timeout. Copy sign-in link places the current link on your clipboard at your request; it is not saved in account settings.
 
 The retained legacy status-line helper can write a private quota-only feed under `ClaudeFeeds` when explicitly used. New connections do not use it; the normal refresh path removes the old integration when still owned by Ai-llowance. This exception does not store transcripts or credentials.
 

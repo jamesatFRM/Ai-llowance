@@ -75,10 +75,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
                 attachment.attachmentCell = NSTextAttachmentCell(imageCell: image)
                 title.append(NSAttributedString(attachment: attachment))
             }
-            let value = entry.remainingPercent.map { "\(Int($0))%" } ?? "—"
+            let value = entry.remainingPercent.map { "\(Int($0))%" } ?? "0%"
             let name = store.menuPreferences.display == .byAccount && store.menuPreferences.showAccountNames ? " \(String(entry.label.prefix(14)))" : ""
             title.append(NSAttributedString(string: "\(name) \(value)"))
-            descriptions.append("\(entry.label): \(value) weekly remaining")
+            descriptions.append(entry.remainingPercent == nil
+                ? "\(entry.label): unavailable · 0% shown; open for connection status"
+                : "\(entry.label): \(value) weekly remaining")
         }
         title.addAttributes([.font: NSFont.monospacedDigitSystemFont(ofSize: 12, weight: .medium), .foregroundColor: NSColor.labelColor], range: NSRange(location: 0, length: title.length))
         button.attributedTitle = title

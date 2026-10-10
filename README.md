@@ -30,7 +30,7 @@ To check a download, place its `SHA256SUMS` file beside the ZIP and run `shasum 
 Open **Accounts → Connect Claude** or **Connect OpenAI**.
 
 - **Claude:** detects your existing Claude Code subscription sign-in. If needed, opens Claude's own browser login through a short Terminal launcher. Once sign-in completes, close Terminal: no conversation, test prompt, or persistent Terminal session is needed. Additional accounts use separate profiles.
-- **OpenAI:** opens ChatGPT sign-in in your browser for a separate Codex profile. **More connection options → Use my existing OpenAI / Codex sign-in** connects the current CLI account instead.
+- **OpenAI:** opens ChatGPT sign-in in your browser for a separate Codex profile. **More connection options → Use my existing OpenAI / Codex sign-in** connects the current CLI account instead. For sign-in recovery, **Use another browser profile** prepares a link without opening the default browser. While waiting, **Copy sign-in link** lets you complete authorization in the matching Chrome profile without switching your other browser account.
 - **API spending:** optional under **More connection options**. Requires an organization Admin API key stored in Keychain. Subscription login is separate from API billing.
 
 The CLIs must be installed once; common installation locations are detected, with official installation links and file pickers when needed. Ai-llowance never downloads executables automatically.
@@ -146,5 +146,5 @@ Provider logos belong to their respective owners and are excluded from the MIT l
 - A current signed-in Claude subscription can be reused. A logged-out or API-billed Claude CLI gets a separate subscription profile, leaving the original profile untouched.
 - During sign-in the account says **Finish sign-in in your browser**. Claude completion is detected on the next local check (normally within 15 seconds), so it does not wait through an earlier authentication backoff. Unfinished Claude attempts stop waiting after ten minutes; close their Terminal window before retrying. Codex browser login can be cancelled in the app and times out after five minutes.
 - Expired sign-ins show **Sign in** even if the last reading is still visible. Existing Codex CLI profiles are reauthenticated in Codex, then **Check sign-in** rereads them. Missing or unauthorized API credentials show **Replace key**.
-- Duplicate emails are flagged for review instead of silently counting multiple connections to the same plan. A shared email can also belong to different organizations; the app does not automatically delete or merge those connections.
+- Codex connections bind to the first verified email. A later CLI account switch shows a sign-in issue rather than another account’s allowance. A second connection to an already connected email is rejected from quota totals and can be signed in with a different account. Same-email organization identities are not distinguishable through this email binding; no connection is automatically deleted, merged, or signed out.
 - Provider outages and rate limits retain their backoff. A late response from before a reconnect cannot replace the new connection state.

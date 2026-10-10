@@ -178,7 +178,7 @@ private actor FetchGate {
 
 @Test @MainActor func cancellingCodexLoginPreservesRetryInsteadOfOverwritingItWithARefreshError() async throws {
     let root = try fixtureRoot(); defer { try? FileManager.default.removeItem(at: root) }
-    let store = AppStore(root: root, monitor: false, fetch: { _, _ in throw UsageError.authentication }, openExternal: { _ in true })
+    let store = AppStore(root: root, monitor: false, fetch: { _, _ in throw UsageError.authentication }, openExternal: { _ in Issue.record("Copy-only sign-in must not open the default browser"); return true })
     store.executable = try cli(root, """
     while IFS= read -r line; do
       case "$line" in
@@ -188,12 +188,15 @@ private actor FetchGate {
     done
     """)
     let account = try store.add(name: "OpenAI", kind: .codex, secret: "", existing: false, refreshAfter: false)
-    store.signIn(account)
-    try await Task.sleep(for: .milliseconds(100))
+    store.signIn(account, openBrowser: false)
+    try await settle { store.codexSignInURL != nil }
+    #expect(store.codexSignInURL?.host == "auth.openai.com")
+    #expect(!String(decoding: try Paths.readData(root.appendingPathComponent("accounts.json")), as: UTF8.self).contains("authUrl"))
     store.cancelSignIn()
     try await settle { store.signingIn == nil && !store.refreshing }
     #expect(store.errors[account.id]?.contains("cancelled") == true)
     #expect(store.needsSignIn(account))
+    #expect(store.codexSignInURL == nil)
 }
 
 @Test @MainActor func corruptSettingsArePreservedAndAddingAccountsFailsClosed() throws {
@@ -290,4 +293,20 @@ private actor FetchGate {
     await claude.shutdown()
     #expect(!claude.connectingClaude)
     #expect(claude.accounts.isEmpty)
+}
+
+
+@Test @MainActor func backgroundMonitoringDeliversHeartbeatWithoutActorIsolationCrash() async throws {
+    let root = try fixtureRoot(); defer { try? FileManager.default.removeItem(at: root) }
+    // Use real utility queues: monitor:false cannot exercise the callback isolation.
+    let store = AppStore(root: root, monitor: true)
+    store.paused = true
+    let started = store.now
+    let deadline = Date().addingTimeInterval(25)
+    while store.now.timeIntervalSince(started) < 14 && Date() < deadline {
+        try await Task.sleep(for: .milliseconds(100))
+    }
+    #expect(store.now.timeIntervalSince(started) >= 14)
+    #expect(!store.refreshing)
+    await store.shutdown()
 }
