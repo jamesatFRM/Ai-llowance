@@ -28,6 +28,14 @@ def issues(data):
         result.add("non-example email address")
     return sorted(result)
 
+def publication_data(kind, data):
+    # Git author/committer/tagger identity is public repository metadata. Scan
+    # message contents, which can accidentally include private app data.
+    if kind in (b"commit", b"tag"):
+        _, separator, message = data.partition(b"\n\n")
+        return message if separator else data
+    return data
+
 def git(*args):
     return subprocess.check_output(["git", *args])
 
@@ -44,6 +52,11 @@ def main():
         assert "private key" in issues(b"-----BEGIN " + b"PRIVATE KEY-----")
         assert "non-example email address" in issues(b"person@" + b"real-mail.invalid")
         assert "local machine path" in issues(b"/Users/" + b"fixture/private")
+        header = b"author writer@" + b"mail.invalid\n\n"
+        assert not issues(publication_data(b"commit", header + b"ordinary commit message"))
+        assert "non-example email address" in issues(publication_data(b"commit", header + b"private@" + b"mail.invalid"))
+        assert "non-example email address" in issues(publication_data(b"tag", header + b"private@" + b"mail.invalid"))
+        assert "non-example email address" in issues(publication_data(b"blob", header))
         print("Privacy guard self-test passed.")
         return 0
     root = pathlib.Path(git("rev-parse", "--show-toplevel").decode().strip())
@@ -66,7 +79,7 @@ def main():
             if kind not in (b"blob", b"commit", b"tag"):
                 continue
             checked += 1
-            failures.extend(("Git object " + oid, category) for category in issues(git("cat-file", "-p", oid)))
+            failures.extend(("Git object " + oid, category) for category in issues(publication_data(kind, git("cat-file", "-p", oid))))
     if failures:
         for location, category in failures:
             print(f"Privacy check failed: {location}: {category}", file=sys.stderr)
