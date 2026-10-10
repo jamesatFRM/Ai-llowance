@@ -18,12 +18,13 @@ PATTERNS = {
 }
 EMAIL = re.compile(rb"[A-Za-z0-9_.+%-]+@([A-Za-z0-9.-]+\.[A-Za-z]{2,})")
 SAFE_DOMAINS = {b"example.com", b"example.org", b"example.net", b"example.test", b"users.noreply.github.com"}
+SAFE_EMAILS = {b"noreply@github.com"}  # GitHub-generated commit metadata only.
 PRIVATE_NAMES = {"accounts.json", "auth.json", ".credentials.json", ".env", ".DS_Store"}
 PRIVATE_PARTS = {"CodexProfiles", "ClaudeProfiles", "ClaudeFeeds", "ClaudeConnections", "node_modules", ".build", ".swiftpm"}
 
 def issues(data):
     result = {name for name, pattern in PATTERNS.items() if re.search(pattern, data)}
-    if any(m.group(1).lower() not in SAFE_DOMAINS for m in EMAIL.finditer(data)):
+    if any(m.group(1).lower() not in SAFE_DOMAINS and m.group(0).lower() not in SAFE_EMAILS for m in EMAIL.finditer(data)):
         result.add("non-example email address")
     return sorted(result)
 
@@ -36,7 +37,8 @@ def main():
     parser.add_argument("--self-test", action="store_true")
     args = parser.parse_args()
     if args.self_test:
-        assert not issues(b"fixture@example.com 12345+author@users.noreply.github.com")
+        assert not issues(b"fixture@example.com 12345+author@users.noreply.github.com noreply@github.com")
+        assert "non-example email address" in issues(b"private-person@" + b"github.com")
         assert "provider credential" in issues(b"sk-" + b"proj-" + b"A" * 40)
         assert "GitHub credential" in issues(b"ghp_" + b"B" * 40)
         assert "private key" in issues(b"-----BEGIN " + b"PRIVATE KEY-----")

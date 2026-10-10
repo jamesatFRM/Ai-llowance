@@ -16,6 +16,9 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
+          # Check the published branch history, not GitHub's temporary PR merge
+          # metadata, whose author email comes from account settings.
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
           fetch-depth: 0
       - name: Privacy guard (source and history)
