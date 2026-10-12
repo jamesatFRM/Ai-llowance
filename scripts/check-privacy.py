@@ -23,6 +23,10 @@ PRIVATE_NAMES = {"accounts.json", "auth.json", ".credentials.json", ".env", ".DS
 PRIVATE_PARTS = {"CodexProfiles", "ClaudeProfiles", "ClaudeFeeds", "ClaudeConnections", "node_modules", ".build", ".swiftpm"}
 
 def issues(data):
+    # Exact public upstream copyright notice bundled by Sparkle (LICENSE).
+    # Keep all other non-example addresses rejected, including in source/history.
+    public_notice = b"Copyright (c) 2015 Orson Peters <orsonpeters@" + b"gmail.com>"
+    data = data.replace(public_notice, b"Sparkle upstream copyright notice")
     result = {name for name, pattern in PATTERNS.items() if re.search(pattern, data)}
     if any(m.group(1).lower() not in SAFE_DOMAINS and m.group(0).lower() not in SAFE_EMAILS for m in EMAIL.finditer(data)):
         result.add("non-example email address")

@@ -4,6 +4,8 @@ import pathlib
 import plistlib
 import re
 import sys
+import stat
+import base64
 import zipfile
 
 archive = pathlib.Path(sys.argv[1])
@@ -26,7 +28,9 @@ secret_patterns = [
 ]
 with zipfile.ZipFile(archive) as z:
     files = {entry.filename for entry in z.infolist() if not entry.is_dir()}
-    if files != allowed:
+    framework_prefix = 'Ai-llowance.app/Contents/Frameworks/Sparkle.framework/'
+    own_files = {name for name in files if not name.startswith(framework_prefix)}
+    if own_files != allowed or framework_prefix + 'Versions/B/Sparkle' not in files and framework_prefix + 'Versions/A/Sparkle' not in files:
         raise SystemExit('Archive contains unexpected or missing files.')
     for entry in z.infolist():
         if entry.is_dir():
@@ -34,6 +38,15 @@ with zipfile.ZipFile(archive) as z:
         if entry.filename.startswith('/') or '..' in pathlib.PurePosixPath(entry.filename).parts:
             raise SystemExit('Unsafe archive path.')
         data = z.read(entry)
+        if stat.S_ISLNK(entry.external_attr >> 16):
+            target = data.decode('utf-8')
+            resolved = pathlib.PurePosixPath(entry.filename).parent / target
+            # Framework aliases may use ../ within this bundle, never escape it.
+            import posixpath
+            if target.startswith('/') or not posixpath.normpath(str(resolved)).startswith(framework_prefix):
+                raise SystemExit('Unsafe framework alias.')
+        if pathlib.PurePosixPath(entry.filename).name in {'accounts.json', 'auth.json', '.credentials.json', '.env'}:
+            raise SystemExit('Private file in release.')
         if any(re.search(pattern, data) for pattern in secret_patterns):
             raise SystemExit('Potential credential found; do not publish.')
         if b'/Users/' in data or b'/private/var/folders/' in data:
@@ -41,6 +54,12 @@ with zipfile.ZipFile(archive) as z:
     info = plistlib.loads(z.read('Ai-llowance.app/Contents/Info.plist'))
     if info.get('CFBundleIdentifier') != 'com.usagebar.app' or info.get('CFBundleDisplayName') != 'Ai-llowance' or not info.get('LSUIElement'):
         raise SystemExit('Unexpected app identity or mode.')
+    if len(base64.b64decode(info.get('SUPublicEDKey', ''), validate=True)) != 32 or info.get('SUFeedURL') != 'https://github.com/jamesatFRM/Ai-llowance/releases/download/update-feed/appcast.xml':
+        raise SystemExit('Missing or unexpected update configuration.')
+    if not info.get('SURequireSignedFeed') or not info.get('SUVerifyUpdateBeforeExtraction') or info.get('SUEnableSystemProfiling') or info.get('SUAutomaticallyUpdate'):
+        raise SystemExit('Unsafe updater defaults.')
+    if info.get('SUSignedFeedFailureExpirationInterval') != 0:
+        raise SystemExit('Signed feeds must not silently become optional.')
     for executable in ['UsageBar', 'UsageBridge']:
         mode = z.getinfo('Ai-llowance.app/Contents/MacOS/' + executable).external_attr >> 16
         if not mode & 0o111:

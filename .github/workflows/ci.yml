@@ -8,7 +8,7 @@ permissions:
   contents: read
 concurrency:
   group: checks-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 jobs:
   macos:
     runs-on: macos-15
@@ -25,15 +25,65 @@ jobs:
         run: |
           python3 scripts/check-privacy.py --self-test
           python3 scripts/check-privacy.py --history
+      - name: Release build number
+        run: echo "USAGEBAR_BUILD_NUMBER=$((200 + GITHUB_RUN_NUMBER))" >> "$GITHUB_ENV"
       - name: Tests
         run: bash scripts/test.sh
       - name: Build and verify preview archive
         run: bash scripts/package-release.sh
+        env:
+          USAGEBAR_ARCHITECTURES: arm64 x86_64
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: Ai-llowance-preview-${{ runner.arch }}
+          name: Ai-llowance-preview-universal
           path: |
+            dist/*.dmg
             dist/*.zip
             dist/SHA256SUMS
           if-no-files-found: error
           retention-days: 14
+
+  publish:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.SIGNED_RELEASES_ENABLED == 'true'
+    needs: macos
+    runs-on: macos-15
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: Ai-llowance-preview-universal
+          path: dist
+      - name: Sign and publish verified preview
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          test -n "$SPARKLE_PRIVATE_KEY" || { echo 'Missing update signing key; no release was published.'; exit 1; }
+          version=$(cat VERSION)
+          build=$((200 + GITHUB_RUN_NUMBER))
+          tag="v${version}-build${build}"
+          (cd dist && shasum -a 256 -c SHA256SUMS)
+          bash scripts/sign-release.sh "$tag"
+          cat > dist/release-notes.md <<'NOTES'
+          Drag Ai-llowance into Applications. Existing 0.1.0 users need this one installation to gain Check for Updates and verified install/relaunch.
+
+          Universal macOS 14+ preview. Ad-hoc signed and unnotarized; not a production release. Requires Claude Code and/or Codex CLI for readings.
+          NOTES
+          if ! gh release view "$tag" >/dev/null 2>&1; then
+            gh release create "$tag" dist/*.dmg dist/*.zip dist/SHA256SUMS --target "$GITHUB_SHA" --title "Ai-llowance $version — Preview (build $build)" --notes-file dist/release-notes.md --prerelease --latest=false
+          else
+            gh release download "$tag" --pattern SHA256SUMS --dir "$RUNNER_TEMP/existing-release"
+            cmp dist/SHA256SUMS "$RUNNER_TEMP/existing-release/SHA256SUMS" || { echo 'Existing version differs; refusing to replace a published build.'; exit 1; }
+          fi
+          # Advance the feed only after the complete verified release is available.
+          if ! gh release view update-feed >/dev/null 2>&1; then
+            gh release create update-feed --target "$GITHUB_SHA" --title 'Signed update feed' --notes 'Metadata for the in-app updater. Download the app from a versioned preview release.' --prerelease --latest=false
+          fi
+          gh release upload update-feed dist/appcast.xml --clobber

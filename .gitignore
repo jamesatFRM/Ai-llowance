@@ -23,3 +23,6 @@ CodexProfiles/
 ClaudeProfiles/
 ClaudeFeeds/
 ClaudeConnections/
+
+*.dmg
+*.ed25519

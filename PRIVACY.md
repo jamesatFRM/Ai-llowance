@@ -1,6 +1,6 @@
 # Privacy
 
-Ai-llowance runs locally on your Mac. There is no Ai-llowance backend, analytics service, advertising, cloud sync, or automatic updater. The maintainer does not receive your account identities, usage, credentials, or diagnostic logs from the app.
+Ai-llowance runs locally on your Mac. There is no Ai-llowance backend, analytics service, advertising, or cloud sync. Application update checks use GitHub as described below. The maintainer does not receive your account identities, usage, credentials, or diagnostic logs from the app.
 
 ## What leaves your Mac
 
@@ -46,3 +46,7 @@ Pause stops polling; Quit stops the app. Removing the app bundle alone does not 
 ## Release checks
 
 Source and reachable Git history are checked for common secret patterns, private files, real email addresses and machine paths. Release archives have an exact file allowlist and separate checks. These checks reduce accidental disclosure; they are not a guarantee that no vulnerability exists. The 0.1.0 download is an ad-hoc signed, unnotarized preview.
+
+## Application updates
+
+Sparkle checks the signed GitHub release feed about once per day when enabled, or when you select Check for Updates. These HTTPS requests expose ordinary network metadata such as IP address and installed application version to GitHub; account settings, quota readings, provider credentials and chats are not attached. System profiling is disabled. Updates are cryptographically verified and install only when you choose. Automatic checks can be turned off in Settings. Sparkle preferences use this app's macOS user-defaults domain. Update signing keys are separate from provider sign-ins.
