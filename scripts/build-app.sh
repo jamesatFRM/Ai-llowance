@@ -8,12 +8,12 @@ build_number="${USAGEBAR_BUILD_NUMBER:-200}"
 mkdir -p "$build_dir" "$output_dir"
 export CLANG_MODULE_CACHE_PATH="$build_dir/clang-cache"
 export SWIFTPM_MODULECACHE_OVERRIDE="$build_dir/swift-cache"
-extra=()
-if [ -n "${USAGEBAR_BUILD_SYSTEM:-}" ]; then extra=(--build-system "$USAGEBAR_BUILD_SYSTEM"); fi
+extra=(--disable-sandbox)
+if [ -n "${USAGEBAR_BUILD_SYSTEM:-}" ]; then extra+=(--build-system "$USAGEBAR_BUILD_SYSTEM"); fi
 architectures="${USAGEBAR_ARCHITECTURES:-$(uname -m)}"
 for architecture in $architectures; do
-    swift build --package-path "$project_dir" --scratch-path "$build_dir" --cache-path "$build_dir/package-cache" --disable-sandbox "${extra[@]}" --arch "$architecture" -c release
-    binary_dir="$(swift build --package-path "$project_dir" --scratch-path "$build_dir" --cache-path "$build_dir/package-cache" --disable-sandbox "${extra[@]}" --arch "$architecture" -c release --show-bin-path)"
+    swift build --package-path "$project_dir" --scratch-path "$build_dir" --cache-path "$build_dir/package-cache" "${extra[@]}" --arch "$architecture" -c release
+    binary_dir="$(swift build --package-path "$project_dir" --scratch-path "$build_dir" --cache-path "$build_dir/package-cache" "${extra[@]}" --arch "$architecture" -c release --show-bin-path)"
     mkdir -p "$build_dir/slices/$architecture"
     cp "$binary_dir/UsageBar" "$binary_dir/UsageBridge" "$build_dir/slices/$architecture/"
 done
