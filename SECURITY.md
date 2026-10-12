@@ -13,10 +13,10 @@ Do not post credentials, raw authentication responses, or private account detail
 - Codex and Claude manage their own subscription credentials. App-owned Codex profiles require Keychain. New isolated Claude login launchers detect and remove Claude's plaintext fallback after login; this is not a guarantee that credentials are never temporarily written. Existing CLI profiles keep their existing credential policy.
 - Ai-llowance invokes locally installed provider CLIs. Their version, behavior, authentication, and network traffic remain controlled by the provider. The app does not bundle them or inspect their token files.
 - API requests use fixed HTTPS origins, GET-only reporting endpoints, bounded responses, and no redirects, shared cookies, or URL cache.
-- There is no Ai-llowance analytics service, telemetry endpoint, cloud sync, or automatic updater.
+- There is no Ai-llowance analytics service, telemetry endpoint, or cloud sync. Sparkle checks GitHub for signed updates; system profiling is disabled. Both feed and archive signatures are required before extraction, with no unsigned feed fallback.
 
 ## Removal
 
 Remove API connections in Accounts to delete their saved keys. Removing an app-owned Codex account signs it out; existing Codex sign-ins are preserved. For Claude, use Accounts → More → Sign out in Terminal before removing an account if you want to clear that provider-managed sign-in. Signing out an existing CLI profile also affects other tools using that profile.
 
-Quit Ai-llowance before replacing or deleting the app. Removing the app bundle alone does not delete provider-managed sign-ins or local account settings.
+Sparkle offers Install and Relaunch and waits for the app’s provider processes to shut down. Quit Ai-llowance before manually replacing or deleting the app. Removing the app bundle alone does not delete provider-managed sign-ins or local account settings.

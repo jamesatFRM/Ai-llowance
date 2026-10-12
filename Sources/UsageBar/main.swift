@@ -46,6 +46,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
             previewWindow = preview
             NSApp.activate(ignoringOtherApps: true)
         } else if store.accounts.isEmpty || store.demo || CommandLine.arguments.contains("--accounts") { showAccounts() }
+        store.updater.start()
         updateLabel()
         store.refresh()
         if CommandLine.arguments.contains("--show-menu") {

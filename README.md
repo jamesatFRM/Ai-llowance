@@ -2,9 +2,9 @@
 
 *Know what’s left.*
 
-A small native macOS menu bar app for multiple Claude and OpenAI accounts. SwiftUI + AppKit, Foundation networking, Security Keychain; no third-party runtime dependencies or Electron. Requires macOS 14+ and Swift 6 to build.
+A small native macOS menu bar app for multiple Claude and OpenAI accounts. SwiftUI + AppKit, Foundation networking, Security Keychain; Sparkle for signed app updates; no Electron. Requires macOS 14+ and Swift 6 to build.
 
-**0.1.0 preview — not a production release.** The download is for Apple Silicon Macs and is ad-hoc signed, not Developer ID signed or notarized. Claude's CLI usage format is version-dependent. See [verification](docs/verification.md) for tested behavior and remaining limits.
+**0.2.0 preview — not a production release.** The DMG includes Apple Silicon and Intel binaries and is ad-hoc signed, not Developer ID signed or notarized. Claude's CLI usage format is version-dependent. See [verification](docs/verification.md) for tested behavior and remaining limits.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/images/menu-dark.png">
@@ -16,14 +16,14 @@ A small native macOS menu bar app for multiple Claude and OpenAI accounts. Swift
 ## Install
 
 1. Install [Claude Code](https://code.claude.com/docs/en/setup) and/or [Codex CLI](https://developers.openai.com/codex/cli) and keep the provider CLI up to date.
-2. Download the [0.1.0 Apple Silicon preview](https://github.com/jamesatFRM/Ai-llowance/releases/tag/v0.1.0), or build from source below. Extract the ZIP and move **Ai-llowance.app** into **Applications**.
+2. Download the DMG from [GitHub Releases](https://github.com/jamesatFRM/Ai-llowance/releases), open it, and drag **Ai-llowance** onto **Applications**. Eject the disk image and open the installed app.
 3. Open Ai-llowance. Its icon appears in the menu bar; **Settings** manages connections.
 
 macOS may block the preview because it is not notarized. Review the source and release checksum before deciding whether to allow it through **System Settings → Privacy & Security → Open Anyway**. Follow [Apple's guidance](https://support.apple.com/102445); do not disable Gatekeeper globally. You can also build from source below.
 
-The app targets macOS 14 or later. The downloadable binary is Apple Silicon only; Intel and all macOS versions have not been tested. No Apple developer membership is needed to build locally.
+The app targets macOS 14 or later. The DMG is universal (Apple Silicon and Intel); native Intel runtime verification and all macOS versions have not been tested. No Apple developer membership is needed to build locally.
 
-To check a download, place its `SHA256SUMS` file beside the ZIP and run `shasum -a 256 -c SHA256SUMS`. Updates are manual: quit Ai-llowance, replace the app, and reopen it. Account settings remain in Application Support. Login at startup is not enabled automatically.
+To check a download, place its `SHA256SUMS` file beside the downloads and run `shasum -a 256 -c SHA256SUMS`. **Settings → Updates → Check for Updates…** downloads verified releases and offers **Install and Relaunch**. Automatic checks run daily by default and can be disabled; installation waits for your choice. Account settings remain in Application Support. Version 0.1.0 needs this one-time DMG installation to gain the updater. Login at startup is not enabled automatically.
 
 ## Connect once
 
@@ -117,7 +117,7 @@ swift run UsageBridge --probe-claude "$HOME/.local/bin/claude"
 `UsageCore` defines adapters, typed quota windows, timestamps, errors, polling policy, and credential storage. Future providers should expose only verified data, with explicit unsupported states. Google/Gemini and Grok are excluded following the narrowed scope; research is in [provider-research.md](docs/provider-research.md).
 
 
-To produce an ad-hoc signed release ZIP and checksum:
+To produce an ad-hoc signed DMG, ZIP and checksums:
 
 ```sh
 bash scripts/package-release.sh
@@ -148,3 +148,9 @@ Provider logos belong to their respective owners and are excluded from the MIT l
 - Expired sign-ins show **Sign in** even if the last reading is still visible. Existing Codex CLI profiles are reauthenticated in Codex, then **Check sign-in** rereads them. Missing or unauthorized API credentials show **Replace key**.
 - Codex connections bind to the first verified email. A later CLI account switch shows a sign-in issue rather than another account’s allowance. A second connection to an already connected email is rejected from quota totals and can be signed in with a different account. Same-email organization identities are not distinguishable through this email binding; no connection is automatically deleted, merged, or signed out.
 - Provider outages and rate limits retain their backoff. A late response from before a reconnect cannot replace the new connection state.
+
+## Release updates
+
+Pushes to `main` run privacy, test, universal-build, and DMG checks. When automated publishing is enabled, the publish job runs after those checks and uses the encrypted `SPARKLE_PRIVATE_KEY` repository secret to publish a new preview release and its signed update feed. Pull requests cannot access the signing key or publish releases. Each CI run has a higher build number, including when the display version stays the same. Increment `VERSION` for named releases. The exact Sparkle dependency and packaging tools are pinned.
+
+Update archives and the feed use Ed25519 signatures. The app verifies the feed and archive before extraction; no unsigned fallback or system profiling is enabled. The signing key stays in the maintainer's Keychain. Automated publishing additionally requires approval to store it in an encrypted GitHub Actions secret; the key is never in source or downloads. See [release maintenance](docs/releases.md).

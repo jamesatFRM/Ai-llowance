@@ -21,6 +21,7 @@ final class AppStore: ObservableObject {
     @Published var offline = false
     @Published var now = Date()
     @Published private(set) var menuPreferences = MenuPreferences()
+    lazy var updater = AppUpdater(enabled: !demo)
     let demo: Bool
     let root: URL
     var executable = CodexAdapter.findExecutable()

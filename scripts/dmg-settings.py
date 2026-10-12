@@ -1,0 +1,19 @@
+# Deterministic Finder layout; no UI scripting or saved personal Finder state.
+app = defines['app']
+files = [app, defines['readme']]
+symlinks = {'Applications': '/Applications'}
+background = defines['background']
+icon_size = 96
+text_size = 13
+window_rect = ((160, 160), (640, 420))
+icon_locations = {'Ai-llowance.app': (170, 210), 'Applications': (470, 210), 'Read me.txt': (580, 366)}
+show_status_bar = False
+show_tab_view = False
+show_toolbar = False
+show_pathbar = False
+show_sidebar = False
+include_icon_view_settings = True
+include_list_view_settings = False
+default_view = 'icon-view'
+format = 'ULFO'
+filesystem = 'APFS'

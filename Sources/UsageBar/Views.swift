@@ -38,7 +38,8 @@ struct Dashboard: View {
             HStack {
                 Button(action: manage) { Label("Settings", systemImage: "gearshape") }.help("Settings")
                 Spacer()
-                Text("Preview · 0.1.0").foregroundStyle(.tertiary)
+                Text("Preview · \(AppUpdater.version)").foregroundStyle(.tertiary)
+                UpdateCheckButton(updater: store.updater)
                 Button { store.togglePause() } label: {
                     Image(systemName: store.paused ? "play.fill" : "pause.fill").frame(width: 22, height: 22)
                 }.help(store.paused ? "Resume automatic refresh" : "Pause automatic refresh")
@@ -257,6 +258,7 @@ struct AccountsView: View {
                     menuBarSettings
                     accountSection("Claude", kinds: [.claudeCode, .claudeAPI], provider: .claude)
                     accountSection("OpenAI", kinds: [.codex, .openAIAPI], provider: .openAI)
+                    UpdateSettings(updater: store.updater)
                     advancedSettings
                     if let notice = store.notice {
                         Label(notice, systemImage: "info.circle").font(.system(size: 11)).foregroundStyle(.orange).fixedSize(horizontal: false, vertical: true)
@@ -269,7 +271,7 @@ struct AccountsView: View {
                 Text("Stored on this Mac").foregroundStyle(.secondary)
                 Spacer()
                 Button("Show menu", action: showMenu).help("Open the menu-bar panel")
-                Text("0.1.0 preview").foregroundStyle(.tertiary)
+                Text("\(AppUpdater.version) preview").foregroundStyle(.tertiary)
                 Button { store.togglePause() } label: { Image(systemName: store.paused ? "play.fill" : "pause.fill").frame(width: 26, height: 26) }
                     .help(store.paused ? "Resume refresh" : "Pause refresh").accessibilityLabel(store.paused ? "Resume refresh" : "Pause refresh").disabled(store.demo)
                 Button { NSApplication.shared.terminate(nil) } label: { Image(systemName: "power").frame(width: 26, height: 26) }
@@ -535,4 +537,31 @@ struct AccountsView: View {
         }
     }
 
+}
+
+
+private struct UpdateCheckButton: View {
+    @ObservedObject var updater: AppUpdater
+    var body: some View {
+        Button { updater.check() } label: { Image(systemName: "arrow.down.circle").frame(width: 22, height: 22) }
+            .disabled(!updater.canCheck).help("Check for Updates…").accessibilityLabel("Check for Updates")
+    }
+}
+private struct UpdateSettings: View {
+    @ObservedObject var updater: AppUpdater
+    var body: some View {
+        SettingsCard {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack {
+                    Label("Updates", systemImage: "arrow.down.circle").font(.system(size: 13, weight: .semibold))
+                    Spacer()
+                    Text(AppUpdater.version).font(.system(size: 11)).foregroundStyle(.secondary)
+                    Button("Check for Updates…") { updater.check() }.disabled(!updater.canCheck).controlSize(.small)
+                }
+                Toggle("Automatically check for updates", isOn: Binding(get: { updater.automaticChecks }, set: { updater.setAutomaticChecks($0) }))
+                    .toggleStyle(.switch).controlSize(.mini).font(.system(size: 11)).disabled(!updater.canCheck)
+                Text("Updates install when you choose. Your accounts stay on this Mac.").font(.system(size: 10)).foregroundStyle(.secondary)
+            }
+        }
+    }
 }

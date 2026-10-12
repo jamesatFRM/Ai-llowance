@@ -3,40 +3,64 @@ set -euo pipefail
 project_dir="$(cd "$(dirname "$0")/.." && pwd)"
 build_dir="${USAGEBAR_BUILD_ROOT:-$project_dir/.build}"
 output_dir="${USAGEBAR_OUTPUT_DIR:-$project_dir/dist}"
+version="$(cat "$project_dir/VERSION")"
+build_number="${USAGEBAR_BUILD_NUMBER:-200}"
 mkdir -p "$build_dir" "$output_dir"
 export CLANG_MODULE_CACHE_PATH="$build_dir/clang-cache"
 export SWIFTPM_MODULECACHE_OVERRIDE="$build_dir/swift-cache"
-swift build --package-path "$project_dir" --scratch-path "$build_dir" --cache-path "$build_dir/package-cache" --disable-sandbox -c release
-binary_dir="$(swift build --package-path "$project_dir" --scratch-path "$build_dir" --cache-path "$build_dir/package-cache" --disable-sandbox -c release --show-bin-path)"
+extra=()
+if [ -n "${USAGEBAR_BUILD_SYSTEM:-}" ]; then extra=(--build-system "$USAGEBAR_BUILD_SYSTEM"); fi
+architectures="${USAGEBAR_ARCHITECTURES:-$(uname -m)}"
+for architecture in $architectures; do
+    swift build --package-path "$project_dir" --scratch-path "$build_dir" --cache-path "$build_dir/package-cache" --disable-sandbox "${extra[@]}" --arch "$architecture" -c release
+    binary_dir="$(swift build --package-path "$project_dir" --scratch-path "$build_dir" --cache-path "$build_dir/package-cache" --disable-sandbox "${extra[@]}" --arch "$architecture" -c release --show-bin-path)"
+    mkdir -p "$build_dir/slices/$architecture"
+    cp "$binary_dir/UsageBar" "$binary_dir/UsageBridge" "$build_dir/slices/$architecture/"
+done
 app_dir="$output_dir/Ai-llowance.app"
-mkdir -p "$app_dir/Contents/MacOS" "$app_dir/Contents/Resources"
-cp "$binary_dir/UsageBar" "$app_dir/Contents/MacOS/UsageBar"
-cp "$binary_dir/UsageBridge" "$app_dir/Contents/MacOS/UsageBridge"
-cp "$project_dir/Resources/UsageBar.icns" "$app_dir/Contents/Resources/UsageBar.icns"
-cp "$project_dir/LICENSE" "$app_dir/Contents/Resources/LICENSE"
-cp "$project_dir/Resources/Claude.png" "$project_dir/Resources/ChatGPT.png" "$app_dir/Contents/Resources/"
-cp "$project_dir/THIRD_PARTY_NOTICES.md" "$app_dir/Contents/Resources/"
-cp "$project_dir/PRIVACY.md" "$app_dir/Contents/Resources/"
-# Keep debug paths and symbols out of public binaries; sign after stripping.
+# Only replace the generated output bundle, never an installed application.
+if [ -d "$app_dir" ]; then rm -rf "$app_dir"; fi
+mkdir -p "$app_dir/Contents/MacOS" "$app_dir/Contents/Resources" "$app_dir/Contents/Frameworks"
+for binary in UsageBar UsageBridge; do
+    slices=()
+    for architecture in $architectures; do slices+=("$build_dir/slices/$architecture/$binary"); done
+    if [ "${#slices[@]}" -gt 1 ]; then lipo -create "${slices[@]}" -output "$app_dir/Contents/MacOS/$binary"
+    else cp "${slices[0]}" "$app_dir/Contents/MacOS/$binary"; fi
+done
+framework="$(python3 - "$build_dir" <<'PY2'
+from pathlib import Path
+import sys
+matches=list((Path(sys.argv[1])/'artifacts').glob('**/macos*/Sparkle.framework'))
+if len(matches)!=1: raise SystemExit('Expected one pinned Sparkle framework')
+print(matches[0])
+PY2
+)"
+ditto "$framework" "$app_dir/Contents/Frameworks/Sparkle.framework"
+codesign --verify --deep --strict "$app_dir/Contents/Frameworks/Sparkle.framework"
+cp "$project_dir/Resources/UsageBar.icns" "$project_dir/Resources/Claude.png" "$project_dir/Resources/ChatGPT.png" "$app_dir/Contents/Resources/"
+cp "$project_dir/LICENSE" "$project_dir/THIRD_PARTY_NOTICES.md" "$project_dir/PRIVACY.md" "$app_dir/Contents/Resources/"
 /usr/bin/strip -S "$app_dir/Contents/MacOS/UsageBar" "$app_dir/Contents/MacOS/UsageBridge"
-cat > "$app_dir/Contents/Info.plist" <<'PLIST'
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0"><dict>
-  <key>CFBundleIdentifier</key><string>com.usagebar.app</string>
-  <key>CFBundleName</key><string>Ai-llowance</string>
-  <key>CFBundleDisplayName</key><string>Ai-llowance</string>
-  <key>CFBundleExecutable</key><string>UsageBar</string>
-  <key>CFBundleIconFile</key><string>UsageBar</string>
-  <key>CFBundlePackageType</key><string>APPL</string>
-  <key>CFBundleShortVersionString</key><string>0.1.0</string>
-  <key>CFBundleVersion</key><string>1</string>
-  <key>LSMinimumSystemVersion</key><string>14.0</string>
-  <key>LSUIElement</key><true/>
-  <key>NSHighResolutionCapable</key><true/>
-</dict></plist>
-PLIST
-codesign --force --sign - "$app_dir/Contents/MacOS/UsageBridge"
-codesign --force --sign - "$app_dir"
+# SwiftPM may add build-machine framework search paths. Keep only portable paths.
+python3 - "$app_dir/Contents/MacOS/UsageBar" <<'PY2'
+import subprocess,sys,re
+p=sys.argv[1]
+rpaths=re.findall(r'cmd LC_RPATH\n\s+cmdsize \d+\n\s+path (.+) \(offset',subprocess.check_output(['otool','-l',p],text=True))
+for path in dict.fromkeys(rpaths):
+    if path.startswith('/') and not path.startswith(('/usr/lib','/System/Library')):
+        subprocess.run(['install_name_tool','-delete_rpath',path,p],check=True)
+PY2
+python3 - "$app_dir" "$version" "$build_number" "$project_dir/Resources/update-public-key.txt" <<'PY2'
+import pathlib,plistlib,sys,base64,re
+app,version,build,keyfile=sys.argv[1:]
+key=pathlib.Path(keyfile).read_text().strip()
+assert len(base64.b64decode(key,validate=True))==32
+assert re.fullmatch(r'\d+\.\d+\.\d+',version) and re.fullmatch(r'\d+',build)
+info=dict(CFBundleIdentifier='com.usagebar.app',CFBundleName='Ai-llowance',CFBundleDisplayName='Ai-llowance',CFBundleExecutable='UsageBar',CFBundleIconFile='UsageBar',CFBundlePackageType='APPL',CFBundleShortVersionString=version,CFBundleVersion=build,LSMinimumSystemVersion='14.0',LSUIElement=True,NSHighResolutionCapable=True,
+    SUFeedURL='https://github.com/jamesatFRM/Ai-llowance/releases/download/update-feed/appcast.xml',SUPublicEDKey=key,SUEnableAutomaticChecks=True,SUAutomaticallyUpdate=False,SUEnableSystemProfiling=False,SUScheduledCheckInterval=86400,SUVerifyUpdateBeforeExtraction=True,SURequireSignedFeed=True,SUSignedFeedFailureExpirationInterval=0)
+pathlib.Path(app,'Contents/Info.plist').write_bytes(plistlib.dumps(info))
+PY2
+identity="${USAGEBAR_SIGNING_IDENTITY:--}"
+codesign --force --sign "$identity" "$app_dir/Contents/MacOS/UsageBridge"
+codesign --force --sign "$identity" "$app_dir"
 codesign --verify --deep --strict "$app_dir"
-echo "Built local preview: $app_dir"
+echo "Built app: $app_dir"

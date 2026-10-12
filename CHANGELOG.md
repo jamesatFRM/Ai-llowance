@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.2.0 — Preview
+
+- Universal drag-to-Applications DMG with a compact installer layout.
+- Sparkle Check for Updates and optional daily checks; install and relaunch preserves accounts.
+- Signed update archives and feeds, verified before extraction.
+- GitHub publishes verified preview updates after main passes CI.
+- Existing 0.1.0 users need one DMG installation to gain update support.
+
 ## Unreleased — Account connections and menu display
 
 - Fix a startup/heartbeat crash by making utility-queue callbacks explicitly sendable before updating the UI.
