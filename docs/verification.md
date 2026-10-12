@@ -1,6 +1,14 @@
 # Preview verification
 
-Ai-llowance 0.1.0 is an ad-hoc signed, unnotarized preview, not a production release.
+Ai-llowance is an ad-hoc signed, unnotarized preview, not a production release.
+
+## DMG and updater — October 12, 2026
+
+- 75 fixture tests passed with Sparkle integrated. Universal Apple Silicon/Intel release build, strict signatures, ZIP contents and read-only DMG verification passed. Intel runtime and first-launch Gatekeeper approval remain unverified.
+- Installed the actual DMG bundle in Applications, preserving account settings byte-for-byte; the old launch path points to that installed app. Native Settings shows the version, Check for Updates and daily-check toggle.
+- Signed feed and archive generation/verification passed using the dedicated local Keychain key. Modified feed and archive signatures were rejected. Both feed and archive verification are mandatory before extraction; profiling and silent installation are disabled.
+- Automatic CI publication is gated off pending explicit approval to transfer the signing key into an encrypted repository secret. The key has not been exported or uploaded. Locally signed releases can be published without moving the private key.
+- This is a preview, not a notarized production release.
 
 ## GitHub update and local run — October 10, 2026
 
