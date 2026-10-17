@@ -17,14 +17,5 @@ else
     "$tooling/bin/generate_appcast" --account Ai-llowance "${args[@]}" "$feed_dir"
     "$tooling/bin/sign_update" --account Ai-llowance --verify "$feed_dir/appcast.xml"
 fi
+python3 "$project_dir/scripts/check-update-feed.py" "$feed_dir/appcast.xml" "$output_dir" "$tag"
 cp "$feed_dir/appcast.xml" "$output_dir/appcast.xml"
-python3 - "$output_dir/appcast.xml" "$project_dir/Resources/update-public-key.txt" <<'PY2'
-import pathlib,sys,xml.etree.ElementTree as ET
-p=pathlib.Path(sys.argv[1]);root=ET.fromstring(p.read_bytes());ns={'s':'http://www.andymatuschak.org/xml-namespaces/sparkle'}
-items=root.findall('./channel/item'); assert len(items)==1
-enc=items[0].find('enclosure'); assert enc is not None
-assert enc.attrib['url'].startswith('https://github.com/jamesatFRM/Ai-llowance/releases/download/')
-assert enc.attrib.get('{'+ns['s']+'}edSignature') and int(enc.attrib['length'])>0
-assert b'edSignature' in p.read_bytes()
-print('Signed release feed validated.')
-PY2

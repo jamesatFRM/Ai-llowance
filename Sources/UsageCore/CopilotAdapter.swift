@@ -102,6 +102,7 @@ private final class CopilotRPC {
             "PATH": "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin", "LANG": "en_US.UTF-8", "NO_COLOR": "1"]
         process.currentDirectoryURL = directory
         process.standardInput = input; process.standardOutput = output; process.standardError = FileHandle.nullDevice
+        try CommandOutput.protectInput(input)
         try process.run()
     }
     deinit { stop() }

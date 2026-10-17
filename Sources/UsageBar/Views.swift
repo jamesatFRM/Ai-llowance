@@ -121,7 +121,7 @@ private struct CompactAccountRow: View {
     let manage: () -> Void
     let openUsage: () -> Void
     private var status: AllowanceStatus { AllowanceStatus.evaluate(snapshot: snapshot, kind: account.kind, now: now, hasError: error != nil) }
-    private var window: QuotaWindow? { snapshot?.applicableWindows(for: account.kind).min { $0.remainingPercent < $1.remainingPercent } }
+    private var window: QuotaWindow? { snapshot?.limitingWindow(for: account.kind) }
     private var detail: String {
         if !account.enabled { return "Paused" }
         if error != nil { return "Check connection" }
@@ -164,7 +164,7 @@ private struct CompactAccountRow: View {
                         Text(email).font(.system(size: 10)).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle).textSelection(.enabled)
                     }
                     if let snapshot {
-                        ForEach(snapshot.windows) { window in QuotaDetailRow(window: window, now: now, unavailable: error != nil || !account.enabled || snapshot.providerRestricted == true) }
+                        ForEach(snapshot.windows) { window in QuotaDetailRow(window: window, now: now, unavailable: error != nil || cached || snapshot.isStale(at: now, windows: [window]) || !account.enabled || snapshot.providerRestricted == true) }
                         HistorySparkline(points: history)
                         Text(readingAge(snapshot.observedAt, at: now)).font(.system(size: 9)).foregroundStyle(.tertiary)
                     }
@@ -289,7 +289,7 @@ private struct AccountReading: View {
     let now: Date
     let cached: Bool
     var body: some View {
-        let window = snapshot?.applicableWindows(for: account.kind).min { $0.remainingPercent < $1.remainingPercent }
+        let window = snapshot?.limitingWindow(for: account.kind)
         VStack(alignment: .leading, spacing: 9) {
             HStack {
                 ProviderMark(provider: account.kind.provider)
@@ -304,7 +304,7 @@ private struct AccountReading: View {
                 if let label = snapshot.balanceLabel { Text(label).font(.system(size: 10)).foregroundStyle(.secondary) }
                 else if snapshot.balanceUSD != nil { Text("Credit balance").font(.system(size: 10)).foregroundStyle(.secondary) }
                 else if snapshot.costUSD != nil { Text("API spending · this UTC month").font(.system(size: 10)).foregroundStyle(.secondary) }
-                ForEach(snapshot.windows) { window in QuotaDetailRow(window: window, now: now, unavailable: error != nil || !account.enabled || snapshot.providerRestricted == true) }
+                ForEach(snapshot.windows) { window in QuotaDetailRow(window: window, now: now, unavailable: error != nil || cached || snapshot.isStale(at: now, windows: [window]) || !account.enabled || snapshot.providerRestricted == true) }
                 if cached || snapshot.isStale(at: now) { Text(cached ? "Saved reading · checking for update" : "Last known reading · waiting for an update").font(.caption2).foregroundStyle(.orange) }
                 if snapshot.providerRestricted == true { Text("Provider restriction. These percentages do not guarantee requests are available.").font(.system(size: 10)).foregroundStyle(.orange) }
             }

@@ -1,5 +1,16 @@
 import Foundation
 
+/// Match live identity validation even before a refresh is possible. Different
+/// API keys may have different budgets, so only subscription bindings conflict.
+func duplicateSubscriptionAccountIDs(in accounts: [Account], snapshots: [UUID: Snapshot] = [:]) -> Set<UUID> {
+    var identities: [String: [UUID]] = [:]
+    for account in accounts where !account.kind.isAPI {
+        guard let identity = CodexIdentity.normalized(account.expectedIdentity) ?? CodexIdentity.normalized(snapshots[account.id]?.identity) else { continue }
+        identities[account.kind.rawValue + "|" + identity, default: []].append(account.id)
+    }
+    return Set(identities.values.filter { $0.count > 1 }.flatMap { $0 })
+}
+
 public struct UsageHistoryPoint: Codable, Equatable, Identifiable, Sendable {
     public var id: Date { timestamp }
     public let timestamp: Date
@@ -37,20 +48,24 @@ public struct SnapshotCache: Sendable {
         guard record.identity == expected else { return nil }
         if !account.kind.isAPI || expected != nil { guard expected != nil, expected == actual else { return nil } }
         record.history.removeAll { now.timeIntervalSince($0.timestamp) > 7 * 86400 }
+        let moneyLimit = Decimal(string: "1000000000000000")!
         guard record.history.allSatisfy({ point in
-            point.timestamp <= now.addingTimeInterval(60) && point.timestamp >= now.addingTimeInterval(-7 * 86400)
+            point.timestamp <= record.snapshot.observedAt && point.timestamp >= now.addingTimeInterval(-7 * 86400)
                 && point.remainingPercent.map { $0.isFinite && (0...100).contains($0) } != false
-                && point.balanceUSD.map { !$0.isNaN } != false && point.costUSD.map { !$0.isNaN && $0 >= 0 } != false
-        }) else { return nil }
+                && point.balanceUSD.map { !$0.isNaN && $0 >= -moneyLimit && $0 <= moneyLimit } != false
+                && point.costUSD.map { !$0.isNaN && $0 >= 0 && $0 <= moneyLimit } != false
+        }), zip(record.history, record.history.dropFirst()).allSatisfy({ $0.0.timestamp < $0.1.timestamp }) else { return nil }
         return record
     }
     public func load(accounts: [Account], now: Date = Date()) -> [UUID: Snapshot] {
-        accounts.prefix(1000).reduce(into: [:]) { result, account in
+        let duplicates = duplicateSubscriptionAccountIDs(in: accounts)
+        return accounts.prefix(1000).filter { !duplicates.contains($0.id) }.reduce(into: [:]) { result, account in
             if let record = read(account, now: now) { result[account.id] = record.snapshot }
         }
     }
     public func loadHistory(accounts: [Account], now: Date = Date()) -> [UUID: [UsageHistoryPoint]] {
-        accounts.prefix(1000).reduce(into: [:]) { result, account in
+        let duplicates = duplicateSubscriptionAccountIDs(in: accounts)
+        return accounts.prefix(1000).filter { !duplicates.contains($0.id) }.reduce(into: [:]) { result, account in
             if let record = read(account, now: now) { result[account.id] = record.history }
         }
     }
@@ -60,7 +75,11 @@ public struct SnapshotCache: Sendable {
         if !account.kind.isAPI || identity != nil {
             guard identity != nil, identity == CodexIdentity.normalized(snapshot.identity) else { throw UsageError.authentication }
         }
-        var history = read(account, now: snapshot.observedAt)?.history ?? []
+        let existing = read(account, now: snapshot.observedAt)
+        // A delayed reading within the accepted clock skew must not move the
+        // saved value backwards or leave history newer than its snapshot.
+        if let existing, existing.snapshot.observedAt > snapshot.observedAt { return existing.history }
+        var history = existing?.history ?? []
         history.removeAll { snapshot.observedAt.timeIntervalSince($0.timestamp) > 7 * 86400 }
         let status = AllowanceStatus.evaluate(snapshot: snapshot, kind: account.kind, now: snapshot.observedAt)
         if ![.unavailable, .stale, .restricted].contains(status.state) {

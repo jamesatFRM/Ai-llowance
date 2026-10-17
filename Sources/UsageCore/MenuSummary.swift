@@ -78,24 +78,30 @@ extension Snapshot {
 public enum MenuSummary {
     public static func entries(accounts: [Account], snapshots: [UUID: Snapshot], unavailable: Set<UUID>,
                                preferences: MenuPreferences, now: Date) -> [MenuEntry] {
+        let duplicateIDs = duplicateSubscriptionAccountIDs(in: accounts, snapshots: snapshots)
         let selected = accounts.filter {
             $0.enabled && !$0.kind.isAPI && (preferences.allAccounts || preferences.selectedAccountIDs.contains($0.id))
         }
         func provider(_ account: Account) -> MenuProvider { account.kind.provider }
+        func identityMatches(_ snapshot: Snapshot, account: Account) -> Bool {
+            guard !duplicateIDs.contains(account.id) else { return false }
+            guard let expected = CodexIdentity.normalized(account.expectedIdentity) else { return true }
+            return expected == CodexIdentity.normalized(snapshot.identity)
+        }
         func entry(_ group: [Account], label: String, icon: MenuProvider?) -> MenuEntry {
             let allUnlimited = !group.isEmpty && group.allSatisfy { account in
                 guard !unavailable.contains(account.id), let snapshot = snapshots[account.id],
-                      snapshot.providerRestricted != true, snapshot.unlimited == true,
+                      identityMatches(snapshot, account: account), snapshot.providerRestricted != true, snapshot.unlimited == true,
                       snapshot.applicableWindows(for: account.kind).isEmpty,
                       (try? snapshot.validated()) != nil, !snapshot.isStale(at: now) else { return false }
                 return true
             }
             let values = group.compactMap { account -> Double? in
                 guard !unavailable.contains(account.id), let snapshot = snapshots[account.id],
-                      snapshot.providerRestricted != true,
+                      identityMatches(snapshot, account: account), snapshot.providerRestricted != true,
                       (try? snapshot.validated()) != nil else { return nil }
                 let applicable = snapshot.applicableWindows(for: account.kind)
-                guard let window = applicable.min(by: { $0.remainingPercent < $1.remainingPercent }),
+                guard let window = snapshot.limitingWindow(for: account.kind),
                       !snapshot.isStale(at: now, windows: applicable) else { return nil }
                 return window.remainingPercent
             }

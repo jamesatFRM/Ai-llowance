@@ -28,7 +28,9 @@ jobs:
       - name: Release build number
         run: echo "USAGEBAR_BUILD_NUMBER=$((200 + GITHUB_RUN_NUMBER))" >> "$GITHUB_ENV"
       - name: Tests
-        run: bash scripts/test.sh
+        run: |
+          python3 -m unittest discover -s scripts/tests -p 'test_*.py'
+          bash scripts/test.sh
       - name: Build and verify preview archive
         run: bash scripts/package-release.sh
         env:
@@ -71,15 +73,26 @@ jobs:
           tag="v${version}-build${build}"
           (cd dist && shasum -a 256 -c SHA256SUMS)
           bash scripts/sign-release.sh "$tag"
-          cp docs/release-notes-0.3.0.md dist/release-notes.md
+          cp "docs/release-notes-${version}.md" dist/release-notes.md
           if ! gh release view "$tag" >/dev/null 2>&1; then
             gh release create "$tag" dist/*.dmg dist/*.zip dist/SHA256SUMS --target "$GITHUB_SHA" --title "Ai-llowance $version — Preview (build $build)" --notes-file dist/release-notes.md --prerelease --latest=false
-          else
-            gh release download "$tag" --pattern SHA256SUMS --dir "$RUNNER_TEMP/existing-release"
-            cmp dist/SHA256SUMS "$RUNNER_TEMP/existing-release/SHA256SUMS" || { echo 'Existing version differs; refusing to replace a published build.'; exit 1; }
           fi
+          # A partial upload can leave a release and manifest without its archives.
+          # Verify the actual public assets on fresh publications and retries alike.
+          published="$RUNNER_TEMP/verified-release"
+          gh release download "$tag" --pattern '*.dmg' --pattern '*.zip' --pattern SHA256SUMS --dir "$published"
+          cmp dist/SHA256SUMS "$published/SHA256SUMS" || { echo 'Existing version differs; refusing to replace a published build.'; exit 1; }
+          python3 scripts/check-update-feed.py dist/appcast.xml "$published" "$tag"
           # Advance the feed only after the complete verified release is available.
           if ! gh release view update-feed >/dev/null 2>&1; then
             gh release create update-feed --target "$GITHUB_SHA" --title 'Signed update feed' --notes 'Metadata for the in-app updater. Download the app from a versioned preview release.' --prerelease --latest=false
+          else
+            # A new feed release may exist without its first upload after a failure.
+            # Distinguish that state from a network error fetching an existing feed.
+            existing_feed=$(gh release view update-feed --json assets --jq '.assets[] | select(.name == "appcast.xml") | .name')
+            if [ -n "$existing_feed" ]; then
+              gh release download update-feed --pattern appcast.xml --dir "$RUNNER_TEMP/previous-feed"
+              python3 scripts/check-update-feed.py dist/appcast.xml "$published" "$tag" --previous "$RUNNER_TEMP/previous-feed/appcast.xml"
+            fi
           fi
           gh release upload update-feed dist/appcast.xml --clobber

@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.3.1 — Reliability (pending notarized release)
+
+- Recover from early CLI exits without crashing the app.
+- Verify subscription identity before and after quota reads; reject duplicate cached accounts before the first refresh.
+- Show the correct reset when multiple allowances are exhausted and expire menu readings at reset/age boundaries without extra provider polling.
+- Keep old expanded readings visibly stale and reject invalid timestamps, malformed histories, and unbounded retry delays.
+- Preserve notification opt-out when a permission response arrives late.
+- Verify actual published archives before advancing updates, and refuse stale or altered release feeds.
+
 ## 0.3.0 preview
 
 Guided setup, direct account recovery, compact allowance/reset rows, optional quiet alerts, native launch-at-login control, bounded local history/cache, and adaptive refresh. Claude now receives identity binding and duplicate-account protection. Added Copilot quota (preview), OpenRouter key budgets, Vercel AI Gateway credits, and xAI prepaid API credits. Cursor/Gemini have explicit usage-page shortcuts pending reliable automatic integration.

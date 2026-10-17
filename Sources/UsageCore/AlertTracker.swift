@@ -56,7 +56,7 @@ public struct AlertTracker: Codable, Sendable {
         else if status.state == .low, previous.state == .ready || previous.state == .unlimited { alertKind = .low }
         else { alertKind = nil }
         guard let alertKind else { return nil }
-        let limiting = snapshot.applicableWindows(for: account.kind).min { $0.remainingPercent < $1.remainingPercent }
+        let limiting = snapshot.limitingWindow(for: account.kind)
         let cycle = "\(limiting?.id ?? "balance")|\(status.resetAt.map { String($0.timeIntervalSince1970) } ?? "unspecified")|\(alertKind.rawValue)"
         guard !observation.issued.contains(cycle) else { return nil }
         observation.issued.append(cycle); observation.issued = Array(observation.issued.suffix(24))

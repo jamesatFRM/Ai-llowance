@@ -24,6 +24,7 @@ final class CodexRPC {
             "LANG": "en_US.UTF-8"]
         process.currentDirectoryURL = home
         process.standardInput = input; process.standardOutput = output; process.standardError = FileHandle.nullDevice
+        try CommandOutput.protectInput(input)
         try process.run()
     }
     deinit { stop() }
@@ -119,9 +120,20 @@ public struct CodexAdapter: UsageAdapter {
             guard identity["type"] as? String == "chatgpt" else {
                 throw UsageError.unavailable("This Codex profile uses API billing. Connect an OpenAI API spending account instead, or sign in with ChatGPT.")
             }
+            guard let before = CodexIdentity.normalized(identity["email"] as? String) else { throw UsageError.authentication }
+            if let expected = CodexIdentity.normalized(account.expectedIdentity), expected != before {
+                throw UsageError.accountChanged(expected)
+            }
             let response = try rpc.call("account/rateLimits/read")
+            // An existing CLI profile can be signed into another account while the
+            // request is running. Do not label its new quota with the old identity.
+            let after = try rpc.call("account/read", params: ["refreshToken": false])["account"] as? [String: Any]
+            guard after?["type"] as? String == "chatgpt",
+                  CodexIdentity.normalized(after?["email"] as? String) == before else {
+                throw UsageError.accountChanged(account.expectedIdentity ?? before)
+            }
             let data = try JSONSerialization.data(withJSONObject: response)
-            return try UsageParser.codex(data, at: now, identity: identity["email"] as? String)
+            return try UsageParser.codex(data, at: now, identity: before)
         }
         return try await withTaskCancellationHandler { try await worker.value } onCancel: { worker.cancel() }
     }
