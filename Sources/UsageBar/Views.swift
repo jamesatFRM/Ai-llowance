@@ -5,6 +5,54 @@ import UsageCore
 // Explicit wrapper alias avoids the newer SDK State macro; remains compatible with macOS 14.
 private typealias ViewState<Value> = SwiftUI.State<Value>
 
+// One native material layer, with inexpensive fills above it. No animated effects or extra polling.
+private struct PanelBackground: View {
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+    var body: some View {
+        if reduceTransparency {
+            Color(nsColor: .windowBackgroundColor)
+        } else {
+            Rectangle().fill(.regularMaterial)
+                .overlay(alignment: .top) {
+                    LinearGradient(colors: [Color.accentColor.opacity(0.045), .clear], startPoint: .top, endPoint: .bottom)
+                        .frame(height: 150)
+                }
+        }
+    }
+}
+
+private struct InsetSurface: ViewModifier {
+    @Environment(\.colorScheme) private var colorScheme
+    var tint: Color = .clear
+    var cornerRadius: CGFloat = 10
+    func body(content: Content) -> some View {
+        content.background {
+            RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                .fill(LinearGradient(colors: [
+                    Color.white.opacity(colorScheme == .dark ? 0.065 : 0.72),
+                    Color.white.opacity(colorScheme == .dark ? 0.035 : 0.42)
+                ], startPoint: .topLeading, endPoint: .bottomTrailing))
+                .overlay {
+                    RoundedRectangle(cornerRadius: cornerRadius, style: .continuous).fill(tint.opacity(0.045))
+                }
+                .overlay {
+                    RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                        .strokeBorder(Color.primary.opacity(colorScheme == .dark ? 0.09 : 0.075), lineWidth: 0.5)
+                }
+        }
+    }
+}
+
+private struct QuietButtonStyle: ButtonStyle {
+    @Environment(\.isEnabled) private var isEnabled
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .foregroundStyle(isEnabled ? Color.secondary : Color.secondary.opacity(0.45))
+            .background(Color.primary.opacity(configuration.isPressed ? 0.10 : 0.035), in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+            .contentShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+    }
+}
+
 struct Dashboard: View {
     @ObservedObject var store: AppStore
     var renderForSharing = false
@@ -14,20 +62,22 @@ struct Dashboard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 9) {
             HStack(spacing: 6) {
-                Text("Ai-llowance").font(.system(size: 12, weight: .semibold))
+                Image(systemName: "gauge.with.dots.needle.33percent")
+                    .font(.system(size: 11, weight: .medium)).foregroundStyle(.secondary)
+                Text("Ai-llowance").font(.system(size: 12, weight: .semibold, design: .rounded))
                 Spacer()
                 if store.refreshing { ProgressView().controlSize(.mini) }
                 Text(store.refreshSummary).font(.system(size: 10)).foregroundStyle(.secondary).lineLimit(1)
-                Button { store.refresh(force: true) } label: { Image(systemName: "arrow.clockwise").font(.system(size: 10)) }
-                    .buttonStyle(.plain).help("Refresh (respects provider backoff)")
+                Button { store.refresh(force: true) } label: { Image(systemName: "arrow.clockwise").font(.system(size: 10, weight: .medium)).frame(width: 22, height: 22) }
+                    .buttonStyle(QuietButtonStyle()).help("Refresh (respects provider backoff)")
                     .accessibilityLabel("Refresh accounts").disabled(store.refreshing || store.paused || store.demo)
-            }.padding(.horizontal, 9).padding(.top, 5)
+            }.padding(.horizontal, 9).padding(.top, 1)
             if store.accounts.isEmpty {
                 VStack(alignment: .leading, spacing: 9) {
                     Label("Connect your first account", systemImage: "person.crop.circle.badge.plus").font(.system(size: 12, weight: .semibold))
                     Text("See your limits before they stop your work.").font(.system(size: 11)).foregroundStyle(.secondary)
                     Button("Get started", action: manage).controlSize(.small)
-                }.padding(12).frame(maxWidth: .infinity, alignment: .leading).background(Color.primary.opacity(0.045), in: RoundedRectangle(cornerRadius: 12))
+                }.padding(12).frame(maxWidth: .infinity, alignment: .leading).modifier(InsetSurface())
             } else if renderForSharing {
                 providerContent
             } else {
@@ -35,18 +85,19 @@ struct Dashboard: View {
                     .scrollIndicators(.hidden).fixedSize(horizontal: false, vertical: true).frame(maxHeight: 500)
             }
             if let notice = store.notice { Text(notice).font(.system(size: 10)).foregroundStyle(.orange).lineLimit(2).padding(.horizontal, 9) }
-            HStack {
-                Button(action: manage) { Label("Settings", systemImage: "gearshape") }.help("Settings")
+            HStack(spacing: 5) {
+                Button(action: manage) { Label("Settings", systemImage: "gearshape").padding(.horizontal, 5).frame(height: 22) }
+                    .buttonStyle(QuietButtonStyle()).help("Settings")
                 Spacer()
-                Text(AppUpdater.versionLabel).foregroundStyle(.tertiary)
+                Text(AppUpdater.versionLabel).monospacedDigit().foregroundStyle(.secondary).padding(.trailing, 3)
                 UpdateCheckButton(updater: store.updater)
                 Button { store.togglePause() } label: { Image(systemName: store.paused ? "play.fill" : "pause.fill").frame(width: 22, height: 22) }
                     .help(store.paused ? "Resume automatic refresh" : "Pause automatic refresh")
                     .accessibilityLabel(store.paused ? "Resume automatic refresh" : "Pause automatic refresh").disabled(store.demo)
                 Button { NSApplication.shared.terminate(nil) } label: { Image(systemName: "power").frame(width: 22, height: 22) }
                     .help("Quit Ai-llowance").accessibilityLabel("Quit Ai-llowance")
-            }.font(.system(size: 10)).buttonStyle(.plain).foregroundStyle(.secondary).padding(.horizontal, 9).padding(.bottom, 3)
-        }.padding(7).frame(width: 350).background(Color(nsColor: .windowBackgroundColor)).preferredColorScheme(store.menuPreferences.theme.colorScheme)
+            }.font(.system(size: 10)).buttonStyle(QuietButtonStyle()).foregroundStyle(.secondary).padding(.horizontal, 9).padding(.bottom, 3)
+        }.padding(7).frame(width: 350).background(PanelBackground()).preferredColorScheme(store.menuPreferences.theme.colorScheme)
     }
 
     private func manage(_ account: Account) { store.selectedAccountID = account.id; manage() }
@@ -68,7 +119,10 @@ struct Dashboard: View {
         VStack(spacing: 8) {
             if !attentionAccounts.isEmpty {
                 VStack(alignment: .leading, spacing: 6) {
-                    Text("Needs attention").font(.system(size: 10, weight: .semibold)).foregroundStyle(.secondary)
+                    HStack(spacing: 5) {
+                        Circle().fill(Color.orange).frame(width: 4, height: 4)
+                        Text("Needs attention").font(.system(size: 9, weight: .semibold)).textCase(.uppercase).tracking(0.6)
+                    }.foregroundStyle(.secondary)
                     ForEach(attentionAccounts) { account in
                         let status = readingStatus(account)
                         Button { manage(account) } label: {
@@ -82,16 +136,18 @@ struct Dashboard: View {
                             }.font(.system(size: 11)).contentShape(Rectangle())
                         }.buttonStyle(.plain)
                     }
-                }.padding(11).background(Color.orange.opacity(0.055), in: RoundedRectangle(cornerRadius: 12))
+                }.padding(11).modifier(InsetSurface(tint: .orange))
             }
             ForEach(MenuProvider.allCases, id: \.self) { provider in
                 let accounts = store.accounts.filter { $0.kind.provider == provider }
                 if !accounts.isEmpty {
                     VStack(spacing: 0) {
                         HStack {
-                            Text(provider.title).font(.system(size: 10, weight: .semibold))
+                            Text(provider.title).font(.system(size: 9, weight: .semibold)).textCase(.uppercase).tracking(0.7)
                             Spacer()
-                            Text("\(accounts.count)").font(.system(size: 9)).monospacedDigit()
+                            Text("\(accounts.count)").font(.system(size: 8, weight: .medium)).monospacedDigit()
+                                .frame(minWidth: 16, minHeight: 13)
+                                .background(Color.primary.opacity(0.045), in: Capsule())
                         }.foregroundStyle(.secondary).padding(.bottom, 5)
                         ForEach(accounts) { account in
                             CompactAccountRow(account: account, snapshot: store.snapshots[account.id], error: store.errors[account.id], now: store.now, cached: store.isCached(account),
@@ -99,10 +155,10 @@ struct Dashboard: View {
                                 history: expandedAccountID == account.id ? store.history(for: account) : [],
                                 expand: { expandedAccountID = expandedAccountID == account.id ? nil : account.id },
                                 manage: { manage(account) }, openUsage: { store.openUsage(account) })
-                            if account.id != accounts.last?.id { Divider().opacity(0.3).padding(.vertical, 4) }
+                            if account.id != accounts.last?.id { Divider().opacity(0.35).padding(.leading, 21).padding(.vertical, 4) }
                         }
                     }.padding(.horizontal, 11).padding(.vertical, 9)
-                        .background(Color.primary.opacity(0.045), in: RoundedRectangle(cornerRadius: 12))
+                        .modifier(InsetSurface())
                 }
             }
         }
@@ -121,7 +177,7 @@ private struct CompactAccountRow: View {
     let manage: () -> Void
     let openUsage: () -> Void
     private var status: AllowanceStatus { AllowanceStatus.evaluate(snapshot: snapshot, kind: account.kind, now: now, hasError: error != nil) }
-    private var window: QuotaWindow? { snapshot?.applicableWindows(for: account.kind).min { $0.remainingPercent < $1.remainingPercent } }
+    private var window: QuotaWindow? { snapshot?.limitingWindow(for: account.kind) }
     private var detail: String {
         if !account.enabled { return "Paused" }
         if error != nil { return "Check connection" }
@@ -143,9 +199,10 @@ private struct CompactAccountRow: View {
                         ProviderMark(provider: account.kind.provider, size: 14)
                         Text(account.name).font(.system(size: 12, weight: .semibold)).lineLimit(1)
                         Spacer(minLength: 5)
-                        Text(readingValue(snapshot, window: window)).font(.system(size: 13, weight: .semibold)).monospacedDigit()
+                        Text(readingValue(snapshot, window: window)).font(.system(size: 13, weight: .semibold, design: .rounded)).monospacedDigit()
                             .foregroundStyle(error != nil || cached || status.state == .stale || !account.enabled ? .secondary : .primary)
-                        Image(systemName: expanded ? "chevron.up" : "chevron.down").font(.system(size: 8, weight: .semibold)).foregroundStyle(.tertiary)
+                        Image(systemName: expanded ? "chevron.up" : "chevron.down").font(.system(size: 8, weight: .semibold))
+                            .foregroundStyle(.secondary).frame(width: 12)
                     }
                     HStack(spacing: 7) {
                         Text(detail).font(.system(size: 9)).foregroundStyle(error != nil || status.state == .restricted ? Color.orange : Color.secondary).lineLimit(1)
@@ -164,17 +221,17 @@ private struct CompactAccountRow: View {
                         Text(email).font(.system(size: 10)).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle).textSelection(.enabled)
                     }
                     if let snapshot {
-                        ForEach(snapshot.windows) { window in QuotaDetailRow(window: window, now: now, unavailable: error != nil || !account.enabled || snapshot.providerRestricted == true) }
+                        ForEach(snapshot.windows) { window in QuotaDetailRow(window: window, now: now, unavailable: error != nil || cached || snapshot.isStale(at: now, windows: [window]) || !account.enabled || snapshot.providerRestricted == true) }
                         HistorySparkline(points: history)
                         Text(readingAge(snapshot.observedAt, at: now)).font(.system(size: 9)).foregroundStyle(.tertiary)
                     }
                     if let error { Text(error).font(.system(size: 10)).foregroundStyle(.orange).fixedSize(horizontal: false, vertical: true) }
                     HStack {
-                        Button(action: openUsage) { Label("Open usage", systemImage: "arrow.up.right") }
+                        Button(action: openUsage) { Label("Open usage", systemImage: "arrow.up.right").padding(.horizontal, 6).frame(height: 20) }
                         Spacer()
-                        Button(action: manage) { Label(error == nil ? "Account" : "Fix connection", systemImage: "gearshape") }
-                    }.font(.system(size: 10)).buttonStyle(.plain).foregroundStyle(.secondary)
-                }.padding(.leading, 21).padding(.bottom, 4)
+                        Button(action: manage) { Label(error == nil ? "Account" : "Fix connection", systemImage: "gearshape").padding(.horizontal, 6).frame(height: 20) }
+                    }.font(.system(size: 10)).buttonStyle(QuietButtonStyle()).foregroundStyle(.secondary)
+                }.padding(.leading, 21).padding(.top, 2).padding(.bottom, 4)
             }
         }
     }
@@ -219,7 +276,7 @@ private struct QuotaDetailRow: View {
             HStack {
                 Text(shortWindowLabel(window)).lineLimit(1)
                 Spacer()
-                Text("\(Int(window.remainingPercent))% left").monospacedDigit()
+                Text("\(Int(window.remainingPercent))% left").fontWeight(.medium).monospacedDigit()
             }.font(.system(size: 10))
             HStack {
                 Text(resetText(window.resetsAt, at: now)).font(.system(size: 9)).foregroundStyle(.secondary)
@@ -278,8 +335,7 @@ private struct SettingsCard<Content: View>: View {
     @ViewBuilder let content: Content
     var body: some View {
         content.padding(14).frame(maxWidth: .infinity, alignment: .leading)
-            .background(Color.primary.opacity(0.045), in: RoundedRectangle(cornerRadius: 12))
-            .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color.primary.opacity(0.06), lineWidth: 1))
+            .modifier(InsetSurface(cornerRadius: 12))
     }
 }
 private struct AccountReading: View {
@@ -289,7 +345,7 @@ private struct AccountReading: View {
     let now: Date
     let cached: Bool
     var body: some View {
-        let window = snapshot?.applicableWindows(for: account.kind).min { $0.remainingPercent < $1.remainingPercent }
+        let window = snapshot?.limitingWindow(for: account.kind)
         VStack(alignment: .leading, spacing: 9) {
             HStack {
                 ProviderMark(provider: account.kind.provider)
@@ -304,7 +360,7 @@ private struct AccountReading: View {
                 if let label = snapshot.balanceLabel { Text(label).font(.system(size: 10)).foregroundStyle(.secondary) }
                 else if snapshot.balanceUSD != nil { Text("Credit balance").font(.system(size: 10)).foregroundStyle(.secondary) }
                 else if snapshot.costUSD != nil { Text("API spending · this UTC month").font(.system(size: 10)).foregroundStyle(.secondary) }
-                ForEach(snapshot.windows) { window in QuotaDetailRow(window: window, now: now, unavailable: error != nil || !account.enabled || snapshot.providerRestricted == true) }
+                ForEach(snapshot.windows) { window in QuotaDetailRow(window: window, now: now, unavailable: error != nil || cached || snapshot.isStale(at: now, windows: [window]) || !account.enabled || snapshot.providerRestricted == true) }
                 if cached || snapshot.isStale(at: now) { Text(cached ? "Saved reading · checking for update" : "Last known reading · waiting for an update").font(.caption2).foregroundStyle(.orange) }
                 if snapshot.providerRestricted == true { Text("Provider restriction. These percentages do not guarantee requests are available.").font(.system(size: 10)).foregroundStyle(.orange) }
             }
@@ -332,17 +388,18 @@ struct AccountsView: View {
     var body: some View {
         VStack(spacing: 0) {
             HStack(spacing: 12) {
-                Image(systemName: "gauge.with.dots.needle.33percent").font(.system(size: 22)).foregroundStyle(.primary)
+                Image(systemName: "gauge.with.dots.needle.33percent").font(.system(size: 22, weight: .medium))
+                    .foregroundStyle(.secondary).frame(width: 42, height: 42).modifier(InsetSurface())
                 VStack(alignment: .leading, spacing: 3) {
-                    Text(store.accounts.isEmpty ? "Welcome to Ai-llowance" : "Settings").font(.system(size: 21, weight: .semibold))
+                    Text(store.accounts.isEmpty ? "Welcome to Ai-llowance" : "Settings").font(.system(size: 21, weight: .semibold, design: .rounded))
                     Text(store.accounts.isEmpty ? "Connect once. Know what’s left." : "Your accounts. Your menu bar.").font(.system(size: 11)).foregroundStyle(.secondary)
                 }
                 Spacer()
                 if store.refreshing { ProgressView().controlSize(.small) }
                 Text(store.refreshSummary).font(.system(size: 10)).foregroundStyle(.secondary).lineLimit(1)
                 Button { store.rediscoverTools(); store.refresh(force: true) } label: { Image(systemName: "arrow.clockwise").frame(width: 26, height: 26) }
-                    .buttonStyle(.plain).help("Refresh accounts").accessibilityLabel("Refresh accounts").disabled(store.demo || store.paused || store.refreshing)
-            }.padding(22)
+                    .buttonStyle(QuietButtonStyle()).help("Refresh accounts").accessibilityLabel("Refresh accounts").disabled(store.demo || store.paused || store.refreshing)
+            }.padding(.horizontal, 22).padding(.vertical, 18)
             Divider().opacity(0.4)
             ScrollViewReader { proxy in
                 ScrollView {
@@ -376,9 +433,9 @@ struct AccountsView: View {
                 Spacer()
                 Button("Show menu", action: showMenu)
                 Text(AppUpdater.versionLabel).foregroundStyle(.tertiary)
-                Button { NSApplication.shared.terminate(nil) } label: { Image(systemName: "power").frame(width: 26, height: 26) }.buttonStyle(.plain).help("Quit Ai-llowance")
+                Button { NSApplication.shared.terminate(nil) } label: { Image(systemName: "power").frame(width: 26, height: 26) }.buttonStyle(QuietButtonStyle()).help("Quit Ai-llowance")
             }.font(.system(size: 10)).padding(.horizontal, 22).padding(.vertical, 12)
-        }.frame(minWidth: 580, minHeight: 560).preferredColorScheme(store.menuPreferences.theme.colorScheme)
+        }.frame(minWidth: 580, minHeight: 560).background(PanelBackground()).preferredColorScheme(store.menuPreferences.theme.colorScheme)
         .alert("Remove \(removing?.name ?? "account")?", isPresented: Binding(get: { removing != nil }, set: { if !$0 { removing = nil } })) {
             Button("Cancel", role: .cancel) { removing = nil }
             Button("Remove", role: .destructive) { if let account = removing { Task { await store.remove(account) } }; removing = nil }
@@ -563,7 +620,8 @@ struct AccountsView: View {
         return VStack(alignment: .leading, spacing: 9) {
             HStack {
                 Text(provider.title).font(.system(size: 13, weight: .semibold))
-                Text("\(accounts.count)").font(.system(size: 10)).foregroundStyle(.secondary)
+                Text("\(accounts.count)").font(.system(size: 9, weight: .medium)).monospacedDigit().foregroundStyle(.secondary)
+                    .frame(minWidth: 18, minHeight: 16).background(Color.primary.opacity(0.045), in: Capsule())
                 Spacer()
             }
             ForEach(accounts) { account in

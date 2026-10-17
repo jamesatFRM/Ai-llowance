@@ -148,7 +148,10 @@ public struct Snapshot: Codable, Equatable, Sendable {
         || (costUSD != nil && periodStart.map { CostAdapter.monthStart(now) != $0 } == true)
     }
     public func validated() throws -> Self {
-        guard observedAt.timeIntervalSince1970.isFinite, windows.count <= 64,
+        // Finite alone accepts dates such as 1e100. Keep every provider date in
+        // the same representable calendar range as reset dates before UI formatting.
+        let supportedDates: ClosedRange<TimeInterval> = 0...253_402_300_799
+        guard observedAt.timeIntervalSince1970.isFinite, supportedDates.contains(observedAt.timeIntervalSince1970), windows.count <= 64,
               source.utf8.count <= 4096, (identity?.utf8.count ?? 0) <= 4096,
               (note?.utf8.count ?? 0) <= 16_384, (balanceLabel?.utf8.count ?? 0) <= 256,
               Set(windows.map(\.id)).count == windows.count else { throw UsageError.invalidData }
@@ -163,7 +166,10 @@ public struct Snapshot: Codable, Equatable, Sendable {
         if let freshnessInterval {
             guard freshnessInterval.isFinite, freshnessInterval >= 30, freshnessInterval <= 604800 else { throw UsageError.invalidData }
         }
-        if let periodStart { guard periodStart.timeIntervalSince1970.isFinite else { throw UsageError.invalidData } }
+        if let periodStart {
+            guard periodStart.timeIntervalSince1970.isFinite, supportedDates.contains(periodStart.timeIntervalSince1970),
+                  periodStart <= observedAt else { throw UsageError.invalidData }
+        }
         return self
     }
     private enum CodingKeys: String, CodingKey {
@@ -233,7 +239,10 @@ public struct PollState: Sendable {
     public mutating func failed(_ error: Error, at now: Date) {
         failures = min(failures + 1, 5)
         var delay = min(3600.0, 300 * pow(2, Double(failures - 1)))
-        if case UsageError.rateLimited(let retry) = error { delay = max(delay, retry) }
+        if case UsageError.rateLimited(let retry) = error, retry.isFinite, retry >= 0 {
+            // Broken Retry-After headers must not disable a connection forever.
+            delay = max(delay, min(retry, 7 * 86400))
+        }
         if error as? UsageError == .authentication || error as? UsageError == .missingCredential || error as? UsageError == .forbidden { delay = 3600 }
         nextAttempt = now.addingTimeInterval(delay)
     }

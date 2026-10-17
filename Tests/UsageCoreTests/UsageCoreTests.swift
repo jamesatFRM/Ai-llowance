@@ -135,11 +135,12 @@ private actor MockHTTP: HTTPTransport {
     let script = root.appendingPathComponent("fake-codex")
     let text = """
     #!/bin/sh
+    auth_id=2
     while IFS= read -r line; do
       case "$line" in
         *'"method":"initialize"'*) echo '{"id":1,"result":{}}' ;;
         *'"method":"initialized"'*) ;;
-        *'account/read'*) echo '{"id":2,"result":{"account":{"type":"chatgpt","email":"fixture@example.test"}}}' ;;
+        *'account/read'*) printf '{"id":%s,"result":{"account":{"type":"chatgpt","email":"fixture@example.test"}}}\\n' "$auth_id"; auth_id=4 ;;
         *'account/rateLimits/read'*) echo '{"id":3,"result":{"rateLimits":{"primary":{"usedPercent":20,"windowDurationMins":300}}}}' ;;
         *) exit 9 ;;
       esac

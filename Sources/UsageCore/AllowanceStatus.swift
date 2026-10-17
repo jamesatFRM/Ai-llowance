@@ -14,6 +14,20 @@ extension Snapshot {
         case .openAIAPI, .claudeAPI, .vercelGateway, .xai: return []
         }
     }
+
+    /// Equal exhausted limits only recover after every applicable limit resets.
+    /// An unknown reset must not be replaced with a promise from another window.
+    public func limitingWindow(for kind: ConnectionKind) -> QuotaWindow? {
+        applicableWindows(for: kind).min { first, second in
+            if first.remainingPercent != second.remainingPercent { return first.remainingPercent < second.remainingPercent }
+            switch (first.resetsAt, second.resetsAt) {
+            case (nil, .some): return true
+            case (.some, nil): return false
+            case let (.some(firstReset), .some(secondReset)) where firstReset != secondReset: return firstReset > secondReset
+            default: return first.id < second.id
+            }
+        }
+    }
 }
 
 public struct AllowanceStatus: Equatable, Sendable {
@@ -43,7 +57,7 @@ public struct AllowanceStatus: Equatable, Sendable {
             guard snapshot.costUSD != nil else { return Self(.unavailable, "No report", "questionmark.circle") }
             return Self(.ready, "Spending report", "dollarsign.circle", detail: "Month to date")
         }
-        guard let limiting = windows.min(by: { $0.remainingPercent < $1.remainingPercent }) else {
+        guard let limiting = snapshot.limitingWindow(for: kind) else {
             return snapshot.unlimited == true ? Self(.unlimited, "Unlimited", "infinity") : Self(.unavailable, "No allowance", "questionmark.circle")
         }
         let remaining = limiting.remainingPercent

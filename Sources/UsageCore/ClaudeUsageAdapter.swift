@@ -10,7 +10,10 @@ public struct ClaudeUsageAdapter: UsageAdapter, Sendable {
     public func fetch(account: Account, now: Date) async throws -> Snapshot {
         let connection = ClaudeConnection(root: root, executable: executable, bundledBridge: executable)
         let identity = try await connection.authIdentity(account: account)
-        guard identity.signedIn else { throw UsageError.authentication }
+        guard identity.signedIn, let before = CodexIdentity.normalized(identity.email) else { throw UsageError.authentication }
+        if let expected = CodexIdentity.normalized(account.expectedIdentity), expected != before {
+            throw UsageError.accountChanged(expected)
+        }
         let profile = connection.config(account)
         let work = root.appendingPathComponent("ClaudeConnections/\(account.id.uuidString)/UsageCheck")
         try Paths.prepare(work)
@@ -30,11 +33,17 @@ public struct ClaudeUsageAdapter: UsageAdapter, Sendable {
             try process.run()
             let result = try CommandOutput.read(process, output: output, timeout: 25, limit: 1_048_576)
             guard result.exitCode == 0 else { throw UsageError.unavailable("Claude could not finish its usage check. Try refreshing; if this continues, sign in again.") }
-            var snapshot = try ClaudeUsageReport.parse(result.data, at: Date())
-            snapshot.identity = identity.email
-            return snapshot
+            return try ClaudeUsageReport.parse(result.data, at: Date())
         }
-        return try await withTaskCancellationHandler { try await worker.value } onCancel: { worker.cancel() }
+        var snapshot = try await withTaskCancellationHandler { try await worker.value } onCancel: { worker.cancel() }
+        // /usage runs separately from auth status. A sign-in change during that
+        // interval must invalidate the reading rather than relabel another account.
+        let after = try await connection.authIdentity(account: account)
+        guard after.signedIn, CodexIdentity.normalized(after.email) == before else {
+            throw UsageError.accountChanged(account.expectedIdentity ?? before)
+        }
+        snapshot.identity = before
+        return snapshot
     }
 }
 

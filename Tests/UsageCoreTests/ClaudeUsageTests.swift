@@ -75,9 +75,10 @@ private func envelope(_ text: String, turns: Int = 0, cost: Double = 0) throws -
     #expect(snapshot.windows.count == 3)
     #expect(snapshot.identity == "separate@example.com")
     let calls = try String(contentsOf: log, encoding: .utf8).split(separator: "\n")
-    #expect(calls.count == 2)
+    #expect(calls.count == 3)
     #expect(calls[0] == "auth status --json")
     #expect(calls[1] == "-p /usage --output-format json --safe-mode --no-session-persistence --tools  --strict-mcp-config --mcp-config {\"mcpServers\":{}}")
+    #expect(calls[2] == "auth status --json")
     #expect(FileManager.default.fileExists(atPath: Paths.claudeProfile(account.id, root: root).path))
 }
 

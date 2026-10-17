@@ -37,6 +37,8 @@ final class AppStore: ObservableObject {
     private var rememberedTools: [String: RememberedExecutable] = [:]
     private var alerts = AlertTracker()
     private var pendingAlerts: [UsageAlert] = []
+    private var notificationRequestVersion = UUID()
+    private let requestNotificationAuthorization: @Sendable () async throws -> Bool
     private var cachedAccounts: Set<UUID> = []
     private var restoredLegacyFeeds: Set<UUID> = []
     private var cacheTask: Task<Void, Never>?
@@ -70,8 +72,12 @@ final class AppStore: ObservableObject {
 
     init(demo: Bool = false, root: URL = Paths.root, monitor: Bool = true,
          fetch: (@Sendable (Account, Date) async throws -> Snapshot)? = nil,
+         requestNotificationAuthorization: @escaping @Sendable () async throws -> Bool = {
+             try await UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound])
+         },
          openExternal: @escaping (URL) -> Bool = { NSWorkspace.shared.open($0) }) {
         self.demo = demo; self.root = root; self.fetchOverride = fetch; self.openExternal = openExternal
+        self.requestNotificationAuthorization = requestNotificationAuthorization
         if demo {
             accounts = [Account(name: "Personal", kind: .claudeCode), Account(name: "Work", kind: .claudeCode),
                         Account(name: "Personal", kind: .codex), Account(name: "Work", kind: .codex)]
@@ -390,6 +396,7 @@ final class AppStore: ObservableObject {
                 do {
                     var snapshot = try await fetchAccount(account, at: start)
                     snapshot.freshnessInterval = account.kind.freshnessInterval
+                    _ = try snapshot.validated()
                     try Task.checkCancellation()
                     guard accounts.contains(where: { $0.id == account.id && $0.enabled }), connectionVersions[account.id] == version,
                           signingIn != account.id, waitingForClaude[account.id] == nil else { continue }
@@ -555,15 +562,31 @@ final class AppStore: ObservableObject {
     }
     private func scheduleHeartbeat() {
         guard !shuttingDown, let heartbeat else { return }
-        let date = Date()
+        let delay = heartbeatDelay(at: Date())
+        heartbeat.schedule(deadline: .now() + delay, leeway: .seconds(delay > 60 ? 10 : 1))
+    }
+    // Expire displayed readings on time without increasing provider polling.
+    // Past deadlines are ignored, so a paused/stale account never creates a busy loop.
+    func heartbeatDelay(at date: Date) -> TimeInterval {
         var delay: TimeInterval = interfaceVisible ? 60 : 900
+        for account in accounts where account.enabled {
+            guard let snapshot = snapshots[account.id] else { continue }
+            var boundaries = snapshot.applicableWindows(for: account.kind).compactMap(\.resetsAt)
+            boundaries.append(snapshot.observedAt.addingTimeInterval((snapshot.freshnessInterval ?? 900) + 1))
+            if snapshot.costUSD != nil, let periodStart = snapshot.periodStart {
+                var calendar = Calendar(identifier: .gregorian)
+                calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+                if let nextMonth = calendar.date(byAdding: .month, value: 1, to: periodStart) { boundaries.append(nextMonth) }
+            }
+            for boundary in boundaries where boundary > date { delay = min(delay, boundary.timeIntervalSince(date)) }
+        }
         if !waitingForClaude.isEmpty { delay = min(delay, 15) }
         if !paused && !offline && !sleeping && !refreshing {
             for account in accounts where account.enabled && signingIn != account.id && waitingForClaude[account.id] == nil {
                 delay = min(delay, max(1, (schedules[account.id]?.nextAttempt ?? date).timeIntervalSince(date)))
             }
         }
-        heartbeat.schedule(deadline: .now() + max(1, delay), leeway: .seconds(delay > 60 ? 10 : 1))
+        return max(1, delay)
     }
     func connectCopilot() {
         guard !demo, !readOnly, !removing else { return }
@@ -603,6 +626,7 @@ final class AppStore: ObservableObject {
     private func clearCachedReading(_ account: Account) {
         cachedAccounts.remove(account.id); usageHistory[account.id] = nil
         alerts.remove(account.id)
+        pendingAlerts.removeAll { $0.accountID == account.id }
         guard !demo, !readOnly else { return }
         let previous = cacheTask, root = root, state = alerts
         cacheTask = Task.detached(priority: .utility) {
@@ -646,14 +670,30 @@ final class AppStore: ObservableObject {
         } catch { notice = "macOS could not change launch at login. Open System Settings → General → Login Items." }
     }
     func setNotificationsEnabled(_ enabled: Bool) {
-        guard !demo else { return }
-        if !enabled { notificationsEnabled = false; try? persist(); return }
+        guard !demo, !readOnly, !shuttingDown else { return }
+        let version = UUID()
+        notificationRequestVersion = version
+        if !enabled {
+            let previous = notificationsEnabled
+            notificationsEnabled = false
+            pendingAlerts = []
+            do { try persist() }
+            catch { notificationsEnabled = previous; notice = "Could not save the notification setting." }
+            return
+        }
         Task {
             do {
-                let accepted = try await UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound])
-                notificationsEnabled = accepted; try persist()
+                let accepted = try await requestNotificationAuthorization()
+                guard notificationRequestVersion == version, !shuttingDown else { return }
+                let previous = notificationsEnabled
+                notificationsEnabled = accepted
+                do { try persist() }
+                catch { notificationsEnabled = previous; notice = "Could not save the notification setting."; return }
                 if !accepted { notice = "Allow notifications for Ai-llowance in System Settings to receive allowance alerts." }
-            } catch { notice = "Could not enable notifications. Check System Settings → Notifications." }
+            } catch {
+                guard notificationRequestVersion == version, !shuttingDown else { return }
+                notice = "Could not enable notifications. Check System Settings → Notifications."
+            }
         }
     }
     func browserProfileID(_ account: Account) -> String? { browserChoices[account.id.uuidString] }

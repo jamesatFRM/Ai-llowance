@@ -4,6 +4,12 @@ import Darwin
 /// Run only on a worker task. Even a child that closes stdout and hangs has a deadline.
 enum CommandOutput {
     struct Result { let data: Data; let exitCode: Int32 }
+    /// A helper can exit between launch and an RPC write. FileHandle otherwise
+    /// delivers SIGPIPE on macOS, terminating the app instead of throwing EPIPE.
+    /// Scope this to the pipe rather than changing process-wide signal handling.
+    static func protectInput(_ input: Pipe) throws {
+        guard fcntl(input.fileHandleForWriting.fileDescriptor, F_SETNOSIGPIPE, 1) == 0 else { throw UsageError.server }
+    }
     static func read(_ process: Process, output: Pipe, timeout: TimeInterval, limit: Int) throws -> Result {
         defer {
             if process.isRunning { kill(process.processIdentifier, SIGKILL) }
