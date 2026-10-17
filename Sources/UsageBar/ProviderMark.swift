@@ -29,6 +29,11 @@ enum ProviderImages {
         switch provider {
         case .claude: claude?.copy() as? NSImage
         case .openAI: openAI?.copy() as? NSImage
+        // Native symbols identify integrations without downloading or imitating provider artwork.
+        case .copilot: NSImage(systemSymbolName: "terminal", accessibilityDescription: "GitHub Copilot")
+        case .openRouter: NSImage(systemSymbolName: "arrow.triangle.branch", accessibilityDescription: "OpenRouter")
+        case .vercelGateway: NSImage(systemSymbolName: "triangle", accessibilityDescription: "Vercel AI Gateway")
+        case .xai: NSImage(systemSymbolName: "sparkle", accessibilityDescription: "xAI")
         case nil: NSImage(systemSymbolName: "gauge.with.dots.needle.33percent", accessibilityDescription: "All accounts")
         }
     }

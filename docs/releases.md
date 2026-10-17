@@ -1,6 +1,6 @@
 # Installer and update releases
 
-Ai-llowance 0.2.0 is a preview. No Apple Developer ID certificate is configured, so downloads are ad-hoc signed and unnotarized. The DMG improves installation; it does not remove macOS's first-launch approval requirement. Sparkle Ed25519 signatures provide update authenticity independently of Apple signing.
+Ai-llowance 0.3.0 is a preview. No Apple Developer ID certificate is configured for automated releases, so those downloads are ad-hoc signed and unnotarized. The DMG improves installation; it does not remove macOS's first-launch approval requirement. Sparkle Ed25519 signatures provide update authenticity independently of Apple signing.
 
 ## Normal updates
 
@@ -12,8 +12,30 @@ Every workflow run uses a monotonically increasing build number (200 + workflow 
 
 ## Signing keys
 
-The dedicated `Ai-llowance` Sparkle key lives in the maintainer's login Keychain. Only its public key is committed at `Resources/update-public-key.txt`. Automated publishing requires explicit approval to store the private key in the repository's encrypted `SPARKLE_PRIVATE_KEY` Actions secret. Until then, keep `SIGNED_RELEASES_ENABLED` unset and publish locally signed releases from the maintainer's Mac. Back up the Keychain securely: losing this key prevents updates to existing ad-hoc installations. Never commit, print, or attach it to a release.
+The dedicated `Ai-llowance` Sparkle key lives in the maintainer's login Keychain. Only its public key is committed at `Resources/update-public-key.txt`. The maintainer approved the dedicated key's encrypted `SPARKLE_PRIVATE_KEY` Actions secret, and `SIGNED_RELEASES_ENABLED=true` enables the publishing job. This approval and configuration apply to the Sparkle update key; Apple signing/notarization credentials remain unconfigured. Back up the Keychain securely: losing this key prevents updates to existing ad-hoc installations. Never commit, print, or attach it to a release.
 
 For a local signed release, run `bash scripts/package-release.sh` followed by `bash scripts/sign-release.sh vVERSION-buildNUMBER`. This uses the dedicated Keychain key. The tools and Sparkle runtime are pinned and verified; the signed feed must not be edited after signing.
 
-For production distribution, configure Developer ID signing and notarization, sign all nested code consistently, and staple the notarization ticket. That is not configured in this preview.
+## Optional Developer ID and notarization path
+
+The scripts now support Developer ID signing and notarization. **This path has not been exercised with a real signing identity or notarization profile; current automated releases remain unnotarized previews.** Membership in the Apple Developer Program alone does not provide the certificate/private key or authenticated notary profile on this Mac.
+
+Prerequisites are an installed Developer ID Application certificate **with its private key**, compatible Xcode tools including `notarytool` and `stapler`, and a notarytool credential profile stored in the local Keychain. Configure the profile interactively with `xcrun notarytool store-credentials Ai-llowance-notary`; do not paste credentials into chat, source files, or release logs. No Apple signing credentials are uploaded by these scripts.
+
+Run the existing package script with these non-secret configuration values:
+
+```sh
+USAGEBAR_SIGNING_IDENTITY='Developer ID Application: Your Name (TEAMID)' \
+USAGEBAR_NOTARY_PROFILE='Ai-llowance-notary' \
+USAGEBAR_REQUIRE_NOTARIZATION=1 \
+USAGEBAR_ARCHITECTURES='arm64 x86_64' \
+bash scripts/package-release.sh
+```
+
+The pipeline signs Sparkle's nested helpers and XPC services, the framework, UsageBridge, and the app in dependency order. Distribution signatures use hardened runtime and secure timestamps. Sparkle's Downloader retains its upstream entitlements. Signing uses explicit targets, never `codesign --deep`; deep verification remains enabled.
+
+It then submits a temporary app ZIP using the Keychain profile, requires an `Accepted` result, staples and validates the app, and only then creates the release ZIP and DMG. The DMG is signed, separately submitted, stapled, and validated before checksums or Sparkle signatures are generated. Gatekeeper assessment must pass for both the packaged app and DMG. A missing identity/profile/tool, rejection, invalid ticket, or failed assessment stops the command. The preview path remains available when notarization is not requested.
+
+Before changing production publication, verify clean-Mac drag/install/launch, privacy permissions and provider sign-in, automatic launch, and an actual Sparkle update from an existing preview while preserving accounts. Test both Intel and Apple silicon. CI needs its own narrowly scoped Apple signing/notarization credentials and a production release gate; these are **not configured** by this change. Keep the existing Sparkle public key and bundle identity during that transition.
+
+Official references: [Apple notarization requirements](https://developer.apple.com/documentation/security/notarizing-macos-software-before-distribution), [custom notarization workflow](https://developer.apple.com/documentation/security/customizing-the-notarization-workflow), and [Sparkle's explicit signing order](https://sparkle-project.org/documentation/sandboxing/#code-signing).

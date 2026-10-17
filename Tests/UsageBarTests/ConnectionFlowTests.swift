@@ -296,17 +296,17 @@ private actor FetchGate {
 }
 
 
-@Test @MainActor func backgroundMonitoringDeliversHeartbeatWithoutActorIsolationCrash() async throws {
+@Test @MainActor func backgroundMonitoringStartsDueWorkWithoutActorIsolationCrash() async throws {
     let root = try fixtureRoot(); defer { try? FileManager.default.removeItem(at: root) }
-    // Use real utility queues: monitor:false cannot exercise the callback isolation.
-    let store = AppStore(root: root, monitor: true)
-    store.paused = true
-    let started = store.now
-    let deadline = Date().addingTimeInterval(25)
-    while store.now.timeIntervalSince(started) < 14 && Date() < deadline {
-        try await Task.sleep(for: .milliseconds(100))
-    }
-    #expect(store.now.timeIntervalSince(started) >= 14)
+    // A real utility timer must enter MainActor safely, then stay quiet after success.
+    let store = AppStore(root: root, monitor: true, fetch: { _, date in
+        Snapshot(observedAt: date, identity: "fixture@example.com", source: "Fixture")
+    })
+    let account = Account(name: "Fixture", kind: .codex)
+    store.accounts = [account]
+    let deadline = Date().addingTimeInterval(10)
+    while store.snapshots[account.id] == nil && Date() < deadline { try await Task.sleep(for: .milliseconds(100)) }
+    #expect(store.snapshots[account.id]?.identity == "fixture@example.com")
     #expect(!store.refreshing)
     await store.shutdown()
 }

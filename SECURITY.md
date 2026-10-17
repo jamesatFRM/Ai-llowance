@@ -8,11 +8,13 @@ Do not post credentials, raw authentication responses, or private account detail
 
 - Writes create private temporary files before writing and atomically replace their destination. Saved settings are size-bounded and validated; invalid files are preserved instead of silently reset.
 - Share-image export loads only fictional in-memory accounts, without reading or replacing saved account settings.
-- Account labels and connection settings are local, under `~/Library/Application Support/UsageBar`, with private file permissions. Normal GUI quota snapshots and signed-in email labels stay in process memory. The retained legacy status-line helper can write a private quota-only feed; provider CLIs manage their own caches and logs. See [Privacy](PRIVACY.md).
-- Organization API keys are stored in this Mac's non-synchronizing Keychain. Background reads do not prompt repeatedly if Keychain is locked.
+- Account labels and connection settings are local, under `~/Library/Application Support/UsageBar`, with private file permissions. The latest validated reading, signed-in identity, and bounded seven-day history are cached privately (128 KiB and 96 samples per account maximum); cached data remains timestamped and visibly identified. Cache keys bind to the account, connection kind, and expected identity/scope. Account changes and removal invalidate their cache and alert state. The retained legacy status-line helper can write a private quota-only feed; provider CLIs manage their own caches and logs. See [Privacy](PRIVACY.md).
+- API keys are stored in this Mac's non-synchronizing Keychain. Background reads do not prompt repeatedly if Keychain is locked.
 - Codex and Claude manage their own subscription credentials. App-owned Codex profiles require Keychain. New isolated Claude login launchers detect and remove Claude's plaintext fallback after login; this is not a guarantee that credentials are never temporarily written. Existing CLI profiles keep their existing credential policy.
 - Ai-llowance invokes locally installed provider CLIs. Their version, behavior, authentication, and network traffic remain controlled by the provider. The app does not bundle them or inspect their token files.
 - API requests use fixed HTTPS origins, GET-only reporting endpoints, bounded responses, and no redirects, shared cookies, or URL cache.
+- Optional remembered CLI paths are revalidated against file metadata; this detects changes but does not establish publisher trust. Browser profile discovery reads display names only.
+- Optional notifications are local and deduplicated; no push service is used.
 - There is no Ai-llowance analytics service, telemetry endpoint, or cloud sync. Sparkle checks GitHub for signed updates; system profiling is disabled. Both feed and archive signatures are required before extraction, with no unsigned feed fallback.
 
 ## Removal

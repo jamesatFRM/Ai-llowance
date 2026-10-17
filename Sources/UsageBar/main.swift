@@ -2,9 +2,10 @@ import AppKit
 import SwiftUI
 import Combine
 import UsageCore
+import UserNotifications
 
 @MainActor
-final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSWindowDelegate {
     private var statusItem: NSStatusItem!
     private var popover = NSPopover()
     private var window: NSWindow?
@@ -12,6 +13,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     private var subscriptions: Set<AnyCancellable> = []
     private var outsideClickMonitor: Any?
     private var localClickMonitor: Any?
+    private var notificationDelegate: AllowanceNotificationDelegate?
     private var renderedEntries: [MenuEntry]?
     private var renderedPreferences: MenuPreferences?
     private let store = AppStore(demo: CommandLine.arguments.contains("--demo") || CommandLine.arguments.contains("--preview") || CommandLine.arguments.contains("--export-preview"))
@@ -28,7 +30,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
             button.imagePosition = .imageLeading
             button.title = " Usage"
             button.target = self; button.action = #selector(togglePopover)
-            button.toolTip = "Weekly remaining quota for your selected accounts. Open for individual windows."
+            button.toolTip = "Remaining allowance for your selected accounts. Open for limits and resets."
         }
         popover.behavior = .transient
         popover.delegate = self
@@ -46,6 +48,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
             previewWindow = preview
             NSApp.activate(ignoringOtherApps: true)
         } else if store.accounts.isEmpty || store.demo || CommandLine.arguments.contains("--accounts") { showAccounts() }
+        if !store.demo {
+            let notifications = AllowanceNotificationDelegate { [weak self] id in
+                self?.store.selectedAccountID = id
+                self?.showAccounts()
+            }
+            notificationDelegate = notifications
+            UNUserNotificationCenter.current().delegate = notifications
+        }
         store.updater.start()
         updateLabel()
         store.refresh()
@@ -76,12 +86,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
                 attachment.attachmentCell = NSTextAttachmentCell(imageCell: image)
                 title.append(NSAttributedString(attachment: attachment))
             }
-            let value = entry.remainingPercent.map { "\(Int($0))%" } ?? "0%"
+            let value = entry.isUnlimited ? "∞" : (entry.remainingPercent.map { "\(Int($0))%" } ?? "0%!")
             let name = store.menuPreferences.display == .byAccount && store.menuPreferences.showAccountNames ? " \(String(entry.label.prefix(14)))" : ""
             title.append(NSAttributedString(string: "\(name) \(value)"))
-            descriptions.append(entry.remainingPercent == nil
+            descriptions.append(entry.isUnlimited ? "\(entry.label): unlimited allowance" : entry.remainingPercent == nil
                 ? "\(entry.label): unavailable · 0% shown; open for connection status"
-                : "\(entry.label): \(value) weekly remaining")
+                : "\(entry.label): \(value) allowance remaining")
         }
         title.addAttributes([.font: NSFont.monospacedDigitSystemFont(ofSize: 12, weight: .medium), .foregroundColor: NSColor.labelColor], range: NSRange(location: 0, length: title.length))
         button.attributedTitle = title
@@ -91,15 +101,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     @objc private func togglePopover() {
         if popover.isShown { closePopover() }
         else if let button = statusItem.button {
-            store.now = Date()
-            store.refresh(force: true)
+            store.setInterfaceVisible(true)
             NSApp.activate(ignoringOtherApps: true)
             popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
             popover.contentViewController?.view.window?.makeKey()
             monitorOutsideClicks()
         }
     }
-    private func closePopover() { popover.performClose(nil); removeClickMonitors() }
+    private func closePopover() { popover.performClose(nil); removeClickMonitors(); store.setInterfaceVisible(window?.isVisible == true) }
     private func monitorOutsideClicks() {
         removeClickMonitors()
         outsideClickMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown, .otherMouseDown]) { [weak self] _ in
@@ -123,13 +132,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         if let outsideClickMonitor { NSEvent.removeMonitor(outsideClickMonitor); self.outsideClickMonitor = nil }
         if let localClickMonitor { NSEvent.removeMonitor(localClickMonitor); self.localClickMonitor = nil }
     }
-    func popoverDidClose(_ notification: Notification) { removeClickMonitors() }
+    func popoverDidClose(_ notification: Notification) { removeClickMonitors(); store.setInterfaceVisible(window?.isVisible == true) }
     func applicationDidResignActive(_ notification: Notification) { closePopover() }
-    func applicationDidBecomeActive(_ notification: Notification) { store.refresh() }
+    func applicationDidBecomeActive(_ notification: Notification) { store.rediscoverTools(); store.refresh() }
+    func windowWillClose(_ notification: Notification) { store.setInterfaceVisible(popover.isShown) }
     private func showAccounts() {
-        store.now = Date()
-        store.refresh(force: true)
         closePopover()
+        store.setInterfaceVisible(true)
         if window == nil {
             let controller = NSHostingController(rootView: AccountsView(store: store) { [weak self] in
                 self?.window?.orderOut(nil)
@@ -138,7 +147,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
             let created = NSWindow(contentViewController: controller)
             created.title = "Ai-llowance · Settings"; created.styleMask = [.titled, .closable, .miniaturizable, .resizable]
             created.setContentSize(NSSize(width: 680, height: 750)); created.center()
-            created.isReleasedWhenClosed = false; window = created
+            created.isReleasedWhenClosed = false; created.delegate = self; window = created
         }
         window?.makeKeyAndOrderFront(nil); NSApp.activate(ignoringOtherApps: true)
     }

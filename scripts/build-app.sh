@@ -5,6 +5,22 @@ build_dir="${USAGEBAR_BUILD_ROOT:-$project_dir/.build}"
 output_dir="${USAGEBAR_OUTPUT_DIR:-$project_dir/dist}"
 version="$(cat "$project_dir/VERSION")"
 build_number="${USAGEBAR_BUILD_NUMBER:-200}"
+identity="${USAGEBAR_SIGNING_IDENTITY:--}"
+if [ "$identity" != "-" ]; then
+    # A production signing request must never fall back to ad-hoc signing.
+    python3 - "$identity" <<'PY2'
+import subprocess,sys
+identity=sys.argv[1]
+if not identity.startswith('Developer ID Application: '):
+    raise SystemExit('Use the complete Developer ID Application identity name for distribution signing.')
+available=subprocess.check_output(['security','find-identity','-v','-p','codesigning'],text=True)
+if '"'+identity+'"' not in available:
+    raise SystemExit('The requested Developer ID Application identity and private key are not available in the Keychain.')
+PY2
+fi
+if [ -n "${USAGEBAR_NOTARY_PROFILE:-}" ] || [ "${USAGEBAR_REQUIRE_NOTARIZATION:-0}" = "1" ]; then
+    bash "$project_dir/scripts/notarize-release.sh" --check-config
+fi
 mkdir -p "$build_dir" "$output_dir"
 export CLANG_MODULE_CACHE_PATH="$build_dir/clang-cache"
 export SWIFTPM_MODULECACHE_OVERRIDE="$build_dir/swift-cache"
@@ -59,8 +75,20 @@ info=dict(CFBundleIdentifier='com.usagebar.app',CFBundleName='Ai-llowance',CFBun
     SUFeedURL='https://github.com/jamesatFRM/Ai-llowance/releases/download/update-feed/appcast.xml',SUPublicEDKey=key,SUEnableAutomaticChecks=True,SUAutomaticallyUpdate=False,SUEnableSystemProfiling=False,SUScheduledCheckInterval=86400,SUVerifyUpdateBeforeExtraction=True,SURequireSignedFeed=True,SUSignedFeedFailureExpirationInterval=0)
 pathlib.Path(app,'Contents/Info.plist').write_bytes(plistlib.dumps(info))
 PY2
-identity="${USAGEBAR_SIGNING_IDENTITY:--}"
-codesign --force --sign "$identity" "$app_dir/Contents/MacOS/UsageBridge"
-codesign --force --sign "$identity" "$app_dir"
+if [ "$identity" = "-" ]; then
+    codesign --force --sign - "$app_dir/Contents/MacOS/UsageBridge"
+    codesign --force --sign - "$app_dir"
+else
+    # Sign inside out. --deep is for verification, not signing. Sparkle's
+    # Downloader retains its upstream entitlements, as its signing guide requires.
+    sparkle="$app_dir/Contents/Frameworks/Sparkle.framework"
+    codesign --force --sign "$identity" --options runtime --timestamp "$sparkle/Versions/B/XPCServices/Installer.xpc"
+    codesign --force --sign "$identity" --options runtime --timestamp --preserve-metadata=entitlements "$sparkle/Versions/B/XPCServices/Downloader.xpc"
+    codesign --force --sign "$identity" --options runtime --timestamp "$sparkle/Versions/B/Autoupdate"
+    codesign --force --sign "$identity" --options runtime --timestamp "$sparkle/Versions/B/Updater.app"
+    codesign --force --sign "$identity" --options runtime --timestamp "$sparkle"
+    codesign --force --sign "$identity" --options runtime --timestamp "$app_dir/Contents/MacOS/UsageBridge"
+    codesign --force --sign "$identity" --options runtime --timestamp "$app_dir"
+fi
 codesign --verify --deep --strict "$app_dir"
 echo "Built app: $app_dir"

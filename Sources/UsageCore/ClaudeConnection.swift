@@ -33,6 +33,9 @@ public struct ClaudeConnection: Sendable {
         try Paths.writePrivate(data, to: url, executable: executable)
     }
     private func readSettings(_ url: URL) throws -> (Data?, [String: Any]) {
+        try Self.readSettingsFile(url)
+    }
+    private static func readSettingsFile(_ url: URL) throws -> (Data?, [String: Any]) {
         guard FileManager.default.fileExists(atPath: url.path) else { return (nil, [:]) }
         let data = try Paths.readData(url)
         guard data.count <= 2_000_000, let object = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
@@ -96,18 +99,24 @@ public struct ClaudeConnection: Sendable {
     }
     /// Restore only the field we installed; never overwrite a user's subsequent custom status line.
     public func uninstall(account: Account) throws {
-        let recordURL = folder(account).appendingPathComponent("setup.json")
+        try Self.uninstall(account: account, root: root, existingConfig: existingConfig)
+    }
+    /// Local rollback remains available after Claude Code has been removed or relocated.
+    public static func uninstall(account: Account, root: URL = Paths.root,
+                                 existingConfig: URL = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".claude")) throws {
+        let recordURL = root.appendingPathComponent("ClaudeConnections/\(account.id.uuidString)/setup.json")
         guard FileManager.default.fileExists(atPath: recordURL.path) else { return }
         let record = try JSONDecoder().decode(Record.self, from: Paths.readData(recordURL))
-        let url = config(account).appendingPathComponent("settings.json")
+        let config = account.usesExistingClaude == true ? existingConfig : Paths.claudeProfile(account.id, root: root)
+        let url = config.appendingPathComponent("settings.json")
         guard record.accountID == account.id, record.settingsPath == url.path else { throw UsageError.invalidData }
-        let (original, current) = try readSettings(url)
+        let (original, current) = try readSettingsFile(url)
         var settings = current
         if (settings["statusLine"] as? [String: Any])?["command"] as? String == record.installedCommand {
             if let previous = record.previousStatusLine { settings["statusLine"] = try JSONSerialization.jsonObject(with: previous, options: [.fragmentsAllowed]) }
             else { settings.removeValue(forKey: "statusLine") }
             guard (try? Data(contentsOf: url)) == original else { throw UsageError.unavailable("Claude’s settings changed. Please try removing the connection again.") }
-            try writePrivate(try JSONSerialization.data(withJSONObject: settings, options: [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]), to: url)
+            try Paths.writePrivate(try JSONSerialization.data(withJSONObject: settings, options: [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]), to: url)
         }
         try FileManager.default.removeItem(at: recordURL)
     }

@@ -2,7 +2,7 @@ import Foundation
 import Darwin
 
 public enum ConnectionKind: String, Codable, CaseIterable, Identifiable, Sendable {
-    case codex, claudeCode, openAIAPI, claudeAPI
+    case codex, claudeCode, openAIAPI, claudeAPI, copilot, openRouter, vercelGateway, xai
     public var id: String { rawValue }
     public var title: String {
         switch self {
@@ -10,15 +10,40 @@ public enum ConnectionKind: String, Codable, CaseIterable, Identifiable, Sendabl
         case .claudeCode: "Claude · Code subscription"
         case .openAIAPI: "OpenAI · API spending"
         case .claudeAPI: "Claude · API spending"
+        case .copilot: "GitHub · Copilot allowance"
+        case .openRouter: "OpenRouter · key budget"
+        case .vercelGateway: "Vercel AI Gateway · API credits"
+        case .xai: "xAI · API credits"
         }
     }
-    public var isAPI: Bool { self == .openAIAPI || self == .claudeAPI }
+    public var isAPI: Bool { self == .openAIAPI || self == .claudeAPI || isBalance }
+    public var isBalance: Bool { self == .openRouter || self == .vercelGateway || self == .xai }
+    public var provider: MenuProvider {
+        switch self {
+        case .codex, .openAIAPI: .openAI
+        case .claudeCode, .claudeAPI: .claude
+        case .copilot: .copilot
+        case .openRouter: .openRouter
+        case .vercelGateway: .vercelGateway
+        case .xai: .xai
+        }
+    }
+    public func refreshInterval(visible: Bool, lowPower: Bool = false) -> TimeInterval {
+        if self == .openAIAPI || self == .claudeAPI { return 3600 }
+        if isBalance { return visible && !lowPower ? 300 : 600 }
+        return lowPower ? 900 : (visible ? 60 : 600)
+    }
+    public var freshnessInterval: TimeInterval { isAPI && !isBalance ? 7200 : 1800 }
     public var explanation: String {
         switch self {
         case .codex: "Reads the quota buckets reported by Codex. This is not a universal ChatGPT message counter. Sign in separately for each account."
         case .claudeCode: "Reads plan limits directly through Claude Code’s built-in /usage command, without a conversation. Requires a version that reports plan limits in print mode (verified with 2.1.294) and a subscription sign-in. Missing data stays unavailable."
         case .openAIAPI: "Organization API cost this UTC month. Requires an OpenAI Admin API key. A ChatGPT subscription or ordinary project key does not provide this report."
         case .claudeAPI: "Organization API cost this UTC month. Requires an Anthropic Admin API key. Excludes Priority Tier costs; this is not Claude subscription usage."
+        case .copilot: "Reads account quota buckets through the installed GitHub Copilot CLI and its existing sign-in. This is not a count of all GitHub activity."
+        case .openRouter: "Reads the API spending budget available to your OpenRouter key. This endpoint does not report total account credits or model subscription allowance."
+        case .vercelGateway: "Reads your Vercel AI Gateway API credit balance. This is separate from Vercel hosting usage."
+        case .xai: "Reads prepaid API credits for the selected xAI team using a Management API key. This is not a Grok subscription allowance."
         }
     }
     public var dashboard: URL {
@@ -27,6 +52,10 @@ public enum ConnectionKind: String, Codable, CaseIterable, Identifiable, Sendabl
         case .claudeCode: "https://claude.ai/settings/usage"
         case .openAIAPI: "https://platform.openai.com/usage"
         case .claudeAPI: "https://platform.claude.com/usage"
+        case .copilot: "https://github.com/settings/copilot"
+        case .openRouter: "https://openrouter.ai/settings/credits"
+        case .vercelGateway: "https://vercel.com/dashboard"
+        case .xai: "https://console.x.ai"
         }
         return URL(string: address)!
     }
@@ -36,6 +65,10 @@ public enum ConnectionKind: String, Codable, CaseIterable, Identifiable, Sendabl
         case .claudeCode: "https://code.claude.com/docs/en/statusline"
         case .openAIAPI: "https://platform.openai.com/docs/api-reference/usage"
         case .claudeAPI: "https://platform.claude.com/docs/en/manage-claude/usage-cost-api"
+        case .copilot: "https://docs.github.com/en/copilot/how-tos/copilot-sdk/features/usage-and-billing"
+        case .openRouter: "https://openrouter.ai/docs/api-reference/credits/get-credits"
+        case .vercelGateway: "https://vercel.com/docs/ai-gateway"
+        case .xai: "https://docs.x.ai/developers/rest-api-reference/management/billing"
         }
         return URL(string: address)!
     }
@@ -50,9 +83,11 @@ public struct Account: Codable, Identifiable, Equatable, Sendable {
     public var usesExistingClaude: Bool?
     // Non-secret identity binding; old settings decode without a binding.
     public var expectedIdentity: String?
-    public init(id: UUID = UUID(), name: String, kind: ConnectionKind, enabled: Bool = true, usesExistingCodex: Bool = false, usesExistingClaude: Bool = false) {
+    public var scopeID: String?
+    public init(id: UUID = UUID(), name: String, kind: ConnectionKind, enabled: Bool = true, usesExistingCodex: Bool = false, usesExistingClaude: Bool = false, scopeID: String? = nil) {
         self.id = id; self.name = name; self.kind = kind; self.enabled = enabled; self.usesExistingCodex = usesExistingCodex
         self.usesExistingClaude = usesExistingClaude
+        self.scopeID = scopeID
     }
 }
 
@@ -92,18 +127,64 @@ public struct Snapshot: Codable, Equatable, Sendable {
     public var source: String
     public var note: String?
     public var providerRestricted: Bool?
+    public var balanceUSD: Decimal?
+    public var balanceLabel: String?
+    public var unlimited: Bool?
+    public var freshnessInterval: TimeInterval?
     public init(observedAt: Date, windows: [QuotaWindow] = [], costUSD: Decimal? = nil, periodStart: Date? = nil,
-                identity: String? = nil, source: String, note: String? = nil, providerRestricted: Bool? = nil) {
+                identity: String? = nil, source: String, note: String? = nil, providerRestricted: Bool? = nil,
+                balanceUSD: Decimal? = nil, balanceLabel: String? = nil, unlimited: Bool? = nil, freshnessInterval: TimeInterval? = nil) {
         self.observedAt = observedAt; self.windows = windows; self.costUSD = costUSD; self.periodStart = periodStart
         self.identity = identity; self.source = source; self.note = note; self.providerRestricted = providerRestricted
+        self.balanceUSD = balanceUSD; self.balanceLabel = balanceLabel; self.unlimited = unlimited; self.freshnessInterval = freshnessInterval
     }
     public var weeklyWindows: [QuotaWindow] {
         // Claude's stable row IDs also cover readings made before duration metadata was added.
         windows.filter { $0.durationMinutes == 10_080 || $0.id.hasPrefix("week.") || $0.id == "7-day" }
     }
     public func isStale(at now: Date = Date(), windows relevantWindows: [QuotaWindow]? = nil) -> Bool {
-        now.timeIntervalSince(observedAt) > 900 || observedAt > now.addingTimeInterval(60)
+        now.timeIntervalSince(observedAt) > (freshnessInterval ?? 900) || observedAt > now.addingTimeInterval(60)
         || (relevantWindows ?? windows).contains { $0.resetsAt.map { $0 <= now } ?? false }
+        || (costUSD != nil && periodStart.map { CostAdapter.monthStart(now) != $0 } == true)
+    }
+    public func validated() throws -> Self {
+        guard observedAt.timeIntervalSince1970.isFinite, windows.count <= 64,
+              source.utf8.count <= 4096, (identity?.utf8.count ?? 0) <= 4096,
+              (note?.utf8.count ?? 0) <= 16_384, (balanceLabel?.utf8.count ?? 0) <= 256,
+              Set(windows.map(\.id)).count == windows.count else { throw UsageError.invalidData }
+        for window in windows {
+            _ = try QuotaWindow(id: window.id, label: window.label, usedPercent: window.usedPercent,
+                                resetsAt: window.resetsAt, durationMinutes: window.durationMinutes)
+        }
+        let moneyLimit = Decimal(string: "1000000000000000")!
+        if let costUSD { guard !costUSD.isNaN, costUSD >= 0, costUSD <= moneyLimit else { throw UsageError.invalidData } }
+        // Some credit providers report a negative balance after overage.
+        if let balanceUSD { guard !balanceUSD.isNaN, balanceUSD >= -moneyLimit, balanceUSD <= moneyLimit else { throw UsageError.invalidData } }
+        if let freshnessInterval {
+            guard freshnessInterval.isFinite, freshnessInterval >= 30, freshnessInterval <= 604800 else { throw UsageError.invalidData }
+        }
+        if let periodStart { guard periodStart.timeIntervalSince1970.isFinite else { throw UsageError.invalidData } }
+        return self
+    }
+    private enum CodingKeys: String, CodingKey {
+        case observedAt, windows, costUSD, periodStart, identity, source, note, providerRestricted
+        case balanceUSD, balanceLabel, unlimited, freshnessInterval
+    }
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(observedAt: try values.decode(Date.self, forKey: .observedAt),
+                  windows: try values.decodeIfPresent([QuotaWindow].self, forKey: .windows) ?? [],
+                  costUSD: try values.decodeIfPresent(Decimal.self, forKey: .costUSD),
+                  periodStart: try values.decodeIfPresent(Date.self, forKey: .periodStart),
+                  identity: try values.decodeIfPresent(String.self, forKey: .identity),
+                  source: try values.decode(String.self, forKey: .source),
+                  note: try values.decodeIfPresent(String.self, forKey: .note),
+                  providerRestricted: try values.decodeIfPresent(Bool.self, forKey: .providerRestricted),
+                  balanceUSD: try values.decodeIfPresent(Decimal.self, forKey: .balanceUSD),
+                  balanceLabel: try values.decodeIfPresent(String.self, forKey: .balanceLabel),
+                  unlimited: try values.decodeIfPresent(Bool.self, forKey: .unlimited),
+                  freshnessInterval: try values.decodeIfPresent(TimeInterval.self, forKey: .freshnessInterval))
+        _ = try validated()
     }
 }
 
@@ -130,15 +211,25 @@ public enum UsageError: Error, LocalizedError, Sendable, Equatable {
 public struct PollState: Sendable {
     public var nextAttempt = Date.distantPast
     public var failures = 0
+    public private(set) var lastSuccess: Date?
     public init() {}
     public static let refreshInterval: TimeInterval = 60
     public static let manualRefreshInterval: TimeInterval = 30
     public func shouldRefresh(at now: Date, manual: Bool = false) -> Bool {
         let earlyManualRead = manual && failures == 0
-            && now >= nextAttempt.addingTimeInterval(Self.manualRefreshInterval - Self.refreshInterval)
+            && lastSuccess.map { now.timeIntervalSince($0) >= Self.manualRefreshInterval } == true
         return earlyManualRead || now >= nextAttempt
     }
-    public mutating func succeeded(at now: Date) { failures = 0; nextAttempt = now.addingTimeInterval(Self.refreshInterval) }
+    public mutating func succeeded(at now: Date, interval: TimeInterval = Self.refreshInterval) {
+        failures = 0; lastSuccess = now
+        nextAttempt = now.addingTimeInterval(interval.isFinite && interval >= Self.manualRefreshInterval ? interval : Self.refreshInterval)
+    }
+    /// Change healthy cadence without making another read or shortening provider backoff.
+    public mutating func adjustHealthyInterval(_ interval: TimeInterval) {
+        guard failures == 0, let lastSuccess else { return }
+        let delay = interval.isFinite && interval >= Self.manualRefreshInterval ? interval : Self.refreshInterval
+        nextAttempt = lastSuccess.addingTimeInterval(delay)
+    }
     public mutating func failed(_ error: Error, at now: Date) {
         failures = min(failures + 1, 5)
         var delay = min(3600.0, 300 * pow(2, Double(failures - 1)))

@@ -71,11 +71,7 @@ jobs:
           tag="v${version}-build${build}"
           (cd dist && shasum -a 256 -c SHA256SUMS)
           bash scripts/sign-release.sh "$tag"
-          cat > dist/release-notes.md <<'NOTES'
-          Drag Ai-llowance into Applications. Existing 0.1.0 users need this one installation to gain Check for Updates and verified install/relaunch.
-
-          Universal macOS 14+ preview. Ad-hoc signed and unnotarized; not a production release. Requires Claude Code and/or Codex CLI for readings.
-          NOTES
+          cp docs/release-notes-0.3.0.md dist/release-notes.md
           if ! gh release view "$tag" >/dev/null 2>&1; then
             gh release create "$tag" dist/*.dmg dist/*.zip dist/SHA256SUMS --target "$GITHUB_SHA" --title "Ai-llowance $version — Preview (build $build)" --notes-file dist/release-notes.md --prerelease --latest=false
           else
