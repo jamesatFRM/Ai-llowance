@@ -26,3 +26,7 @@ ClaudeConnections/
 
 *.dmg
 *.ed25519
+
+# Private allowance cache and local notification state.
+Readings/
+alerts.json

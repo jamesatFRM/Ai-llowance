@@ -19,8 +19,8 @@ PATTERNS = {
 EMAIL = re.compile(rb"[A-Za-z0-9_.+%-]+@([A-Za-z0-9.-]+\.[A-Za-z]{2,})")
 SAFE_DOMAINS = {b"example.com", b"example.org", b"example.net", b"example.test", b"users.noreply.github.com"}
 SAFE_EMAILS = {b"noreply@github.com"}  # GitHub-generated commit metadata only.
-PRIVATE_NAMES = {"accounts.json", "auth.json", ".credentials.json", ".env", ".DS_Store"}
-PRIVATE_PARTS = {"CodexProfiles", "ClaudeProfiles", "ClaudeFeeds", "ClaudeConnections", "node_modules", ".build", ".swiftpm"}
+PRIVATE_NAMES = {"accounts.json", "alerts.json", "auth.json", ".credentials.json", ".env", ".DS_Store"}
+PRIVATE_PARTS = {"CodexProfiles", "ClaudeProfiles", "ClaudeFeeds", "ClaudeConnections", "Readings", "node_modules", ".build", ".swiftpm"}
 
 def issues(data):
     # Exact public upstream copyright notice bundled by Sparkle (LICENSE).
@@ -49,6 +49,7 @@ def main():
     parser.add_argument("--self-test", action="store_true")
     args = parser.parse_args()
     if args.self_test:
+        assert "alerts.json" in PRIVATE_NAMES and "Readings" in PRIVATE_PARTS
         assert not issues(b"fixture@example.com 12345+author@users.noreply.github.com noreply@github.com")
         assert "non-example email address" in issues(b"private-person@" + b"github.com")
         assert "provider credential" in issues(b"sk-" + b"proj-" + b"A" * 40)
