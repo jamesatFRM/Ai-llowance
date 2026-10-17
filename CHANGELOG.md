@@ -1,6 +1,8 @@
 # Changelog
 
-## 0.3.1 — Reliability (pending notarized release)
+## 0.3.1 — Reliability and visual polish (pending notarized release)
+
+- Refine the native glass, borders, type hierarchy, and compact controls while preserving the 350px dashboard and dense account rows.
 
 - Recover from early CLI exits without crashing the app.
 - Verify subscription identity before and after quota reads; reject duplicate cached accounts before the first refresh.

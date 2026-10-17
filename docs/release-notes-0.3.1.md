@@ -1,5 +1,7 @@
 # Ai-llowance 0.3.1
 
+A refined native surface keeps the same compact 350px menu, with clearer headings, subtle glass and borders, consistent controls, and the same dense account rows. Light and dark appearance plus Reduce Transparency remain supported.
+
 Reliability fixes for multi-account monitoring and updates:
 
 - A helper closing early now produces a recoverable connection error instead of quitting Ai-llowance.
