@@ -6,6 +6,7 @@ output_dir="${USAGEBAR_OUTPUT_DIR:-$project_dir/dist}"
 version="$(cat "$project_dir/VERSION")"
 build_number="${USAGEBAR_BUILD_NUMBER:-200}"
 identity="${USAGEBAR_SIGNING_IDENTITY:--}"
+preview_build=true
 if [ "$identity" != "-" ]; then
     # A production signing request must never fall back to ad-hoc signing.
     python3 - "$identity" <<'PY2'
@@ -20,6 +21,7 @@ PY2
 fi
 if [ -n "${USAGEBAR_NOTARY_PROFILE:-}" ] || [ "${USAGEBAR_REQUIRE_NOTARIZATION:-0}" = "1" ]; then
     bash "$project_dir/scripts/notarize-release.sh" --check-config
+    preview_build=false
 fi
 mkdir -p "$build_dir" "$output_dir"
 export CLANG_MODULE_CACHE_PATH="$build_dir/clang-cache"
@@ -65,13 +67,15 @@ for path in dict.fromkeys(rpaths):
     if path.startswith('/') and not path.startswith(('/usr/lib','/System/Library')):
         subprocess.run(['install_name_tool','-delete_rpath',path,p],check=True)
 PY2
-python3 - "$app_dir" "$version" "$build_number" "$project_dir/Resources/update-public-key.txt" <<'PY2'
+python3 - "$app_dir" "$version" "$build_number" "$project_dir/Resources/update-public-key.txt" "$preview_build" <<'PY2'
 import pathlib,plistlib,sys,base64,re
-app,version,build,keyfile=sys.argv[1:]
+app,version,build,keyfile,preview=sys.argv[1:]
 key=pathlib.Path(keyfile).read_text().strip()
 assert len(base64.b64decode(key,validate=True))==32
 assert re.fullmatch(r'\d+\.\d+\.\d+',version) and re.fullmatch(r'\d+',build)
+assert preview in ('true','false')
 info=dict(CFBundleIdentifier='com.usagebar.app',CFBundleName='Ai-llowance',CFBundleDisplayName='Ai-llowance',CFBundleExecutable='UsageBar',CFBundleIconFile='UsageBar',CFBundlePackageType='APPL',CFBundleShortVersionString=version,CFBundleVersion=build,LSMinimumSystemVersion='14.0',LSUIElement=True,NSHighResolutionCapable=True,
+    AILPreviewBuild=preview=='true',
     SUFeedURL='https://github.com/jamesatFRM/Ai-llowance/releases/download/update-feed/appcast.xml',SUPublicEDKey=key,SUEnableAutomaticChecks=True,SUAutomaticallyUpdate=False,SUEnableSystemProfiling=False,SUScheduledCheckInterval=86400,SUVerifyUpdateBeforeExtraction=True,SURequireSignedFeed=True,SUSignedFeedFailureExpirationInterval=0)
 pathlib.Path(app,'Contents/Info.plist').write_bytes(plistlib.dumps(info))
 PY2
