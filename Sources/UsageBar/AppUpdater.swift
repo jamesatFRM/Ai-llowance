@@ -9,6 +9,9 @@ final class AppUpdater: ObservableObject {
     private var controller: SPUStandardUpdaterController?
     private var started = false
     static var version: String { Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "Development" }
+    // Missing metadata remains a preview, including older bundles and local SwiftPM builds.
+    static var isPreview: Bool { (Bundle.main.object(forInfoDictionaryKey: "AILPreviewBuild") as? Bool) != false }
+    static var versionLabel: String { isPreview ? "Preview · \(version)" : version }
 
     init(enabled: Bool) {
         // Fixture tests and share previews never start updater networking.

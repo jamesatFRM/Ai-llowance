@@ -38,7 +38,7 @@ struct Dashboard: View {
             HStack {
                 Button(action: manage) { Label("Settings", systemImage: "gearshape") }.help("Settings")
                 Spacer()
-                Text("Preview · \(AppUpdater.version)").foregroundStyle(.tertiary)
+                Text(AppUpdater.versionLabel).foregroundStyle(.tertiary)
                 UpdateCheckButton(updater: store.updater)
                 Button { store.togglePause() } label: { Image(systemName: store.paused ? "play.fill" : "pause.fill").frame(width: 22, height: 22) }
                     .help(store.paused ? "Resume automatic refresh" : "Pause automatic refresh")
@@ -375,7 +375,7 @@ struct AccountsView: View {
                 Label("Stored on this Mac", systemImage: "lock.shield").foregroundStyle(.secondary)
                 Spacer()
                 Button("Show menu", action: showMenu)
-                Text("\(AppUpdater.version) preview").foregroundStyle(.tertiary)
+                Text(AppUpdater.versionLabel).foregroundStyle(.tertiary)
                 Button { NSApplication.shared.terminate(nil) } label: { Image(systemName: "power").frame(width: 26, height: 26) }.buttonStyle(.plain).help("Quit Ai-llowance")
             }.font(.system(size: 10)).padding(.horizontal, 22).padding(.vertical, 12)
         }.frame(minWidth: 580, minHeight: 560).preferredColorScheme(store.menuPreferences.theme.colorScheme)
@@ -678,7 +678,7 @@ struct AccountsView: View {
                         Button("Choose Claude…") { store.chooseClaudeExecutable() }
                         Button("Choose Copilot…") { store.chooseCopilotExecutable() }
                     }.controlSize(.small).font(.system(size: 10))
-                    Text("Preview release · not notarized. No Ai-llowance analytics or backend.").font(.system(size: 10)).foregroundStyle(.secondary)
+                    Text((AppUpdater.isPreview ? "Preview release · not notarized. " : "") + "No Ai-llowance analytics or backend.").font(.system(size: 10)).foregroundStyle(.secondary)
                 }.padding(.top, 10)
             }.font(.system(size: 12, weight: .medium))
         }.disabled(store.demo)
