@@ -45,7 +45,8 @@ public struct CostAdapter: UsageAdapter {
         return calendar.dateInterval(of: .month, for: date)!.start
     }
     public static func request(kind: ConnectionKind, key: String, now: Date, page: String?) throws -> URLRequest {
-        guard kind.isAPI, !key.isEmpty, !key.contains("\n"), !key.contains("\r") else { throw UsageError.missingCredential }
+        guard kind == .openAIAPI || kind == .claudeAPI else { throw UsageError.invalidData }
+        guard !key.isEmpty, !key.contains("\n"), !key.contains("\r") else { throw UsageError.missingCredential }
         let start = monthStart(now)
         var components = URLComponents(string: kind == .openAIAPI ? "https://api.openai.com/v1/organization/costs" : "https://api.anthropic.com/v1/organizations/cost_report")!
         if kind == .openAIAPI {

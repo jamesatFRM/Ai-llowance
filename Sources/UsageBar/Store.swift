@@ -2,6 +2,8 @@ import AppKit
 import Combine
 import Network
 import UsageCore
+import ServiceManagement
+import UserNotifications
 
 @MainActor
 final class AppStore: ObservableObject {
@@ -21,11 +23,26 @@ final class AppStore: ObservableObject {
     @Published var offline = false
     @Published var now = Date()
     @Published private(set) var menuPreferences = MenuPreferences()
+    @Published var selectedAccountID: UUID?
+    @Published private(set) var notificationsEnabled = false
+    @Published private(set) var launchAtLogin = false
+    @Published private(set) var loginItemNeedsApproval = false
+    @Published private(set) var browserProfiles: [BrowserProfile] = []
+    @Published private(set) var usageHistory: [UUID: [UsageHistoryPoint]] = [:]
+    @Published var executable = CodexAdapter.findExecutable()
+    @Published var claudeExecutable = ClaudeConnection.findExecutable()
+    @Published var copilotExecutable = CopilotAdapter.findExecutable()
+    private var interfaceVisible = false
+    private var browserChoices: [String: String] = [:]
+    private var rememberedTools: [String: RememberedExecutable] = [:]
+    private var alerts = AlertTracker()
+    private var pendingAlerts: [UsageAlert] = []
+    private var cachedAccounts: Set<UUID> = []
+    private var restoredLegacyFeeds: Set<UUID> = []
+    private var cacheTask: Task<Void, Never>?
     lazy var updater = AppUpdater(enabled: !demo)
     let demo: Bool
     let root: URL
-    var executable = CodexAdapter.findExecutable()
-    var claudeExecutable = ClaudeConnection.findExecutable()
     var existingClaudeConfig = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".claude")
     private var schedules: [UUID: PollState] = [:]
     private var refreshTask: Task<Void, Never>?
@@ -38,12 +55,18 @@ final class AppStore: ObservableObject {
     private let fetchOverride: (@Sendable (Account, Date) async throws -> Snapshot)?
     private let openExternal: (URL) -> Bool
     private let network = NWPathMonitor()
+    private var workspaceObservers: [NSObjectProtocol] = []
     private var sleeping = false
     private var readOnly = false
     private var shuttingDown = false
     private let costs = CostAdapter()
+    private let balances = BalanceAdapter()
     private let keychain = KeychainStore()
-    private struct Saved: Codable { var accounts: [Account]; var paused: Bool; var menuPreferences: MenuPreferences? }
+    private struct Saved: Codable {
+        var accounts: [Account]; var paused: Bool; var menuPreferences: MenuPreferences?
+        var notificationsEnabled: Bool?; var browserChoices: [String: String]?
+        var rememberedTools: [String: RememberedExecutable]?
+    }
 
     init(demo: Bool = false, root: URL = Paths.root, monitor: Bool = true,
          fetch: (@Sendable (Account, Date) async throws -> Snapshot)? = nil,
@@ -72,8 +95,21 @@ final class AppStore: ObservableObject {
                       saved.accounts.allSatisfy({ !$0.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && $0.name.utf8.count <= 4096 }) else { throw UsageError.invalidData }
                 accounts = saved.accounts; paused = saved.paused
                 menuPreferences = saved.menuPreferences ?? MenuPreferences()
+                notificationsEnabled = saved.notificationsEnabled ?? false
+                browserChoices = saved.browserChoices ?? [:]
+                rememberedTools = saved.rememberedTools ?? [:]
             } catch { notice = "Account settings could not be read. The existing file was preserved. Restore accounts.json before adding accounts."; readOnly = true }
         }
+        if !readOnly {
+            let cache = SnapshotCache(root: root)
+            snapshots = cache.load(accounts: accounts, now: now)
+            cachedAccounts = Set(snapshots.keys)
+            usageHistory = cache.loadHistory(accounts: accounts, now: now)
+            if let data = try? Paths.readData(root.appendingPathComponent("alerts.json"), limit: 256_000),
+               let savedAlerts = try? JSONDecoder().decode(AlertTracker.self, from: data) { alerts = savedAlerts }
+            alerts.retain(accounts: accounts)
+        }
+        rediscoverTools()
         guard monitor else { return }
         network.pathUpdateHandler = { @Sendable [weak self] path in
             let offline = path.status != .satisfied
@@ -82,18 +118,18 @@ final class AppStore: ObservableObject {
         network.start(queue: DispatchQueue(label: "Ai-llowance.network", qos: .utility))
         // Dispatch deadlines do not depend on AppKit's default/event-tracking run-loop mode.
         let heartbeat = DispatchSource.makeTimerSource(queue: DispatchQueue(label: "Ai-llowance.heartbeat", qos: .utility))
-        heartbeat.schedule(deadline: .now() + 15, repeating: 15, leeway: .seconds(3))
+        heartbeat.schedule(deadline: .now() + 1, leeway: .seconds(1))
         heartbeat.setEventHandler { @Sendable [weak self] in
-            Task { @MainActor in self?.now = Date(); self?.refresh() }
+            Task { @MainActor in self?.refresh() }
         }
         self.heartbeat = heartbeat
         heartbeat.resume()
-        NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.willSleepNotification, object: nil, queue: .main) { [weak self] _ in
+        workspaceObservers.append(NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.willSleepNotification, object: nil, queue: .main) { [weak self] _ in
             Task { @MainActor in self?.sleeping = true; self?.refreshTask?.cancel(); self?.loginTask?.cancel() }
-        }
-        NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.didWakeNotification, object: nil, queue: .main) { [weak self] _ in
+        })
+        workspaceObservers.append(NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.didWakeNotification, object: nil, queue: .main) { [weak self] _ in
             Task { @MainActor in self?.sleeping = false; self?.now = Date(); self?.refresh() }
-        }
+        })
     }
     var refreshSummary: String {
         if demo { return "Sample data" }
@@ -103,7 +139,7 @@ final class AppStore: ObservableObject {
         if refreshing { return "Updating…" }
         let active = accounts.filter { $0.enabled }
         if active.contains(where: { errors[$0.id] != nil }) { return "Check accounts" }
-        guard !active.isEmpty else { return "Auto-refresh · 1 min" }
+        guard !active.isEmpty else { return "Ready to connect" }
         let readings = active.compactMap { snapshots[$0.id]?.observedAt }
         guard readings.count == active.count, let oldest = readings.min() else { return "Waiting for readings" }
         let age = max(0, Int(now.timeIntervalSince(oldest)))
@@ -136,18 +172,18 @@ final class AppStore: ObservableObject {
     private func persist() throws {
         guard !readOnly else { throw UsageError.storage }
         if !demo {
-            do { try Paths.write(Saved(accounts: accounts, paused: paused, menuPreferences: menuPreferences), to: root.appendingPathComponent("accounts.json")) }
+            do { try Paths.write(Saved(accounts: accounts, paused: paused, menuPreferences: menuPreferences, notificationsEnabled: notificationsEnabled, browserChoices: browserChoices, rememberedTools: rememberedTools), to: root.appendingPathComponent("accounts.json")) }
             catch { throw UsageError.storage }
         }
     }
     @discardableResult
-    func add(name: String, kind: ConnectionKind, secret: String, existing: Bool, refreshAfter: Bool = true) throws -> Account {
+    func add(name: String, kind: ConnectionKind, secret: String, existing: Bool, refreshAfter: Bool = true, scopeID: String? = nil) throws -> Account {
         guard !demo, !readOnly else { throw UsageError.storage }
         guard accounts.count < 1000, name.utf8.count <= 4096, !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { throw UsageError.invalidData }
         if kind == .codex && existing && accounts.contains(where: { $0.usesExistingCodex }) {
             throw UsageError.unavailable("The existing Codex CLI profile is already connected.")
         }
-        let account = Account(name: name.trimmingCharacters(in: .whitespacesAndNewlines), kind: kind, usesExistingCodex: kind == .codex && existing)
+        let account = Account(name: name.trimmingCharacters(in: .whitespacesAndNewlines), kind: kind, usesExistingCodex: kind == .codex && existing, scopeID: scopeID)
         if kind.isAPI { try keychain.save(secret.trimmingCharacters(in: .whitespacesAndNewlines), for: account.id) }
         if kind == .codex && !existing { try Paths.prepare(Paths.profile(account.id, root: root)) }
         accounts.append(account)
@@ -167,7 +203,8 @@ final class AppStore: ObservableObject {
         guard executable != nil else { notice = "Install Codex CLI once, then click Connect OpenAI. If it is already installed, use Choose Codex CLI below."; return }
         do {
             let account = try add(name: automaticName("OpenAI", kind: .codex), kind: .codex, secret: "", existing: existing, refreshAfter: false)
-            if existing { refresh(force: true) } else { signIn(account) }
+            selectedAccountID = account.id
+            if existing { refresh(force: true) } else { signIn(account, openBrowser: accounts.filter { $0.kind == .codex }.count == 1) }
         } catch { notice = safeMessage(error) }
     }
     private func claudeConnection() throws -> ClaudeConnection {
@@ -193,6 +230,7 @@ final class AppStore: ObservableObject {
                 try Paths.prepare(connection.config(account))
                 claudeSignedIn[account.id] = signedIn
                 accounts.append(account)
+                selectedAccountID = account.id
                 do { try persist() }
                 catch { accounts.removeAll { $0.id == account.id }; try? connection.uninstall(account: account); throw error }
                 if !signedIn {
@@ -211,6 +249,7 @@ final class AppStore: ObservableObject {
                 connectionVersions[account.id] = UUID()
                 authenticationRequired.insert(account.id)
                 snapshots[account.id] = nil; errors[account.id] = nil; schedules[account.id] = PollState()
+                clearCachedReading(account)
                 claudeSignedIn[account.id] = false
                 try? FileManager.default.removeItem(at: Paths.feed(account.id, root: root))
             }
@@ -279,6 +318,8 @@ final class AppStore: ObservableObject {
         guard !demo, !readOnly, account.kind.isAPI, accounts.contains(where: { $0.id == account.id }) else { throw UsageError.storage }
         guard !refreshing, !removing else { throw UsageError.unavailable("Wait for the current refresh to finish, then save the key.") }
         try keychain.save(secret.trimmingCharacters(in: .whitespacesAndNewlines), for: account.id)
+        connectionVersions[account.id] = UUID()
+        clearCachedReading(account)
         schedules[account.id] = PollState(); snapshots[account.id] = nil; errors[account.id] = nil
         refresh(force: true)
     }
@@ -292,6 +333,7 @@ final class AppStore: ObservableObject {
         paused.toggle()
         do { try persist() } catch { paused.toggle(); notice = "Could not save the refresh setting." }
         if paused { refreshTask?.cancel() } else { refresh() }
+        scheduleHeartbeat()
     }
     func remove(_ account: Account) async {
         guard !demo, !refreshing, !removing, signingIn == nil else { return }
@@ -305,11 +347,14 @@ final class AppStore: ObservableObject {
                 guard let executable else { throw UsageError.unavailable("Locate Codex CLI before removing this account so its stored sign-in can be cleared.") }
                 try await CodexAdapter(executable: executable, root: root).logout(account: account)
             }
-            if account.kind == .claudeCode { try claudeConnection().uninstall(account: account) }
-            let old = accounts
+            if account.kind == .claudeCode { try ClaudeConnection.uninstall(account: account, root: root, existingConfig: existingClaudeConfig) }
+            let old = accounts, oldBrowserChoice = browserChoices[account.id.uuidString]
             accounts.removeAll { $0.id == account.id }
-            do { try persist() } catch { accounts = old; throw error }
+            browserChoices[account.id.uuidString] = nil
+            do { try persist() } catch { accounts = old; browserChoices[account.id.uuidString] = oldBrowserChoice; throw error }
             snapshots[account.id] = nil; errors[account.id] = nil; schedules[account.id] = nil; claudeSignedIn[account.id] = nil
+            clearCachedReading(account)
+            if selectedAccountID == account.id { selectedAccountID = nil }
             authenticationRequired.remove(account.id); connectionVersions[account.id] = nil
             waitingForClaude[account.id] = nil; claudeCompletions[account.id] = nil
             if account.kind == .claudeCode { try? FileManager.default.removeItem(at: Paths.feed(account.id, root: root)) }
@@ -318,6 +363,7 @@ final class AppStore: ObservableObject {
     }
     func refresh(force: Bool = false) {
         now = Date()
+        defer { scheduleHeartbeat() }
         checkClaudeSignIns(at: now)
         guard !shuttingDown, !demo, !paused, !sleeping, !removing, !offline else { return }
         if refreshing { pendingManualRefresh = pendingManualRefresh || force; return }
@@ -332,6 +378,8 @@ final class AppStore: ObservableObject {
                 let pending = pendingManualRefresh
                 pendingManualRefresh = false
                 if pending { refresh(force: true) }
+                deliverAlerts()
+                scheduleHeartbeat()
             }
             for account in due {
                 if Task.isCancelled || paused || sleeping || offline { return }
@@ -340,11 +388,12 @@ final class AppStore: ObservableObject {
                 let start = Date()
                 var schedule = schedules[account.id] ?? PollState()
                 do {
-                    let snapshot = try await fetchAccount(account, at: start)
+                    var snapshot = try await fetchAccount(account, at: start)
+                    snapshot.freshnessInterval = account.kind.freshnessInterval
                     try Task.checkCancellation()
                     guard accounts.contains(where: { $0.id == account.id && $0.enabled }), connectionVersions[account.id] == version,
                           signingIn != account.id, waitingForClaude[account.id] == nil else { continue }
-                    if account.kind == .codex, let index = accounts.firstIndex(where: { $0.id == account.id }) {
+                    if !account.kind.isAPI, let index = accounts.firstIndex(where: { $0.id == account.id }) {
                         let identity = try CodexIdentity.validate(snapshot, for: accounts[index], accounts: accounts, snapshots: snapshots)
                         if accounts[index].expectedIdentity == nil {
                             accounts[index].expectedIdentity = identity
@@ -352,13 +401,16 @@ final class AppStore: ObservableObject {
                             catch { accounts[index].expectedIdentity = nil; throw error }
                         }
                     }
+                    processAlert(snapshot, account: accounts.first(where: { $0.id == account.id }) ?? account)
                     snapshots[account.id] = snapshot; errors[account.id] = nil; authenticationRequired.remove(account.id)
-                    schedule.succeeded(at: Date())
+                    cachedAccounts.remove(account.id)
+                    if let currentAccount = accounts.first(where: { $0.id == account.id }) { saveCachedReading(snapshot, account: currentAccount) }
+                    schedule.succeeded(at: Date(), interval: account.kind.refreshInterval(visible: interfaceVisible, lowPower: ProcessInfo.processInfo.isLowPowerModeEnabled))
                     if account.kind == .claudeCode {
                         claudeSignedIn[account.id] = true
                         if notice?.hasPrefix("Finish Claude’s browser sign-in once.") == true { notice = nil }
                         // Once direct usage works, restore the user's old status line. No bridge is needed.
-                        do { try claudeConnection().uninstall(account: account) }
+                        do { if restoredLegacyFeeds.insert(account.id).inserted { try claudeConnection().uninstall(account: account) } }
                         catch { notice = "Usage is connected, but the previous status-line setting could not be restored automatically." }
                     }
                 } catch is CancellationError { return }
@@ -370,6 +422,7 @@ final class AppStore: ObservableObject {
                         switch identityError {
                         case .accountChanged, .duplicateAccount:
                             snapshots[account.id] = nil
+                            clearCachedReading(account)
                             authenticationRequired.insert(account.id)
                         default: break
                         }
@@ -377,7 +430,6 @@ final class AppStore: ObservableObject {
                     errors[account.id] = safeMessage(error); schedule.failed(error, at: Date())
                     if account.kind == .claudeCode && error as? UsageError == .authentication {
                         claudeSignedIn[account.id] = false
-                        schedule.nextAttempt = Date().addingTimeInterval(60)
                     }
                 }
                 schedules[account.id] = schedule
@@ -390,6 +442,10 @@ final class AppStore: ObservableObject {
         let adapter: any UsageAdapter
         switch account.kind {
         case .openAIAPI, .claudeAPI: adapter = costs
+        case .openRouter, .vercelGateway, .xai: adapter = balances
+        case .copilot:
+            guard let copilotExecutable else { throw UsageError.unavailable("Install Copilot CLI, then choose Check again in Settings.") }
+            adapter = CopilotAdapter(executable: copilotExecutable)
         case .claudeCode:
             guard let claudeExecutable else { throw UsageError.unavailable("Install or locate Claude Code in Advanced connections to read usage.") }
             adapter = ClaudeUsageAdapter(executable: claudeExecutable, root: root)
@@ -409,6 +465,7 @@ final class AppStore: ObservableObject {
         signingIn = account.id
         errors[account.id] = nil
         snapshots[account.id] = nil
+        clearCachedReading(account)
         loginTask = Task { [self] in
             do {
                 try await CodexAdapter(executable: executable, root: root).login(account: account) { [weak self] url in
@@ -416,7 +473,7 @@ final class AppStore: ObservableObject {
                         try Task.checkCancellation()
                         guard let self else { throw CancellationError() }
                         self.codexSignInURL = url
-                        if openBrowser && !self.openExternal(url) {
+                        if openBrowser && !self.openLink(url, for: account) {
                             self.notice = "Browser did not open. Copy the sign-in link into the browser profile for this account."
                         }
                     }
@@ -440,27 +497,190 @@ final class AppStore: ObservableObject {
     func shutdown() async {
         shuttingDown = true
         heartbeat?.cancel(); heartbeat = nil; network.cancel()
+        for observer in workspaceObservers { NSWorkspace.shared.notificationCenter.removeObserver(observer) }
+        workspaceObservers = []
         refreshTask?.cancel(); loginTask?.cancel(); connectionTask?.cancel()
         await refreshTask?.value
         await loginTask?.value
         await connectionTask?.value
+        await cacheTask?.value
     }
-    func chooseExecutable() {
+    func chooseExecutable() { chooseTool(.codex) }
+    func chooseClaudeExecutable() { chooseTool(.claudeCode) }
+    func chooseCopilotExecutable() { chooseTool(.copilot) }
+    private func chooseTool(_ kind: ConnectionKind) {
         let panel = NSOpenPanel(); panel.canChooseDirectories = false; panel.allowsMultipleSelection = false
-        panel.message = "Choose the installed Codex CLI executable."
-        guard panel.runModal() == .OK, let url = panel.url, FileManager.default.isExecutableFile(atPath: url.path) else { return }
-        executable = url
-        // The choice is intentionally per launch; no arbitrary executable is restored silently.
-        schedules = [:]; refresh(force: true)
-    }
-    func chooseClaudeExecutable() {
-        let panel = NSOpenPanel(); panel.canChooseDirectories = false; panel.allowsMultipleSelection = false
-        panel.message = "Choose the installed Claude Code executable."
-        guard panel.runModal() == .OK, let url = panel.url, FileManager.default.isExecutableFile(atPath: url.path) else { return }
-        claudeExecutable = url
-        for account in accounts where account.kind == .claudeCode { schedules[account.id] = PollState() }
+        panel.message = "Choose the installed \(kind.provider.title) CLI."
+        let remember = NSButton(checkboxWithTitle: "Remember this location until the file changes", target: nil, action: nil)
+        panel.accessoryView = remember
+        guard panel.runModal() == .OK, let url = panel.url,
+              let record = RememberedExecutable(url: url) else { return }
+        if kind == .codex { executable = url }
+        else if kind == .claudeCode { claudeExecutable = url }
+        else { copilotExecutable = url }
+        rememberedTools[kind.rawValue] = remember.state == .on ? record : nil
+        do { try persist() } catch { notice = "Could not remember the CLI location." }
+        for account in accounts where account.kind == kind { schedules[account.id] = PollState() }
         refresh(force: true)
     }
+    func rediscoverTools() {
+        guard !demo else { return }
+        func detected(_ kind: ConnectionKind, current: URL?, discover: () -> URL?) -> URL? {
+            if let record = rememberedTools[kind.rawValue] {
+                if let valid = record.validatedURL { return valid }
+                if notice == nil { notice = "A remembered CLI file changed. Choose its location again, or use the detected installation." }
+                return discover()
+            }
+            return current.flatMap { FileManager.default.isExecutableFile(atPath: $0.path) ? $0 : nil } ?? discover()
+        }
+        executable = detected(.codex, current: executable, discover: CodexAdapter.findExecutable)
+        claudeExecutable = detected(.claudeCode, current: claudeExecutable, discover: ClaudeConnection.findExecutable)
+        copilotExecutable = detected(.copilot, current: copilotExecutable, discover: CopilotAdapter.findExecutable)
+        browserProfiles = BrowserProfile.discover()
+        launchAtLogin = SMAppService.mainApp.status == .enabled
+        loginItemNeedsApproval = SMAppService.mainApp.status == .requiresApproval
+    }
+    func setInterfaceVisible(_ value: Bool) {
+        let becameVisible = value && !interfaceVisible
+        let changed = value != interfaceVisible
+        interfaceVisible = value
+        if changed {
+            let lowPower = ProcessInfo.processInfo.isLowPowerModeEnabled
+            for account in accounts {
+                schedules[account.id]?.adjustHealthyInterval(account.kind.refreshInterval(visible: value, lowPower: lowPower))
+            }
+        }
+        if becameVisible { rediscoverTools(); refresh(force: true) }
+        scheduleHeartbeat()
+    }
+    private func scheduleHeartbeat() {
+        guard !shuttingDown, let heartbeat else { return }
+        let date = Date()
+        var delay: TimeInterval = interfaceVisible ? 60 : 900
+        if !waitingForClaude.isEmpty { delay = min(delay, 15) }
+        if !paused && !offline && !sleeping && !refreshing {
+            for account in accounts where account.enabled && signingIn != account.id && waitingForClaude[account.id] == nil {
+                delay = min(delay, max(1, (schedules[account.id]?.nextAttempt ?? date).timeIntervalSince(date)))
+            }
+        }
+        heartbeat.schedule(deadline: .now() + max(1, delay), leeway: .seconds(delay > 60 ? 10 : 1))
+    }
+    func connectCopilot() {
+        guard !demo, !readOnly, !removing else { return }
+        rediscoverTools()
+        guard copilotExecutable != nil else { notice = "Install Copilot CLI, then click Check again."; return }
+        if let existing = accounts.first(where: { $0.kind == .copilot }) {
+            selectedAccountID = existing.id; retryConnection(existing); return
+        }
+        do {
+            let account = try add(name: "Copilot", kind: .copilot, secret: "", existing: true)
+            selectedAccountID = account.id
+        } catch { notice = safeMessage(error) }
+    }
+    func openCopilotSignIn() {
+        guard !demo, let copilotExecutable else { return }
+        let file = root.appendingPathComponent("Copilot/Sign in.command")
+        let script = "#!/bin/zsh\nexport PATH=/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin\nunset GH_TOKEN GITHUB_TOKEN COPILOT_GITHUB_TOKEN\n" + ShellQuote.argument(copilotExecutable.path) + " login\nprintf '%s\n' 'Return to Ai-llowance and click Check sign-in.'\n"
+        do { try Paths.writePrivate(Data(script.utf8), to: file, executable: true); _ = openExternal(file) }
+        catch { notice = safeMessage(error) }
+    }
+    func history(for account: Account) -> [UsageHistoryPoint] { usageHistory[account.id] ?? [] }
+    func isCached(_ account: Account) -> Bool { cachedAccounts.contains(account.id) }
+    private func saveCachedReading(_ snapshot: Snapshot, account: Account) {
+        guard !demo, !readOnly else { return }
+        var points = usageHistory[account.id] ?? []
+        let point = UsageHistoryPoint(timestamp: snapshot.observedAt, remainingPercent: AllowanceStatus.evaluate(snapshot: snapshot, kind: account.kind, now: now).remainingPercent, balanceUSD: snapshot.balanceUSD, costUSD: snapshot.costUSD)
+        let status = AllowanceStatus.evaluate(snapshot: snapshot, kind: account.kind, now: now)
+        if ![.unavailable, .stale, .restricted].contains(status.state),
+           points.last.map({ point.timestamp.timeIntervalSince($0.timestamp) >= 300 }) ?? true { points.append(point) }
+        usageHistory[account.id] = Array(points.filter { snapshot.observedAt.timeIntervalSince($0.timestamp) <= 604800 }.suffix(96))
+        let previous = cacheTask, root = root
+        cacheTask = Task.detached(priority: .utility) {
+            await previous?.value
+            _ = try? SnapshotCache(root: root).save(snapshot, for: account)
+        }
+    }
+    private func clearCachedReading(_ account: Account) {
+        cachedAccounts.remove(account.id); usageHistory[account.id] = nil
+        alerts.remove(account.id)
+        guard !demo, !readOnly else { return }
+        let previous = cacheTask, root = root, state = alerts
+        cacheTask = Task.detached(priority: .utility) {
+            await previous?.value
+            try? SnapshotCache(root: root).remove(account)
+            try? Paths.write(state, to: root.appendingPathComponent("alerts.json"))
+        }
+    }
+    private func processAlert(_ snapshot: Snapshot, account: Account) {
+        if let alert = alerts.observe(account: account, snapshot: snapshot, now: Date()), notificationsEnabled {
+            pendingAlerts.append(alert)
+        }
+    }
+    private func deliverAlerts() {
+        guard !demo, !readOnly else { return }
+        let state = alerts, root = root, previous = cacheTask
+        cacheTask = Task.detached(priority: .utility) {
+            await previous?.value
+            let file = root.appendingPathComponent("alerts.json")
+            if let data = try? JSONEncoder().encode(state), (try? Paths.readData(file)) != data { try? Paths.writePrivate(data, to: file) }
+        }
+        let alerts = pendingAlerts; pendingAlerts = []
+        guard notificationsEnabled, !alerts.isEmpty, !paused, !sleeping, !offline else { return }
+        let content = UNMutableNotificationContent()
+        content.title = alerts.count == 1 ? alerts[0].title : "\(alerts.count) allowance updates"
+        content.body = alerts.prefix(3).map { alert in
+            let name = accounts.first(where: { $0.id == alert.accountID })?.name ?? "Account"
+            return name + " · " + alert.message
+        }.joined(separator: "\n")
+        content.userInfo = ["accountID": alerts[0].accountID.uuidString]
+        let request = UNNotificationRequest(identifier: "allowance-update", content: content, trigger: nil)
+        UNUserNotificationCenter.current().add(request) { _ in }
+    }
+    func setLaunchAtLogin(_ enabled: Bool) {
+        guard !demo else { return }
+        do {
+            if enabled { try SMAppService.mainApp.register() } else { try SMAppService.mainApp.unregister() }
+            launchAtLogin = SMAppService.mainApp.status == .enabled
+            loginItemNeedsApproval = SMAppService.mainApp.status == .requiresApproval
+            if loginItemNeedsApproval { SMAppService.openSystemSettingsLoginItems() }
+        } catch { notice = "macOS could not change launch at login. Open System Settings → General → Login Items." }
+    }
+    func setNotificationsEnabled(_ enabled: Bool) {
+        guard !demo else { return }
+        if !enabled { notificationsEnabled = false; try? persist(); return }
+        Task {
+            do {
+                let accepted = try await UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound])
+                notificationsEnabled = accepted; try persist()
+                if !accepted { notice = "Allow notifications for Ai-llowance in System Settings to receive allowance alerts." }
+            } catch { notice = "Could not enable notifications. Check System Settings → Notifications." }
+        }
+    }
+    func browserProfileID(_ account: Account) -> String? { browserChoices[account.id.uuidString] }
+    func setBrowserProfile(_ account: Account, id: String?) {
+        guard id == nil || browserProfiles.contains(where: { $0.id == id }) else { return }
+        let old = browserChoices[account.id.uuidString]
+        browserChoices[account.id.uuidString] = id
+        do { try persist() } catch { browserChoices[account.id.uuidString] = old; notice = "Could not save the browser choice." }
+    }
+    @discardableResult private func openLink(_ url: URL, for account: Account) -> Bool {
+        if let profile = browserProfileID(account) {
+            guard browserProfiles.contains(where: { $0.id == profile }),
+                  let chrome = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.google.Chrome") else {
+                notice = "The chosen Chrome profile is unavailable. Choose a browser profile again for this account."
+                return false
+            }
+            let configuration = NSWorkspace.OpenConfiguration()
+            configuration.createsNewApplicationInstance = true
+            configuration.arguments = ["--profile-directory=\(profile)", url.absoluteString]
+            NSWorkspace.shared.openApplication(at: chrome, configuration: configuration) { [weak self] _, error in
+                if error != nil { Task { @MainActor in self?.notice = "Chrome could not open the selected profile. Check the browser choice for this account." } }
+            }
+            return true
+        }
+        return openExternal(url)
+    }
+    func openUsage(_ account: Account) { _ = openLink(account.kind.dashboard, for: account) }
     func safeMessage(_ error: Error) -> String {
         if let known = error as? UsageError { return known.localizedDescription }
         if error is DecodingError { return UsageError.invalidData.localizedDescription }

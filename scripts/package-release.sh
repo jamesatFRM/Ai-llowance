@@ -11,6 +11,10 @@ build=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$app_dir/Contents/I
 if [ "$(lipo -archs "$app_dir/Contents/MacOS/UsageBar" | wc -w | tr -d ' ')" -gt 1 ]; then architecture=universal; else architecture=$(lipo -archs "$app_dir/Contents/MacOS/UsageBar"); fi
 basename="Ai-llowance-${version}-build${build}-macOS-${architecture}"
 codesign --verify --deep --strict "$app_dir"
+if [ -n "${USAGEBAR_NOTARY_PROFILE:-}" ]; then
+    # Staple the app before creating either distributable archive.
+    bash "$project_dir/scripts/notarize-release.sh" "$app_dir"
+fi
 ditto -c -k --norsrc --keepParent "$app_dir" "$output_dir/$basename.zip"
 python3 "$project_dir/scripts/check-release.py" "$output_dir/$basename.zip"
 tooling="$build_dir/dmg-tools"
@@ -19,16 +23,25 @@ if [ ! -f "$tooling/.allowance-tools-ready" ]; then
     touch "$tooling/.allowance-tools-ready"
 fi
 swift "$project_dir/scripts/make-dmg-background.swift" "$build_dir/dmg-background.png"
-cat > "$build_dir/Read me.txt" <<'TXT'
+if [ -n "${USAGEBAR_NOTARY_PROFILE:-}" ]; then
+    distribution_note="This app and installer are Developer ID signed and notarized by Apple."
+else
+    distribution_note="This is an unnotarized preview, not a production release. If macOS blocks the first launch, see Apple's official guidance: https://support.apple.com/102445"
+fi
+cat > "$build_dir/Read me.txt" <<TXT
 Drag Ai-llowance into Applications, then open it there.
 
-This is an unnotarized preview, not a production release. If macOS blocks the first launch, see Apple's official guidance: https://support.apple.com/102445
+$distribution_note
 
-Claude Code and/or Codex CLI must be installed for usage readings.
+Install the relevant provider CLI for Claude, Codex, or Copilot readings.
 Settings includes Check for Updates. Updates preserve your connected accounts.
 TXT
 PYTHONPATH="$tooling" python3 -m dmgbuild -s "$project_dir/scripts/dmg-settings.py" -D "app=$app_dir" -D "readme=$build_dir/Read me.txt" -D "background=$build_dir/dmg-background.png" "Ai-llowance $version" "$output_dir/$basename.dmg"
 hdiutil verify "$output_dir/$basename.dmg"
+if [ -n "${USAGEBAR_NOTARY_PROFILE:-}" ]; then
+    # The final DMG ticket changes its bytes; checksums and Sparkle signatures come later.
+    bash "$project_dir/scripts/notarize-release.sh" "$output_dir/$basename.dmg"
+fi
 python3 "$project_dir/scripts/check-dmg.py" "$output_dir/$basename.dmg"
 (cd "$output_dir" && shasum -a 256 "$basename.zip" "$basename.dmg" > SHA256SUMS)
 echo "Packaged: $output_dir/$basename.dmg"

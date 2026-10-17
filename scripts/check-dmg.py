@@ -12,6 +12,11 @@ with tempfile.TemporaryDirectory(prefix='allowance-dmg-check-') as folder:
         if os.readlink(mount/'Applications')!='/Applications': raise SystemExit('Incorrect Applications shortcut')
         if not (mount/'.DS_Store').is_file() or not (mount/'Read me.txt').is_file(): raise SystemExit('Installer layout or instructions missing')
         subprocess.run(['codesign','--verify','--deep','--strict',str(mount/'Ai-llowance.app')],check=True)
+        if os.environ.get('USAGEBAR_NOTARY_PROFILE') or os.environ.get('USAGEBAR_REQUIRE_NOTARIZATION')=='1':
+            subprocess.run(['xcrun','stapler','validate',str(archive)],check=True)
+            subprocess.run(['xcrun','stapler','validate',str(mount/'Ai-llowance.app')],check=True)
+            subprocess.run(['spctl','--assess','--type','execute','--verbose=2',str(mount/'Ai-llowance.app')],check=True)
+            subprocess.run(['spctl','--assess','--type','open','--context','context:primary-signature','--verbose=2',str(archive)],check=True)
         zipped=pathlib.Path(folder,'app.zip')
         subprocess.run(['ditto','-c','-k','--norsrc','--keepParent',str(mount/'Ai-llowance.app'),str(zipped)],check=True)
         subprocess.run([sys.executable,str(pathlib.Path(__file__).with_name('check-release.py')),str(zipped)],check=True)

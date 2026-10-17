@@ -14,7 +14,7 @@ public enum CodexIdentity {
             throw UsageError.accountChanged(expected)
         }
         if let other = accounts.first(where: {
-            $0.id != account.id && $0.kind == .codex
+            $0.id != account.id && $0.kind == account.kind
                 && normalized($0.expectedIdentity ?? snapshots[$0.id]?.identity) == actual
         }) { throw UsageError.duplicateAccount(other.name) }
         return actual

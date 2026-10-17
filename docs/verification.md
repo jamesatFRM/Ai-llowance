@@ -2,6 +2,13 @@
 
 Ai-llowance is an ad-hoc signed, unnotarized preview, not a production release.
 
+## Lightweight setup and provider expansion — October 16, 2026
+
+- 112 local fixture/protocol/application tests passed, including Claude identity binding and duplicate rejection, cache restore/invalidation, limiting-window agreement, fresh-only alert transitions, visibility cadence changes without bypassing failure backoff, and local Claude connection removal when its CLI is missing.
+- New provider tests cover Copilot framed RPC, deadlines/cancellation, identity changes, unlimited quotas, reverse-request rejection, and managed usernames; OpenRouter budgets; Vercel credit semantics; and scoped xAI signed-cent parsing. These are synthetic tests, not authenticated provider acceptance.
+- Source/history privacy checks and shell syntax checks passed. No new runtime dependencies were added; Sparkle remains the only bundled third-party framework.
+- Apple signing/notarization is an optional fail-closed packaging path. No real Developer ID identity or notary profile has been used for this release yet; automated downloads remain unnotarized previews.
+
 ## DMG and updater — October 12, 2026
 
 - 75 fixture tests passed with Sparkle integrated. Universal Apple Silicon/Intel release build, strict signatures, ZIP contents and read-only DMG verification passed. Intel runtime and first-launch Gatekeeper approval remain unverified.
@@ -47,17 +54,18 @@ Ai-llowance is an ad-hoc signed, unnotarized preview, not a production release.
 
 Claude uses its installed CLI's built-in `/usage`, not a published external quota API. Unknown, incomplete, model-generated, cached or rate-limited reports are rejected. Codex uses local app-server account/quota methods, which do not represent every ChatGPT feature. Provider latency and rounding may differ from other surfaces.
 
-Successful reads become due after 60 seconds; a coalescible timer checks every 15 seconds. Opening the menu allows a healthy read after 30 seconds. Errors retain backoff. Offline, sleeping and paused states suppress reads. Resource measurements and methodology are in the [hardening report](hardening-and-resources.md); they describe the measured earlier build, not every Mac or provider CLI version.
+In 0.3.0, one coalescible timer schedules due work. Subscription checks use 60 seconds while the interface is visible, 600 seconds closed, and 900 seconds in Low Power Mode. API balances use 300/600 seconds and organization spending uses 3600 seconds. Opening the menu allows a healthy read after 30 seconds and adjusts the ongoing cadence. Errors retain backoff. Offline, sleeping and paused states suppress reads. Resource measurements and methodology are in the [hardening report](hardening-and-resources.md); they describe the measured earlier build, not every Mac or provider CLI version.
 
 ## Release verification
 
-The package script verifies the signature, an exact archive-file allowlist, executable permissions, bundle identity, common sensitive patterns and local machine paths. GitHub Actions runs fixture tests, source/history privacy checks and packaging on a fresh macOS runner. Check the [actual CI runs](https://github.com/jamesatFRM/Ai-llowance/actions) and [release notes](https://github.com/jamesatFRM/Ai-llowance/releases/tag/v0.1.0) for the published revision and checks; a workflow definition alone is not a passing run.
+The package script verifies the signature, an exact archive-file allowlist, executable permissions, bundle identity, common sensitive patterns and local machine paths. GitHub Actions runs fixture tests, source/history privacy checks and packaging on a fresh macOS runner. Check the [actual CI runs](https://github.com/jamesatFRM/Ai-llowance/actions) and [release notes](https://github.com/jamesatFRM/Ai-llowance/releases) for the published revision and checks; a workflow definition alone is not a passing run.
 
 ## Not yet established
 
 - A clean install and fresh browser-login walkthrough on another person's Mac.
 - Intel binaries and the full range of supported macOS versions.
 - Live organization API billing with real admin keys; adapters are fixture-tested.
-- Developer ID signing, notarization, independent security audit or automatic updates.
+- Developer ID signing, notarization, independent security audit, and an end-user Sparkle upgrade to 0.3.0. Signed feed/archive publication is separate from Apple signing.
 - Exhaustive provider-CLI telemetry, cache/log retention or managed-policy behavior. See [Privacy](../PRIVACY.md).
-- Claude API credit balances, Vercel Gateway balances, Gemini or Grok support.
+- Real-account acceptance of the new Copilot, OpenRouter, Vercel Gateway, and xAI adapters. Provider/parsing fixtures are not live acceptance.
+- Automatic Cursor/Gemini quota, Claude API credit balances, or Grok consumer allowance. The available manual usage links do not establish automatic support.

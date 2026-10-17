@@ -36,15 +36,29 @@ public struct MenuPreferences: Codable, Equatable, Sendable {
         selectedAccountIDs = try values.decodeIfPresent(Set<UUID>.self, forKey: .selectedAccountIDs) ?? []
     }
 }
-public enum MenuProvider: String, Sendable {
-    case openAI, claude
-    public var title: String { self == .openAI ? "OpenAI" : "Claude" }
+public enum MenuProvider: String, CaseIterable, Codable, Sendable {
+    case claude, openAI, copilot, openRouter, vercelGateway, xai
+    public var title: String {
+        switch self {
+        case .openAI: "OpenAI"
+        case .claude: "Claude"
+        case .copilot: "Copilot"
+        case .openRouter: "OpenRouter"
+        case .vercelGateway: "AI Gateway"
+        case .xai: "xAI"
+        }
+    }
 }
 public struct MenuEntry: Sendable, Equatable {
     public let provider: MenuProvider?
     public let label: String
     public let remainingPercent: Double?
     public let accountCount: Int
+    public let isUnlimited: Bool
+    public init(provider: MenuProvider?, label: String, remainingPercent: Double?, accountCount: Int, isUnlimited: Bool = false) {
+        self.provider = provider; self.label = label; self.remainingPercent = remainingPercent
+        self.accountCount = accountCount; self.isUnlimited = isUnlimited
+    }
 }
 
 extension Snapshot {
@@ -55,7 +69,8 @@ extension Snapshot {
         case .codex:
             if let codex = weeklyWindows.first(where: { $0.id.lowercased().hasPrefix("codex.") || $0.label.lowercased().hasPrefix("codex ·") }) { return codex }
             return weeklyWindows.count == 1 ? weeklyWindows.first : nil
-        case .openAIAPI, .claudeAPI: return nil
+        case .copilot: return windows.min { $0.remainingPercent < $1.remainingPercent }
+        case .openAIAPI, .claudeAPI, .openRouter, .vercelGateway, .xai: return nil
         }
     }
 }
@@ -66,13 +81,22 @@ public enum MenuSummary {
         let selected = accounts.filter {
             $0.enabled && !$0.kind.isAPI && (preferences.allAccounts || preferences.selectedAccountIDs.contains($0.id))
         }
-        func provider(_ account: Account) -> MenuProvider { account.kind == .claudeCode ? .claude : .openAI }
+        func provider(_ account: Account) -> MenuProvider { account.kind.provider }
         func entry(_ group: [Account], label: String, icon: MenuProvider?) -> MenuEntry {
+            let allUnlimited = !group.isEmpty && group.allSatisfy { account in
+                guard !unavailable.contains(account.id), let snapshot = snapshots[account.id],
+                      snapshot.providerRestricted != true, snapshot.unlimited == true,
+                      snapshot.applicableWindows(for: account.kind).isEmpty,
+                      (try? snapshot.validated()) != nil, !snapshot.isStale(at: now) else { return false }
+                return true
+            }
             let values = group.compactMap { account -> Double? in
                 guard !unavailable.contains(account.id), let snapshot = snapshots[account.id],
                       snapshot.providerRestricted != true,
-                      let window = snapshot.primaryWeeklyWindow(for: account.kind),
-                      !snapshot.isStale(at: now, windows: [window]) else { return nil }
+                      (try? snapshot.validated()) != nil else { return nil }
+                let applicable = snapshot.applicableWindows(for: account.kind)
+                guard let window = applicable.min(by: { $0.remainingPercent < $1.remainingPercent }),
+                      !snapshot.isStale(at: now, windows: applicable) else { return nil }
                 return window.remainingPercent
             }
             // Incomplete groups stay unavailable; silently dropping a depleted/unread account is misleading.
@@ -80,18 +104,18 @@ public enum MenuSummary {
             if values.count != group.count || values.isEmpty { value = nil }
             else if preferences.aggregation == .lowest { value = values.min() }
             else { value = values.reduce(0, +) / Double(values.count) }
-            return MenuEntry(provider: icon, label: label, remainingPercent: value, accountCount: group.count)
+            return MenuEntry(provider: icon, label: label, remainingPercent: value, accountCount: group.count, isUnlimited: allUnlimited)
         }
         switch preferences.display {
         case .combined:
             return selected.isEmpty ? [] : [entry(selected, label: "All accounts", icon: nil)]
         case .byProvider:
-            return [MenuProvider.claude, .openAI].compactMap { icon in
+            return MenuProvider.allCases.compactMap { icon in
                 let group = selected.filter { provider($0) == icon }
                 return group.isEmpty ? nil : entry(group, label: icon.title, icon: icon)
             }
         case .byAccount:
-            return [MenuProvider.claude, .openAI].flatMap { icon in
+            return MenuProvider.allCases.flatMap { icon in
                 selected.filter { provider($0) == icon }.map { entry([$0], label: $0.name, icon: icon) }
             }
         }

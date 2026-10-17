@@ -4,7 +4,7 @@ Ai-llowance runs locally on your Mac. There is no Ai-llowance backend, analytics
 
 ## What leaves your Mac
 
-Subscription checks use the installed Claude Code and Codex CLIs, which contact their providers. Optional API spending checks send your reporting key directly to the provider's fixed HTTPS reporting endpoint. Login and dashboard links open provider pages in your browser. These services have their own privacy and retention policies.
+Subscription checks use the installed Claude Code, Codex, and Copilot CLIs, which contact their providers. Optional API spending, credit, and budget checks send your key directly to the selected provider's fixed official HTTPS endpoint. xAI requests also include the team ID you enter. Login and dashboard links open provider pages in your browser. These services have their own privacy and retention policies.
 
 Ai-llowance requests no model responses or conversation history. Claude's local `/usage` command may itself inspect local activity to prepare its report; Ai-llowance keeps only recognized plan limits and rejects reports with model turns or model cost. This is a version-dependent CLI integration.
 
@@ -15,9 +15,12 @@ For processes it starts, Ai-llowance sets Claude's `DISABLE_TELEMETRY=1` and `DI
 | Data | Storage |
 |---|---|
 | Account nicknames, connection choices, preferences | Private files under `~/Library/Application Support/UsageBar` |
-| Expected Codex email | Saved privately with connection settings to detect account changes |
-| Current signed-in email and quota readings | Normal app state in memory; visible in the interface |
-| Organization reporting API keys | Non-synchronizing, device-only macOS Keychain items |
+| Expected subscription identity | Saved privately with connection settings to detect account changes and duplicate accounts |
+| Latest signed-in identity and reading | Private cache, bounded to 128 KiB per account; original observation time is preserved |
+| Recent quota, credits, or spending history | Private cache; at most 96 samples per account, no older than seven days, minimum five minutes between samples |
+| Notification deduplication state | Private alert state; no chats or credentials |
+| Browser profile choice and custom CLI location | Private preferences; remembered CLI metadata includes path, size, modification time, and inode |
+| API reporting and balance keys | Non-synchronizing, device-only macOS Keychain items |
 | Subscription credentials | Provider-managed authentication; new app-owned Codex profiles require Keychain |
 | Provider CLI profiles, caches and logs | Provider-managed directories; additional accounts use separate profiles under the app's Application Support folder |
 
@@ -26,6 +29,8 @@ For new isolated Claude profiles, Ai-llowance detects a plaintext credential fal
 Pending Codex authorization links stay in memory until completion, cancellation, or timeout. Copy sign-in link places the current link on your clipboard at your request; it is not saved in account settings.
 
 The retained legacy status-line helper can write a private quota-only feed under `ClaudeFeeds` when explicitly used. New connections do not use it; the normal refresh path removes the old integration when still owned by Ai-llowance. This exception does not store transcripts or credentials.
+
+Chrome profile names are read from its Local State file only to populate the profile picker. Browser cookies, passwords, and session tokens are not read. Notifications are opt-in, local, and may display account nicknames and allowance state on your lock screen according to macOS settings. Launch at Login is also opt-in.
 
 The app is not sandboxed: it needs to launch installed provider CLIs. Select only executables you trust. macOS Keychain and private file permissions do not protect against every program already running with your user privileges.
 
@@ -39,13 +44,13 @@ Connection probes print success metadata, not emails, credentials or quota amoun
 
 ## Disconnecting and deleting
 
-Removing an API connection deletes its saved key. Removing an app-owned Codex connection signs it out; an existing shared Codex profile is preserved. For Claude, use **Accounts → More → Sign out in Terminal** before removing the connection if you want to end its provider-managed sign-in. Signing out a shared profile affects other tools using it.
+Removing a connection removes its app-owned reading/history cache and alert state. Removing an API connection also deletes its saved key. Removing an app-owned Codex connection signs it out; an existing shared Codex profile is preserved. For Claude, use **Accounts → More → Sign out in Terminal** before removing the connection if you want to end its provider-managed sign-in. Signing out a shared profile affects other tools using it.
 
 Pause stops polling; Quit stops the app. Removing the app bundle alone does not erase settings, provider profiles, Keychain entries or provider-side records. Sign out and remove accounts first; you may then delete the app's Application Support folder. Provider-side data must be managed with the provider. There is no maintainer-held account database to delete.
 
 ## Release checks
 
-Source and reachable Git history are checked for common secret patterns, private files, real email addresses and machine paths. Release archives have an exact file allowlist and separate checks. These checks reduce accidental disclosure; they are not a guarantee that no vulnerability exists. The 0.1.0 download is an ad-hoc signed, unnotarized preview.
+Source and reachable Git history are checked for common secret patterns, private files, real email addresses and machine paths. Release archives have an exact file allowlist and separate checks. These checks reduce accidental disclosure; they are not a guarantee that no vulnerability exists. Automated 0.3.0 downloads are ad-hoc signed, unnotarized previews. Developer ID/notarization tooling is available for separately configured releases; its presence is not evidence that a download is notarized.
 
 ## Application updates
 

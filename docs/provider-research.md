@@ -1,3 +1,5 @@
+> Current 0.3.0 additions and limitations are documented in [provider boundaries](providers-0.3.md). The research below records earlier scope decisions.
+
 # Verified integration boundaries
 
 Checked 2026-10-08 against primary documentation. A documented contract is not evidence that a particular account has access. Authenticated acceptance is reported separately in verification.md.

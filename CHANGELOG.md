@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.3.0 preview
+
+Guided setup, direct account recovery, compact allowance/reset rows, optional quiet alerts, native launch-at-login control, bounded local history/cache, and adaptive refresh. Claude now receives identity binding and duplicate-account protection. Added Copilot quota (preview), OpenRouter key budgets, Vercel AI Gateway credits, and xAI prepaid API credits. Cursor/Gemini have explicit usage-page shortcuts pending reliable automatic integration.
+
+Apple Developer ID signing and notarization can be enabled in packaging; automated preview releases remain ad-hoc signed until production signing is configured and verified.
+
 ## 0.2.0 — Preview
 
 - Universal drag-to-Applications DMG with a compact installer layout.

@@ -7,6 +7,7 @@ import sys
 import stat
 import base64
 import zipfile
+import os
 
 archive = pathlib.Path(sys.argv[1])
 allowed = {
@@ -30,7 +31,12 @@ with zipfile.ZipFile(archive) as z:
     files = {entry.filename for entry in z.infolist() if not entry.is_dir()}
     framework_prefix = 'Ai-llowance.app/Contents/Frameworks/Sparkle.framework/'
     own_files = {name for name in files if not name.startswith(framework_prefix)}
-    if own_files != allowed or framework_prefix + 'Versions/B/Sparkle' not in files and framework_prefix + 'Versions/A/Sparkle' not in files:
+    # stapler adds this ticket outside the resource seal. Validate it with Apple's
+    # tools after extraction; an arbitrary extra file must not become acceptable.
+    ticket = 'Ai-llowance.app/Contents/CodeResources'
+    notarized = bool(os.environ.get('USAGEBAR_NOTARY_PROFILE')) or os.environ.get('USAGEBAR_REQUIRE_NOTARIZATION') == '1'
+    expected = allowed | ({ticket} if notarized else set())
+    if own_files != expected or framework_prefix + 'Versions/B/Sparkle' not in files and framework_prefix + 'Versions/A/Sparkle' not in files:
         raise SystemExit('Archive contains unexpected or missing files.')
     for entry in z.infolist():
         if entry.is_dir():

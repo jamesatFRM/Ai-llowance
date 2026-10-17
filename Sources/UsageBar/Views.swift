@@ -9,30 +9,30 @@ struct Dashboard: View {
     @ObservedObject var store: AppStore
     var renderForSharing = false
     var manage: () -> Void
+    @ViewState private var expandedAccountID: UUID?
+
     var body: some View {
         VStack(alignment: .leading, spacing: 9) {
             HStack(spacing: 6) {
                 Text("Ai-llowance").font(.system(size: 12, weight: .semibold))
                 Spacer()
                 if store.refreshing { ProgressView().controlSize(.mini) }
-                Text(store.refreshSummary)
-                    .font(.system(size: 10)).foregroundStyle(.secondary)
+                Text(store.refreshSummary).font(.system(size: 10)).foregroundStyle(.secondary).lineLimit(1)
                 Button { store.refresh(force: true) } label: { Image(systemName: "arrow.clockwise").font(.system(size: 10)) }
                     .buttonStyle(.plain).help("Refresh (respects provider backoff)")
-                    .disabled(store.refreshing || store.paused || store.demo)
+                    .accessibilityLabel("Refresh accounts").disabled(store.refreshing || store.paused || store.demo)
             }.padding(.horizontal, 9).padding(.top, 5)
             if store.accounts.isEmpty {
-                VStack(alignment: .leading, spacing: 10) {
-                    Text("No accounts connected").font(.system(size: 12, weight: .semibold))
-                    Text("Claude and OpenAI limits, at a glance.").font(.system(size: 11)).foregroundStyle(.secondary)
-                    Button("Connect an account", action: manage).controlSize(.small)
+                VStack(alignment: .leading, spacing: 9) {
+                    Label("Connect your first account", systemImage: "person.crop.circle.badge.plus").font(.system(size: 12, weight: .semibold))
+                    Text("See your limits before they stop your work.").font(.system(size: 11)).foregroundStyle(.secondary)
+                    Button("Get started", action: manage).controlSize(.small)
                 }.padding(12).frame(maxWidth: .infinity, alignment: .leading).background(Color.primary.opacity(0.045), in: RoundedRectangle(cornerRadius: 12))
+            } else if renderForSharing {
+                providerContent
             } else {
-                if renderForSharing { providerContent }
-                else {
-                    ScrollView { providerContent }
-                        .scrollIndicators(.hidden).fixedSize(horizontal: false, vertical: true).frame(maxHeight: 500)
-                }
+                ScrollView { providerContent }
+                    .scrollIndicators(.hidden).fixedSize(horizontal: false, vertical: true).frame(maxHeight: 500)
             }
             if let notice = store.notice { Text(notice).font(.system(size: 10)).foregroundStyle(.orange).lineLimit(2).padding(.horizontal, 9) }
             HStack {
@@ -40,183 +40,273 @@ struct Dashboard: View {
                 Spacer()
                 Text("Preview · \(AppUpdater.version)").foregroundStyle(.tertiary)
                 UpdateCheckButton(updater: store.updater)
-                Button { store.togglePause() } label: {
-                    Image(systemName: store.paused ? "play.fill" : "pause.fill").frame(width: 22, height: 22)
-                }.help(store.paused ? "Resume automatic refresh" : "Pause automatic refresh")
+                Button { store.togglePause() } label: { Image(systemName: store.paused ? "play.fill" : "pause.fill").frame(width: 22, height: 22) }
+                    .help(store.paused ? "Resume automatic refresh" : "Pause automatic refresh")
                     .accessibilityLabel(store.paused ? "Resume automatic refresh" : "Pause automatic refresh").disabled(store.demo)
-                Button { NSApplication.shared.terminate(nil) } label: {
-                    Image(systemName: "power").frame(width: 22, height: 22)
-                }.help("Quit Ai-llowance").accessibilityLabel("Quit Ai-llowance")
+                Button { NSApplication.shared.terminate(nil) } label: { Image(systemName: "power").frame(width: 22, height: 22) }
+                    .help("Quit Ai-llowance").accessibilityLabel("Quit Ai-llowance")
             }.font(.system(size: 10)).buttonStyle(.plain).foregroundStyle(.secondary).padding(.horizontal, 9).padding(.bottom, 3)
         }.padding(7).frame(width: 350).background(Color(nsColor: .windowBackgroundColor)).preferredColorScheme(store.menuPreferences.theme.colorScheme)
     }
+
+    private func manage(_ account: Account) { store.selectedAccountID = account.id; manage() }
+    private var attentionAccounts: [Account] {
+        Array(store.accounts.enumerated().filter { _, account in
+            guard account.enabled else { return false }
+            let status = readingStatus(account)
+            return store.needsSignIn(account) || store.errors[account.id] != nil || status.state == .restricted || status.state == .exhausted
+        }.sorted { lhs, rhs in
+            let left = store.needsSignIn(lhs.element) || store.errors[lhs.element.id] != nil
+            let right = store.needsSignIn(rhs.element) || store.errors[rhs.element.id] != nil
+            return left == right ? lhs.offset < rhs.offset : left
+        }.prefix(3).map(\.element))
+    }
+    private func readingStatus(_ account: Account) -> AllowanceStatus {
+        AllowanceStatus.evaluate(snapshot: store.snapshots[account.id], kind: account.kind, now: store.now, hasError: store.errors[account.id] != nil)
+    }
     private var providerContent: some View {
-        VStack(spacing: 9) {
-            providerGroups("Claude", subscription: .claudeCode, api: .claudeAPI)
-            providerGroups("OpenAI", subscription: .codex, api: .openAIAPI)
-        }
-    }
-    @ViewBuilder
-    private func providerGroups(_ name: String, subscription: ConnectionKind, api: ConnectionKind) -> some View {
-        let subscriptions = store.accounts.filter { $0.kind == subscription }
-        let billing = store.accounts.filter { $0.kind == api }
-        if !subscriptions.isEmpty { compactGroup(name, trailing: "Weekly remaining", accounts: subscriptions) }
-        if !billing.isEmpty { compactGroup("\(name) API spending", trailing: "This month · UTC", accounts: billing) }
-    }
-    @ViewBuilder
-    private func accountEmail(_ snapshot: Snapshot?) -> some View {
-        if let email = snapshot?.identity, !email.isEmpty {
-            Text(email).font(.system(size: 9)).foregroundStyle(.secondary)
-                .lineLimit(1).truncationMode(.middle).help(email)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.leading, 23).padding(.top, -3).padding(.bottom, 2)
-        }
-    }
-    private func compactGroup(_ title: String, trailing: String, accounts: [Account]) -> some View {
-        VStack(spacing: 3) {
-            HStack {
-                Text(title).font(.system(size: 11, weight: .medium))
-                Spacer()
-                Text(trailing).font(.system(size: 9))
-            }.foregroundStyle(.secondary).padding(.bottom, 4)
-            ForEach(accounts) { account in
-                let snapshot = store.snapshots[account.id]
-                let windows = snapshot?.primaryWeeklyWindow(for: account.kind).map { [$0] } ?? []
-                if windows.isEmpty {
-                    CompactRow(account: account, snapshot: snapshot, window: nil, error: store.errors[account.id], now: store.now, claudeSignedIn: store.claudeSignedIn[account.id], action: manage)
-                    accountEmail(snapshot)
-                } else {
-                    ForEach(windows) { window in
-                        CompactRow(account: account, snapshot: snapshot, window: window, error: store.errors[account.id], now: store.now, claudeSignedIn: store.claudeSignedIn[account.id], action: manage)
-                        if window.id == windows.first?.id { accountEmail(snapshot) }
+        VStack(spacing: 8) {
+            if !attentionAccounts.isEmpty {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Needs attention").font(.system(size: 10, weight: .semibold)).foregroundStyle(.secondary)
+                    ForEach(attentionAccounts) { account in
+                        let status = readingStatus(account)
+                        Button { manage(account) } label: {
+                            HStack(spacing: 7) {
+                                Image(systemName: store.needsSignIn(account) ? "person.crop.circle.badge.exclamationmark" : status.symbol)
+                                    .frame(width: 14).foregroundStyle(.orange)
+                                Text(account.name).fontWeight(.medium).lineLimit(1)
+                                Spacer(minLength: 4)
+                                Text(store.needsSignIn(account) ? "Sign in" : (store.errors[account.id] != nil ? "Check" : status.title)).foregroundStyle(.secondary).lineLimit(1)
+                                Image(systemName: "chevron.right").font(.system(size: 8, weight: .semibold)).foregroundStyle(.tertiary)
+                            }.font(.system(size: 11)).contentShape(Rectangle())
+                        }.buttonStyle(.plain)
                     }
-                }
-                if let snapshot, let session = snapshot.sessionWindow(for: account.kind) {
-                    let staleSession = snapshot.isStale(at: store.now, windows: [session])
-                    HStack(spacing: 7) {
-                        Text("5h session").fontWeight(.bold).frame(width: 82, alignment: .leading)
-                        AllowanceBar(remaining: session.remainingPercent, unavailable: staleSession || store.errors[account.id] != nil || !account.enabled)
-                            .frame(width: 42, height: 3)
-                        Spacer(minLength: 0)
-                        Text(staleSession ? "Waiting for update" : "\(Int(session.remainingPercent))% left").monospacedDigit()
-                    }.font(.system(size: 9)).foregroundStyle(.secondary)
-                        .padding(.leading, 23).padding(.bottom, 5)
+                }.padding(11).background(Color.orange.opacity(0.055), in: RoundedRectangle(cornerRadius: 12))
+            }
+            ForEach(MenuProvider.allCases, id: \.self) { provider in
+                let accounts = store.accounts.filter { $0.kind.provider == provider }
+                if !accounts.isEmpty {
+                    VStack(spacing: 0) {
+                        HStack {
+                            Text(provider.title).font(.system(size: 10, weight: .semibold))
+                            Spacer()
+                            Text("\(accounts.count)").font(.system(size: 9)).monospacedDigit()
+                        }.foregroundStyle(.secondary).padding(.bottom, 5)
+                        ForEach(accounts) { account in
+                            CompactAccountRow(account: account, snapshot: store.snapshots[account.id], error: store.errors[account.id], now: store.now, cached: store.isCached(account),
+                                expanded: expandedAccountID == account.id,
+                                history: expandedAccountID == account.id ? store.history(for: account) : [],
+                                expand: { expandedAccountID = expandedAccountID == account.id ? nil : account.id },
+                                manage: { manage(account) }, openUsage: { store.openUsage(account) })
+                            if account.id != accounts.last?.id { Divider().opacity(0.3).padding(.vertical, 4) }
+                        }
+                    }.padding(.horizontal, 11).padding(.vertical, 9)
+                        .background(Color.primary.opacity(0.045), in: RoundedRectangle(cornerRadius: 12))
                 }
             }
-        }.padding(.horizontal, 11).padding(.vertical, 10)
-            .background(Color.primary.opacity(0.045), in: RoundedRectangle(cornerRadius: 12))
+        }
     }
 }
 
-private struct CompactRow: View {
+private struct CompactAccountRow: View {
     let account: Account
     let snapshot: Snapshot?
-    let window: QuotaWindow?
     let error: String?
     let now: Date
-    let claudeSignedIn: Bool?
-    let action: () -> Void
-    private var stale: Bool { snapshot?.isStale(at: now, windows: window.map { [$0] } ?? []) ?? false }
+    let cached: Bool
+    let expanded: Bool
+    let history: [UsageHistoryPoint]
+    let expand: () -> Void
+    let manage: () -> Void
+    let openUsage: () -> Void
+    private var status: AllowanceStatus { AllowanceStatus.evaluate(snapshot: snapshot, kind: account.kind, now: now, hasError: error != nil) }
+    private var window: QuotaWindow? { snapshot?.applicableWindows(for: account.kind).min { $0.remainingPercent < $1.remainingPercent } }
     private var detail: String {
-        if !account.enabled { return "paused" }
-        if account.kind == .claudeCode && snapshot == nil, let claudeSignedIn { return claudeSignedIn ? "refresh" : "sign in" }
-        if error != nil { return "check account" }
-        if stale { return "stale" }
-        if snapshot?.providerRestricted == true { return "Provider limit" }
-        guard let window else { return snapshot?.costUSD == nil ? (snapshot == nil ? "no reading" : "Weekly unavailable") : "API cost" }
-        guard let reset = window.resetsAt else { return "Reset unknown" }
-        return "Resets \(reset.formatted(.dateTime.weekday(.abbreviated)))"
-    }
-    private var value: String {
-        if let window { return "\(Int(window.remainingPercent))% left" }
-        if let amount = snapshot?.costUSD { return amount.formatted(.currency(code: "USD")) }
-        return "—"
+        if !account.enabled { return "Paused" }
+        if error != nil { return "Check connection" }
+        if cached { return "Saved reading · checking for update" }
+        if status.state == .stale { return "Last known · waiting for update" }
+        if status.state == .restricted { return "Provider restriction" }
+        if snapshot?.unlimited == true { return "No reported limit" }
+        if let balanceLabel = snapshot?.balanceLabel { return balanceLabel }
+        if snapshot?.balanceUSD != nil { return "Credit balance" }
+        if snapshot?.costUSD != nil { return "Spent this month · UTC" }
+        if let window { return "\(shortWindowLabel(window)) · \(resetText(window.resetsAt, at: now))" }
+        return snapshot == nil ? "Waiting for first reading" : "Quota unavailable"
     }
     var body: some View {
-        Button(action: action) {
-            HStack(spacing: 7) {
-                ProviderMark(provider: account.kind == .codex || account.kind == .openAIAPI ? .openAI : .claude).frame(width: 16)
-                Text(account.name).font(.system(size: 12, weight: .semibold)).lineLimit(1).frame(width: 82, alignment: .leading)
-                if let window {
-                    AllowanceBar(remaining: window.remainingPercent, unavailable: stale || error != nil || !account.enabled || snapshot?.providerRestricted == true)
-                        .frame(width: 42, height: 4)
-                } else { Color.clear.frame(width: 42, height: 4) }
-                Spacer(minLength: 0)
-                Text(detail).font(.system(size: 9)).foregroundStyle(stale || error != nil ? Color.orange : Color.secondary).lineLimit(1).minimumScaleFactor(0.85)
-                Text(value).font(.system(size: 14, weight: .bold)).monospacedDigit().frame(minWidth: 55, alignment: .trailing)
-                    .foregroundStyle(stale || !account.enabled ? .secondary : .primary)
-            }.frame(height: 25).contentShape(Rectangle())
-        }.buttonStyle(.plain)
-            .help("\(account.kind.title) · \(account.name)\n\(window?.label ?? "") · \(detail)\n\(error ?? snapshot?.note ?? "Click for details and account settings.")")
-            .accessibilityLabel("\(account.name), \(account.kind.title), \(window?.label ?? ""), \(value), \(detail)")
+        VStack(alignment: .leading, spacing: 6) {
+            Button(action: expand) {
+                VStack(spacing: 4) {
+                    HStack(spacing: 7) {
+                        ProviderMark(provider: account.kind.provider, size: 14)
+                        Text(account.name).font(.system(size: 12, weight: .semibold)).lineLimit(1)
+                        Spacer(minLength: 5)
+                        Text(readingValue(snapshot, window: window)).font(.system(size: 13, weight: .semibold)).monospacedDigit()
+                            .foregroundStyle(error != nil || cached || status.state == .stale || !account.enabled ? .secondary : .primary)
+                        Image(systemName: expanded ? "chevron.up" : "chevron.down").font(.system(size: 8, weight: .semibold)).foregroundStyle(.tertiary)
+                    }
+                    HStack(spacing: 7) {
+                        Text(detail).font(.system(size: 9)).foregroundStyle(error != nil || status.state == .restricted ? Color.orange : Color.secondary).lineLimit(1)
+                        Spacer(minLength: 2)
+                        if let window {
+                            AllowanceBar(remaining: window.remainingPercent, unavailable: error != nil || cached || status.state == .stale || !account.enabled || status.state == .restricted)
+                                .frame(width: 54, height: 3)
+                        }
+                    }.padding(.leading, 21)
+                }.padding(.vertical, 4).contentShape(Rectangle())
+            }.buttonStyle(.plain).help("\(account.kind.title) · click for limits and actions")
+                .accessibilityLabel("\(account.name), \(readingValue(snapshot, window: window)), \(detail), \(expanded ? "collapse" : "show details")")
+            if expanded {
+                VStack(alignment: .leading, spacing: 8) {
+                    if let email = account.expectedIdentity ?? snapshot?.identity {
+                        Text(email).font(.system(size: 10)).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle).textSelection(.enabled)
+                    }
+                    if let snapshot {
+                        ForEach(snapshot.windows) { window in QuotaDetailRow(window: window, now: now, unavailable: error != nil || !account.enabled || snapshot.providerRestricted == true) }
+                        HistorySparkline(points: history)
+                        Text(readingAge(snapshot.observedAt, at: now)).font(.system(size: 9)).foregroundStyle(.tertiary)
+                    }
+                    if let error { Text(error).font(.system(size: 10)).foregroundStyle(.orange).fixedSize(horizontal: false, vertical: true) }
+                    HStack {
+                        Button(action: openUsage) { Label("Open usage", systemImage: "arrow.up.right") }
+                        Spacer()
+                        Button(action: manage) { Label(error == nil ? "Account" : "Fix connection", systemImage: "gearshape") }
+                    }.font(.system(size: 10)).buttonStyle(.plain).foregroundStyle(.secondary)
+                }.padding(.leading, 21).padding(.bottom, 4)
+            }
+        }
     }
 }
 
+private func shortWindowLabel(_ window: QuotaWindow) -> String {
+    if window.durationMinutes == 300 { return "5h session" }
+    if window.durationMinutes == 10_080 { return window.label.lowercased().contains("all models") || window.id == "7-day" || window.id.lowercased().hasPrefix("codex.") ? "Week" : window.label.replacingOccurrences(of: " · 7d", with: "") }
+    return window.label
+}
+private func resetText(_ date: Date?, at now: Date) -> String {
+    guard let date else { return "reset unknown" }
+    let seconds = date.timeIntervalSince(now)
+    guard seconds > 0 else { return "awaiting refresh" }
+    let minutes = max(1, Int(ceil(seconds / 60)))
+    if minutes < 60 { return "resets in \(minutes)m" }
+    if minutes < 1440 { return "resets in \(minutes / 60)h\(minutes % 60 == 0 ? "" : " \(minutes % 60)m")" }
+    return "resets \(date.formatted(.dateTime.weekday(.abbreviated).hour().minute()))"
+}
+private func readingAge(_ date: Date, at now: Date) -> String {
+    let minutes = max(0, Int(now.timeIntervalSince(date) / 60))
+    if minutes == 0 { return "Read just now" }
+    if minutes < 60 { return "Read \(minutes)m ago" }
+    if minutes < 1440 { return "Read \(minutes / 60)h \(minutes % 60)m ago" }
+    return "Read \(minutes / 1440)d ago"
+}
+private func readingValue(_ snapshot: Snapshot?, window: QuotaWindow?) -> String {
+    if snapshot?.unlimited == true { return "Unlimited" }
+    if let balance = snapshot?.balanceUSD { return balance.formatted(.currency(code: "USD")) }
+    if let window { return "\(Int(window.remainingPercent))% left" }
+    if let cost = snapshot?.costUSD { return cost.formatted(.currency(code: "USD")) }
+    if snapshot?.balanceLabel == "No key budget" { return "Not set" }
+    return "No reading"
+}
+private struct QuotaDetailRow: View {
+    let window: QuotaWindow
+    let now: Date
+    var unavailable = false
+    var body: some View {
+        let stale = window.resetsAt.map { $0 <= now } ?? false
+        VStack(spacing: 3) {
+            HStack {
+                Text(shortWindowLabel(window)).lineLimit(1)
+                Spacer()
+                Text("\(Int(window.remainingPercent))% left").monospacedDigit()
+            }.font(.system(size: 10))
+            HStack {
+                Text(resetText(window.resetsAt, at: now)).font(.system(size: 9)).foregroundStyle(.secondary)
+                Spacer()
+                AllowanceBar(remaining: window.remainingPercent, unavailable: unavailable || stale).frame(width: 64, height: 3)
+            }
+        }.foregroundStyle(unavailable || stale ? .secondary : .primary)
+    }
+}
+private struct HistorySparkline: View {
+    let points: [UsageHistoryPoint]
+    private var series: [(Date, Double)] {
+        let hasQuota = points.contains { $0.remainingPercent != nil }
+        let hasBalance = points.contains { $0.balanceUSD != nil }
+        return points.compactMap { point in
+            let value: Double?
+            if hasQuota { value = point.remainingPercent }
+            else if hasBalance { value = point.balanceUSD.map { NSDecimalNumber(decimal: $0).doubleValue } }
+            else { value = point.costUSD.map { NSDecimalNumber(decimal: $0).doubleValue } }
+            return value.map { (point.timestamp, $0) }
+        }
+    }
+    private var values: [Double] { series.map { $0.1 } }
+    var body: some View {
+        if values.count >= 2 {
+            VStack(alignment: .leading, spacing: 3) {
+                SparklineShape(values: values, dates: series.map { $0.0 }).stroke(Color.accentColor.opacity(0.75), style: StrokeStyle(lineWidth: 1.2, lineCap: .round, lineJoin: .round)).frame(height: 26)
+                HStack {
+                    Text("Recent readings")
+                    Spacer()
+                    if let first = points.first { Text(first.timestamp, format: .dateTime.hour().minute()) }
+                    Text("→")
+                    if let last = points.last { Text(last.timestamp, format: .dateTime.hour().minute()) }
+                }.font(.system(size: 8)).foregroundStyle(.tertiary)
+            }.accessibilityElement(children: .ignore).accessibilityLabel("\(values.count) recent local usage readings")
+        }
+    }
+}
+private struct SparklineShape: Shape {
+    let values: [Double]
+    let dates: [Date]
+    func path(in rect: CGRect) -> Path {
+        guard values.count > 1, let low = values.min(), let high = values.max() else { return Path() }
+        let range = max(high - low, 1)
+        var path = Path()
+        for (index, value) in values.enumerated() {
+            let duration = (dates.last ?? .distantPast).timeIntervalSince(dates.first ?? .distantPast)
+            let position = dates.count == values.count && duration > 0 ? dates[index].timeIntervalSince(dates[0]) / duration : Double(index) / Double(values.count - 1)
+            let point = CGPoint(x: CGFloat(position) * rect.width, y: rect.midY - CGFloat((value - (high + low) / 2) / range) * max(0, rect.height - 4))
+            if index == 0 { path.move(to: point) } else { path.addLine(to: point) }
+        }
+        return path
+    }
+}
 private struct SettingsCard<Content: View>: View {
     @ViewBuilder let content: Content
     var body: some View {
-        content.padding(16).frame(maxWidth: .infinity, alignment: .leading)
-            .background(Color.primary.opacity(0.045), in: RoundedRectangle(cornerRadius: 14))
-            .overlay(RoundedRectangle(cornerRadius: 14).stroke(Color.primary.opacity(0.06), lineWidth: 1))
+        content.padding(14).frame(maxWidth: .infinity, alignment: .leading)
+            .background(Color.primary.opacity(0.045), in: RoundedRectangle(cornerRadius: 12))
+            .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color.primary.opacity(0.06), lineWidth: 1))
     }
 }
-
 private struct AccountReading: View {
     let account: Account
     let snapshot: Snapshot?
     let error: String?
     let now: Date
+    let cached: Bool
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        let window = snapshot?.applicableWindows(for: account.kind).min { $0.remainingPercent < $1.remainingPercent }
+        VStack(alignment: .leading, spacing: 9) {
             HStack {
+                ProviderMark(provider: account.kind.provider)
                 Text(account.name).font(.system(size: 14, weight: .semibold)).lineLimit(1)
                 Spacer()
                 if !account.enabled { Image(systemName: "pause.fill").foregroundStyle(.secondary).help("Paused") }
                 else if error != nil { Image(systemName: "exclamationmark.circle.fill").foregroundStyle(.orange).help("Connection needs attention") }
+                Text(readingValue(snapshot, window: window)).font(.system(size: 15, weight: .semibold, design: .rounded)).monospacedDigit()
             }
-            if let email = account.expectedIdentity ?? snapshot?.identity {
-                Text(email).font(.system(size: 10)).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle).help(email).textSelection(.enabled)
-            }
-            if let snapshot, let window = snapshot.primaryWeeklyWindow(for: account.kind) {
-                let stale = snapshot.isStale(at: now, windows: [window])
-                HStack(alignment: .firstTextBaseline) {
-                    Text("\(Int(window.remainingPercent))%").font(.system(size: 28, weight: .semibold, design: .rounded)).monospacedDigit()
-                    Text("weekly left").font(.system(size: 11)).foregroundStyle(.secondary)
-                    Spacer()
-                    if let reset = window.resetsAt { Text("Resets \(reset.formatted(.dateTime.weekday(.abbreviated)))").font(.system(size: 10)).foregroundStyle(.secondary) }
-                }.foregroundStyle(stale || !account.enabled ? Color.secondary : .primary)
-                AllowanceBar(remaining: window.remainingPercent, unavailable: stale || error != nil || !account.enabled || snapshot.providerRestricted == true).frame(height: 5)
-                if let session = snapshot.sessionWindow(for: account.kind) {
-                    let sessionStale = snapshot.isStale(at: now, windows: [session])
-                    HStack {
-                        Text("5h session").fontWeight(.bold)
-                        AllowanceBar(remaining: session.remainingPercent, unavailable: sessionStale || error != nil || !account.enabled).frame(width: 48, height: 3)
-                        Spacer()
-                        Text(sessionStale ? "Waiting for update" : "\(Int(session.remainingPercent))% left").monospacedDigit()
-                    }.font(.system(size: 10)).foregroundStyle(.secondary)
-                }
-                let additional = snapshot.weeklyWindows.filter { $0.id != window.id }
-                if !additional.isEmpty {
-                    DisclosureGroup("Additional limits") {
-                        ForEach(additional) { extra in
-                            HStack {
-                                Text(extra.label.replacingOccurrences(of: " · 7d", with: ""))
-                                Spacer()
-                                Text("\(Int(extra.remainingPercent))% left").monospacedDigit()
-                            }.font(.system(size: 10)).foregroundStyle(.secondary).padding(.top, 4)
-                        }
-                    }.font(.system(size: 10)).foregroundStyle(.secondary)
-                }
-                if stale { Text("Last known reading · waiting for an update").font(.caption2).foregroundStyle(.orange) }
-            } else if let amount = snapshot?.costUSD {
-                Text(amount, format: .currency(code: "USD")).font(.system(size: 26, weight: .semibold, design: .rounded))
-                Text("API spending · this UTC month").font(.system(size: 10)).foregroundStyle(.secondary)
-            } else {
-                Text(error != nil ? "Needs attention" : (snapshot == nil ? "Waiting for a reading" : "Weekly limit unavailable")).font(.system(size: 12)).foregroundStyle(.secondary).padding(.vertical, 8)
-            }
-            if snapshot?.providerRestricted == true {
-                Text("The provider reports a usage or credit restriction. Remaining percentages do not mean requests are available.")
-                    .font(.system(size: 10)).foregroundStyle(.orange).fixedSize(horizontal: false, vertical: true)
+            if let email = account.expectedIdentity ?? snapshot?.identity { Text(email).font(.system(size: 10)).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle).textSelection(.enabled) }
+            if let snapshot {
+                if let label = snapshot.balanceLabel { Text(label).font(.system(size: 10)).foregroundStyle(.secondary) }
+                else if snapshot.balanceUSD != nil { Text("Credit balance").font(.system(size: 10)).foregroundStyle(.secondary) }
+                else if snapshot.costUSD != nil { Text("API spending · this UTC month").font(.system(size: 10)).foregroundStyle(.secondary) }
+                ForEach(snapshot.windows) { window in QuotaDetailRow(window: window, now: now, unavailable: error != nil || !account.enabled || snapshot.providerRestricted == true) }
+                if cached || snapshot.isStale(at: now) { Text(cached ? "Saved reading · checking for update" : "Last known reading · waiting for an update").font(.caption2).foregroundStyle(.orange) }
+                if snapshot.providerRestricted == true { Text("Provider restriction. These percentages do not guarantee requests are available.").font(.system(size: 10)).foregroundStyle(.orange) }
             }
             if let error { Text(error).font(.system(size: 10)).foregroundStyle(.orange).fixedSize(horizontal: false, vertical: true) }
         }
@@ -226,84 +316,372 @@ private struct AccountReading: View {
 struct AccountsView: View {
     @ObservedObject var store: AppStore
     var showMenu: () -> Void
+    @ViewState private var selectedKind: ConnectionKind = .claudeCode
     @ViewState private var name = ""
-    @ViewState private var kind: ConnectionKind = .openAIAPI
     @ViewState private var secret = ""
-    @ViewState private var error: String?
+    @ViewState private var scopeID = ""
+    @ViewState private var connectionError: String?
+    @ViewState private var addingConnection = false
+    @ViewState private var onboarding = false
     @ViewState private var removing: Account?
     @ViewState private var renaming: Account?
     @ViewState private var newName = ""
     @ViewState private var keyAccount: Account?
     @ViewState private var replacement = ""
+
     var body: some View {
         VStack(spacing: 0) {
             HStack(spacing: 12) {
-                Image(systemName: "gauge.with.dots.needle.33percent").font(.system(size: 24)).foregroundStyle(.primary)
-                    .frame(width: 44, height: 44).background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 12))
+                Image(systemName: "gauge.with.dots.needle.33percent").font(.system(size: 22)).foregroundStyle(.primary)
                 VStack(alignment: .leading, spacing: 3) {
-                    Text("Settings").font(.system(size: 23, weight: .semibold))
-                    Text("Your accounts. Your menu bar.").font(.system(size: 12)).foregroundStyle(.secondary)
+                    Text(store.accounts.isEmpty ? "Welcome to Ai-llowance" : "Settings").font(.system(size: 21, weight: .semibold))
+                    Text(store.accounts.isEmpty ? "Connect once. Know what’s left." : "Your accounts. Your menu bar.").font(.system(size: 11)).foregroundStyle(.secondary)
                 }
                 Spacer()
                 if store.refreshing { ProgressView().controlSize(.small) }
-                Text(store.refreshSummary).font(.system(size: 11)).foregroundStyle(.secondary)
-                Button { store.refresh(force: true) } label: { Image(systemName: "arrow.clockwise").frame(width: 28, height: 28) }
-                    .buttonStyle(.plain).help("Refresh accounts").accessibilityLabel("Refresh accounts")
-                    .disabled(store.demo || store.paused || store.refreshing)
-            }.padding(24)
+                Text(store.refreshSummary).font(.system(size: 10)).foregroundStyle(.secondary).lineLimit(1)
+                Button { store.rediscoverTools(); store.refresh(force: true) } label: { Image(systemName: "arrow.clockwise").frame(width: 26, height: 26) }
+                    .buttonStyle(.plain).help("Refresh accounts").accessibilityLabel("Refresh accounts").disabled(store.demo || store.paused || store.refreshing)
+            }.padding(22)
             Divider().opacity(0.4)
-            ScrollView {
-                VStack(alignment: .leading, spacing: 24) {
-                    if store.demo { Text("Sample accounts · sign-in is disabled in this preview").font(.caption).foregroundStyle(.orange) }
-                    menuBarSettings
-                    accountSection("Claude", kinds: [.claudeCode, .claudeAPI], provider: .claude)
-                    accountSection("OpenAI", kinds: [.codex, .openAIAPI], provider: .openAI)
-                    UpdateSettings(updater: store.updater)
-                    advancedSettings
-                    if let notice = store.notice {
-                        Label(notice, systemImage: "info.circle").font(.system(size: 11)).foregroundStyle(.orange).fixedSize(horizontal: false, vertical: true)
-                    }
-                }.padding(24)
+            ScrollViewReader { proxy in
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 18) {
+                        if store.demo { Text("Sample accounts · sign-in is disabled").font(.caption).foregroundStyle(.orange) }
+                        if store.accounts.isEmpty || onboarding { connectionSetup }
+                        ForEach(MenuProvider.allCases, id: \.self) { provider in
+                            if store.accounts.contains(where: { $0.kind.provider == provider }) { accountSection(provider) }
+                        }
+                        if !store.accounts.isEmpty && !onboarding {
+                            SettingsCard {
+                                DisclosureGroup(isExpanded: $addingConnection) { connectionForm.padding(.top, 12) } label: {
+                                    Label("Add a connection", systemImage: "plus.circle").font(.system(size: 13, weight: .semibold))
+                                }
+                            }
+                        }
+                        behaviorSettings
+                        DisclosureGroup("Menu bar & appearance") { menuBarSettings.padding(.top, 8) }.font(.system(size: 12, weight: .medium))
+                        UpdateSettings(updater: store.updater)
+                        moreConnections
+                        if let notice = store.notice { Label(notice, systemImage: "info.circle").font(.system(size: 11)).foregroundStyle(.orange).fixedSize(horizontal: false, vertical: true) }
+                    }.padding(22)
+                }
+                .onAppear { if store.accounts.isEmpty { onboarding = true }; store.rediscoverTools(); scrollToSelected(proxy) }
+                .onChange(of: store.selectedAccountID) { _, _ in scrollToSelected(proxy) }
+                .onChange(of: onboarding) { _, _ in scrollToSelected(proxy) }
             }
             Divider().opacity(0.4)
-            HStack(spacing: 8) {
-                Image(systemName: "lock.shield").foregroundStyle(.secondary)
-                Text("Stored on this Mac").foregroundStyle(.secondary)
+            HStack {
+                Label("Stored on this Mac", systemImage: "lock.shield").foregroundStyle(.secondary)
                 Spacer()
-                Button("Show menu", action: showMenu).help("Open the menu-bar panel")
+                Button("Show menu", action: showMenu)
                 Text("\(AppUpdater.version) preview").foregroundStyle(.tertiary)
-                Button { store.togglePause() } label: { Image(systemName: store.paused ? "play.fill" : "pause.fill").frame(width: 26, height: 26) }
-                    .help(store.paused ? "Resume refresh" : "Pause refresh").accessibilityLabel(store.paused ? "Resume refresh" : "Pause refresh").disabled(store.demo)
-                Button { NSApplication.shared.terminate(nil) } label: { Image(systemName: "power").frame(width: 26, height: 26) }
-                    .help("Quit Ai-llowance").accessibilityLabel("Quit Ai-llowance")
-            }.font(.system(size: 10)).buttonStyle(.plain).padding(.horizontal, 24).padding(.vertical, 10)
-        }.frame(minWidth: 640, idealWidth: 680, minHeight: 620)
-            .background(Color(nsColor: .windowBackgroundColor)).preferredColorScheme(store.menuPreferences.theme.colorScheme)
+                Button { NSApplication.shared.terminate(nil) } label: { Image(systemName: "power").frame(width: 26, height: 26) }.buttonStyle(.plain).help("Quit Ai-llowance")
+            }.font(.system(size: 10)).padding(.horizontal, 22).padding(.vertical, 12)
+        }.frame(minWidth: 580, minHeight: 560).preferredColorScheme(store.menuPreferences.theme.colorScheme)
         .alert("Remove \(removing?.name ?? "account")?", isPresented: Binding(get: { removing != nil }, set: { if !$0 { removing = nil } })) {
             Button("Cancel", role: .cancel) { removing = nil }
             Button("Remove", role: .destructive) { if let account = removing { Task { await store.remove(account) } }; removing = nil }
-        } message: { Text("Its admin key or app-owned OpenAI sign-in will be cleared. Any legacy Ai-llowance status line is restored automatically. Claude sign-ins remain managed by Claude; use Sign out in Terminal first if you also want to clear that login.") }
+        } message: {
+            Text("The connection and its app-owned key or OpenAI sign-in will be removed. Existing CLI sign-ins are kept. For Claude, use Sign out in Terminal first if you also want to clear that login.")
+        }
         .sheet(item: $renaming) { account in
             VStack(alignment: .leading, spacing: 16) {
                 Text("Rename account").font(.headline)
-                TextField("Name", text: $newName)
-                HStack { Button("Cancel") { renaming = nil }; Spacer(); Button("Save") { store.rename(account, to: newName); renaming = nil } }
-            }.padding(24).frame(width: 360)
+                TextField("Account name", text: $newName).textFieldStyle(.roundedBorder)
+                HStack { Button("Cancel") { renaming = nil }; Spacer(); Button("Save") { store.rename(account, to: newName); renaming = nil }.keyboardShortcut(.defaultAction) }
+            }.padding(24).frame(width: 340)
         }
         .sheet(item: $keyAccount) { account in
             VStack(alignment: .leading, spacing: 16) {
-                Text("Replace admin key").font(.headline)
-                SecureField("New admin key", text: $replacement)
+                Text("Replace \(account.name) key").font(.headline)
+                SecureField(keyLabel(account.kind), text: $replacement).textFieldStyle(.roundedBorder)
                 HStack {
                     Button("Cancel") { replacement = ""; keyAccount = nil }
                     Spacer()
                     Button("Save to Keychain") {
                         do { try store.replaceKey(account, secret: replacement); replacement = ""; keyAccount = nil }
                         catch { store.notice = store.safeMessage(error) }
-                    }.disabled(replacement.isEmpty)
+                    }.disabled(replacement.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || store.demo)
                 }
             }.padding(24).frame(width: 420)
         }
+    }
+    private func scrollToSelected(_ proxy: ScrollViewProxy) {
+        guard !onboarding, let id = store.selectedAccountID else { return }
+        DispatchQueue.main.async { proxy.scrollTo(id, anchor: .top) }
+    }
+    private var busyConnecting: Bool { store.connectingClaude || store.signingIn != nil || !store.waitingForClaude.isEmpty }
+    private var setupAccount: Account? { store.accounts.last { $0.kind == selectedKind } }
+    private var setupStep: Int {
+        guard let account = setupAccount else { return 1 }
+        guard let snapshot = store.snapshots[account.id], !store.isCached(account), store.errors[account.id] == nil,
+              !snapshot.isStale(at: store.now), snapshot.providerRestricted != true else { return 2 }
+        return 3
+    }
+    private var connectionSetup: some View {
+        SettingsCard {
+            VStack(alignment: .leading, spacing: 12) {
+                Label("Connect your first account", systemImage: "person.crop.circle.badge.plus").font(.system(size: 14, weight: .semibold))
+                HStack(spacing: 14) {
+                    Label("Choose", systemImage: setupStep > 1 ? "checkmark.circle" : "1.circle.fill")
+                    Label("Connect", systemImage: setupStep > 2 ? "checkmark.circle" : setupStep == 2 ? "2.circle.fill" : "2.circle")
+                    Label("First reading", systemImage: setupStep == 3 ? "checkmark.circle.fill" : "3.circle")
+                }.font(.system(size: 11)).foregroundStyle(.secondary)
+                connectionForm
+            }
+        }
+    }
+    private var connectionForm: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                ProviderMark(provider: selectedKind.provider, size: 19)
+                Picker("Service", selection: $selectedKind) {
+                    ForEach(ConnectionKind.allCases) { kind in Text(kind.title).tag(kind) }
+                }.labelsHidden()
+            }
+            .disabled(busyConnecting)
+            .onChange(of: selectedKind) { _, _ in secret = ""; scopeID = ""; name = ""; connectionError = nil; store.rediscoverTools() }
+            if selectedKind.isAPI { apiConnectionForm }
+            else { cliConnectionForm }
+            if let account = setupAccount, busyConnecting || store.needsSignIn(account) || store.errors[account.id] != nil {
+                accountActions(account)
+                if let error = store.errors[account.id] { Text(error).font(.system(size: 10)).foregroundStyle(.orange).fixedSize(horizontal: false, vertical: true) }
+            } else if let account = setupAccount, store.snapshots[account.id] == nil, store.refreshing {
+                Label("Reading your allowance…", systemImage: "arrow.clockwise").font(.system(size: 11)).foregroundStyle(.secondary)
+            }
+            if let connectionError { Text(connectionError).font(.system(size: 11)).foregroundStyle(.orange).fixedSize(horizontal: false, vertical: true) }
+            if let account = store.accounts.last(where: { $0.kind == selectedKind }), store.errors[account.id] == nil, !store.isCached(account), let snapshot = store.snapshots[account.id], !snapshot.isStale(at: store.now), snapshot.providerRestricted != true {
+                HStack {
+                    Label("First reading received · \(account.expectedIdentity ?? snapshot.identity ?? account.name)", systemImage: "checkmark.circle.fill")
+                        .font(.system(size: 11)).foregroundStyle(.green).lineLimit(2)
+                    Spacer()
+                    if onboarding { Button("Done") { onboarding = false; showMenu() }.controlSize(.small) }
+                }
+            }
+        }.disabled(store.demo)
+    }
+    private var cliConnectionForm: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            let installed = executable(for: selectedKind) != nil
+            HStack {
+                Label(installed ? "\(cliName(selectedKind)) found" : "Install \(cliName(selectedKind)) first", systemImage: installed ? "checkmark.circle" : "arrow.down.circle")
+                    .font(.system(size: 11)).foregroundStyle(installed ? Color.secondary : Color.primary)
+                Spacer()
+                Button("Check again") { store.rediscoverTools() }.controlSize(.small)
+                Button("Choose…") { chooseExecutable(selectedKind) }.controlSize(.small)
+            }
+            if !installed {
+                HStack {
+                    Link("Installation guide ↗", destination: installationURL(selectedKind))
+                    Text("Then return here. We’ll detect it.").foregroundStyle(.secondary)
+                }.font(.system(size: 11))
+            } else {
+                if selectedKind == .claudeCode {
+                    HStack {
+                        Button("Use existing Claude sign-in") { store.connectClaude(existing: true) }
+                            .disabled(store.accounts.contains { $0.kind == .claudeCode && $0.usesExistingClaude == true })
+                        Button("Add another account") { store.connectClaude(existing: false) }
+                    }.controlSize(.small).disabled(busyConnecting)
+                } else if selectedKind == .codex {
+                    HStack {
+                        Button("Use existing Codex sign-in") { store.connectOpenAI(existing: true) }.disabled(store.accounts.contains { $0.usesExistingCodex })
+                        Button("Add another account") { store.connectOpenAI() }
+                    }.controlSize(.small).disabled(busyConnecting)
+                } else if selectedKind == .copilot {
+                    HStack {
+                        Button("Connect Copilot (preview)") { store.connectCopilot() }.disabled(busyConnecting || store.accounts.contains { $0.kind == .copilot })
+                        Button("Sign in to Copilot…") { store.openCopilotSignIn() }
+                    }.controlSize(.small)
+                    Text("Uses your Copilot CLI sign-in. Quota support depends on your installed CLI.").font(.system(size: 10)).foregroundStyle(.secondary)
+                }
+            }
+            if selectedKind == .claudeCode || selectedKind == .codex {
+                Text(store.accounts.contains { $0.kind == selectedKind } ? "Another account? Use its own browser profile or private window. Check the email before continuing." : "Your existing CLI sign-in stays yours. No API key needed for a subscription.")
+                    .font(.system(size: 10)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            }
+            if busyConnecting { Label("Finish sign-in; your first reading will appear automatically.", systemImage: "arrow.up.right.square").font(.system(size: 11)).foregroundStyle(.secondary) }
+        }
+    }
+    private var apiConnectionForm: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            TextField("Account label (optional)", text: $name).textFieldStyle(.roundedBorder)
+            SecureField(keyLabel(selectedKind), text: $secret).textFieldStyle(.roundedBorder)
+            if selectedKind == .xai {
+                TextField("xAI team ID", text: $scopeID).textFieldStyle(.roundedBorder)
+                Text("Prepaid API credits · beta. Requires a team Management API key; a standard model API key or Grok subscription will not work.")
+                    .font(.system(size: 10)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            }
+            Text(selectedKind.explanation).font(.system(size: 10)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            HStack {
+                Button("Connect securely") {
+                    do {
+                        let account = try store.add(name: name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? suggestedAccountName : name, kind: selectedKind, secret: secret, existing: false,
+                            scopeID: scopeID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : scopeID.trimmingCharacters(in: .whitespacesAndNewlines))
+                        store.selectedAccountID = account.id
+                        secret = ""; scopeID = ""; name = ""; connectionError = nil
+                    } catch { connectionError = store.safeMessage(error) }
+                }.disabled(secret.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || (selectedKind == .xai && scopeID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty))
+                Link("Key & access guide ↗", destination: selectedKind.documentation)
+                Spacer()
+                Label("Saved in Keychain", systemImage: "lock").foregroundStyle(.secondary)
+            }.font(.system(size: 11)).controlSize(.small)
+        }
+    }
+    private func executable(for kind: ConnectionKind) -> URL? {
+        switch kind { case .claudeCode: store.claudeExecutable; case .codex: store.executable; case .copilot: store.copilotExecutable; default: nil }
+    }
+    private func chooseExecutable(_ kind: ConnectionKind) {
+        switch kind { case .claudeCode: store.chooseClaudeExecutable(); case .codex: store.chooseExecutable(); case .copilot: store.chooseCopilotExecutable(); default: break }
+    }
+    private func cliName(_ kind: ConnectionKind) -> String { kind == .claudeCode ? "Claude Code" : kind == .copilot ? "Copilot CLI" : "Codex CLI" }
+    private func installationURL(_ kind: ConnectionKind) -> URL {
+        switch kind {
+        case .claudeCode: URL(string: "https://code.claude.com/docs/en/setup")!
+        case .copilot: URL(string: "https://docs.github.com/en/copilot/how-tos/copilot-cli/install-copilot-cli")!
+        default: URL(string: "https://developers.openai.com/codex/cli")!
+        }
+    }
+    private var suggestedAccountName: String {
+        switch selectedKind {
+        case .openAIAPI: "OpenAI API"
+        case .claudeAPI: "Claude API"
+        default: selectedKind.provider.title
+        }
+    }
+    private func keyLabel(_ kind: ConnectionKind) -> String {
+        switch kind {
+        case .openAIAPI, .claudeAPI: "Organization admin API key"
+        case .openRouter: "OpenRouter API key"
+        case .vercelGateway: "AI Gateway API key"
+        case .xai: "xAI management API key"
+        default: "API key"
+        }
+    }
+    private func accountSection(_ provider: MenuProvider) -> some View {
+        let accounts = store.accounts.filter { $0.kind.provider == provider }
+        return VStack(alignment: .leading, spacing: 9) {
+            HStack {
+                Text(provider.title).font(.system(size: 13, weight: .semibold))
+                Text("\(accounts.count)").font(.system(size: 10)).foregroundStyle(.secondary)
+                Spacer()
+            }
+            ForEach(accounts) { account in
+                SettingsCard {
+                    VStack(alignment: .leading, spacing: 12) {
+                        AccountReading(account: account, snapshot: store.snapshots[account.id], error: store.errors[account.id], now: store.now, cached: store.isCached(account))
+                        accountActions(account)
+                        DisclosureGroup("Details & link preferences") {
+                            VStack(alignment: .leading, spacing: 10) {
+                                HistorySparkline(points: store.history(for: account))
+                                if let snapshot = store.snapshots[account.id] { Text("\(snapshot.source) · updated \(snapshot.observedAt.formatted(.dateTime.hour().minute()))").font(.system(size: 10)).foregroundStyle(.secondary) }
+                                if !store.browserProfiles.isEmpty {
+                                    Picker("Open links with", selection: Binding(get: { store.browserProfileID(account) ?? "" }, set: { store.setBrowserProfile(account, id: $0.isEmpty ? nil : $0) })) {
+                                        Text("System default browser").tag("")
+                                        ForEach(store.browserProfiles, id: \.id) { profile in Text(profile.name).tag(profile.id) }
+                                    }.font(.system(size: 11))
+                                }
+                                Text("Choose the browser profile signed into this account. Default-browser links use its current sign-in.").font(.system(size: 10)).foregroundStyle(.secondary)
+                            }.padding(.top, 8)
+                        }.font(.system(size: 11)).foregroundStyle(.secondary)
+                    }
+                }.id(account.id)
+                    .overlay(RoundedRectangle(cornerRadius: 12).stroke(store.selectedAccountID == account.id ? Color.accentColor.opacity(0.55) : .clear, lineWidth: 1.5))
+            }
+        }
+    }
+    @ViewBuilder
+    private func accountActions(_ account: Account) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            if store.waitingForClaude[account.id] != nil {
+                HStack {
+                    Label("Finish sign-in in your browser", systemImage: "arrow.up.right.square").foregroundStyle(.secondary)
+                    Spacer()
+                    Button("Stop waiting") { store.cancelClaudeSignIn(account) }.help("Close the sign-in Terminal window before retrying.")
+                }
+            } else if store.signingIn == account.id {
+                HStack {
+                    Text("Open the link in this account’s browser profile.").foregroundStyle(.secondary)
+                    Spacer()
+                    if store.codexSignInURL != nil { Button("Copy sign-in link") { store.copyCodexSignInLink() } }
+                    Button("Cancel") { store.cancelSignIn() }
+                }
+            }
+            HStack(spacing: 12) {
+                if store.needsSignIn(account) && store.signingIn != account.id && store.waitingForClaude[account.id] == nil {
+                    if account.kind.isAPI { Button("Replace key") { replacement = ""; keyAccount = account } }
+                    else if account.kind == .claudeCode { Button("Sign in") { store.openClaude(account, login: true) } }
+                    else if account.kind == .codex && !account.usesExistingCodex { Button("Sign in with this account") { store.signIn(account, openBrowser: false) }.disabled(busyConnecting) }
+                    else if account.kind == .copilot {
+                        Button("Sign in to Copilot…") { store.openCopilotSignIn() }
+                        Button("Check sign-in") { store.retryConnection(account) }
+                    } else { Button("Check Codex sign-in") { store.retryConnection(account) }.help("Sign in through Codex CLI, then check again.") }
+                } else if store.errors[account.id] != nil {
+                    Button("Retry connection") { store.retryConnection(account) }.disabled(store.refreshing)
+                } else { Button("Open usage ↗") { store.openUsage(account) } }
+                Spacer()
+                Menu {
+                    if account.kind == .claudeCode {
+                        Button("Open Claude Code") { store.openClaude(account) }
+                        Button("Open in a project…") { store.openClaude(account, chooseProject: true) }
+                        Button("Sign in again") { store.openClaude(account, login: true) }
+                        Button("Sign out in Terminal") { store.openClaude(account, logout: true) }
+                        Divider()
+                    } else if account.kind == .codex && !account.usesExistingCodex {
+                        Button("Sign in again") { store.signIn(account, openBrowser: false) }.disabled(busyConnecting)
+                        Divider()
+                    } else if account.kind.isAPI {
+                        Button("Replace key") { replacement = ""; keyAccount = account }
+                        Divider()
+                    }
+                    Button("Rename account") { newName = account.name; renaming = account }
+                    Button(account.enabled ? "Pause account" : "Resume account") { store.toggle(account) }
+                    Button("Remove account", role: .destructive) { removing = account }.disabled(store.refreshing || store.removing || busyConnecting)
+                } label: { Image(systemName: "ellipsis").frame(width: 22, height: 18) }
+                    .menuStyle(.borderlessButton).frame(width: 26).help("\(account.name) options").accessibilityLabel("\(account.name) options")
+            }
+        }.font(.system(size: 11)).controlSize(.small).disabled(store.demo)
+    }
+    private var behaviorSettings: some View {
+        SettingsCard {
+            VStack(alignment: .leading, spacing: 12) {
+                Toggle(isOn: Binding(get: { store.notificationsEnabled }, set: { store.setNotificationsEnabled($0) })) {
+                    Label("Quiet allowance alerts", systemImage: "bell.badge").font(.system(size: 12, weight: .medium))
+                }.toggleStyle(.switch).controlSize(.small)
+                Text("Low, empty, and available again. Only meaningful changes, grouped across accounts.").font(.system(size: 10)).foregroundStyle(.secondary)
+                Divider().opacity(0.4)
+                Toggle(isOn: Binding(get: { store.launchAtLogin }, set: { store.setLaunchAtLogin($0) })) {
+                    Label("Launch at login", systemImage: "sunrise").font(.system(size: 12, weight: .medium))
+                }.toggleStyle(.switch).controlSize(.small)
+                if store.loginItemNeedsApproval {
+                    Link("Allow Ai-llowance in Login Items ↗", destination: URL(string: "x-apple.systempreferences:com.apple.LoginItems-Settings.extension")!)
+                        .font(.system(size: 10))
+                }
+            }
+        }.disabled(store.demo)
+    }
+    private var moreConnections: some View {
+        SettingsCard {
+            DisclosureGroup("More tools & diagnostics") {
+                VStack(alignment: .leading, spacing: 12) {
+                    HStack {
+                        Text("Manual usage links").font(.system(size: 11, weight: .medium))
+                        Spacer()
+                        Link("Cursor ↗", destination: URL(string: "https://www.cursor.com/dashboard")!)
+                        Link("Gemini ↗", destination: URL(string: "https://aistudio.google.com/usage")!)
+                    }.font(.system(size: 11))
+                    Text("These links open provider dashboards; automatic quota tracking is not connected.").font(.system(size: 10)).foregroundStyle(.secondary)
+                    Divider().opacity(0.4)
+                    HStack {
+                        Button("Find installed tools") { store.rediscoverTools() }
+                        Button("Choose Codex…") { store.chooseExecutable() }
+                        Button("Choose Claude…") { store.chooseClaudeExecutable() }
+                        Button("Choose Copilot…") { store.chooseCopilotExecutable() }
+                    }.controlSize(.small).font(.system(size: 10))
+                    Text("Preview release · not notarized. No Ai-llowance analytics or backend.").font(.system(size: 10)).foregroundStyle(.secondary)
+                }.padding(.top, 10)
+            }.font(.system(size: 12, weight: .medium))
+        }.disabled(store.demo)
     }
     private var menuBarSettings: some View {
         SettingsCard {
@@ -319,7 +697,7 @@ struct AccountsView: View {
                 HStack {
                     Label("Menu bar", systemImage: "menubar.rectangle").font(.system(size: 13, weight: .semibold))
                     Spacer()
-                    Text("Weekly remaining").font(.system(size: 10)).foregroundStyle(.secondary)
+                    Text("Quota remaining").font(.system(size: 10)).foregroundStyle(.secondary)
                 }
                 HStack(spacing: 16) {
                     if store.menuEntries.isEmpty { Label("Usage", systemImage: "gauge.with.dots.needle.33percent") }
@@ -327,8 +705,8 @@ struct AccountsView: View {
                         HStack(spacing: 5) {
                             ProviderMark(provider: entry.provider)
                             if store.menuPreferences.display == .byAccount && store.menuPreferences.showAccountNames { Text(entry.label).lineLimit(1) }
-                            Text(entry.remainingPercent.map { "\(Int($0))%" } ?? "0%").monospacedDigit()
-                        }.accessibilityLabel("\(entry.label): \(entry.remainingPercent.map { "\(Int($0)) percent weekly remaining" } ?? "unavailable")")
+                            Text(entry.isUnlimited ? "∞" : (entry.remainingPercent.map { "\(Int($0))%" } ?? "0%!")).monospacedDigit()
+                        }.accessibilityLabel("\(entry.label): \(entry.isUnlimited ? "unlimited allowance" : (entry.remainingPercent.map { "\(Int($0)) percent quota remaining" } ?? "unavailable"))")
                     }
                     Spacer(minLength: 0)
                 }.font(.system(size: 12, weight: .medium)).padding(10)
@@ -370,7 +748,7 @@ struct AccountsView: View {
                 HStack {
                     VStack(alignment: .leading, spacing: 3) {
                         Text("Automatic refresh").font(.system(size: 12, weight: .medium))
-                        Text("About every minute, even with the panel closed.").font(.system(size: 10)).foregroundStyle(.secondary)
+                        Text("Adapts to activity and provider limits.").font(.system(size: 10)).foregroundStyle(.secondary)
                     }
                     Spacer()
                     Toggle("Automatic refresh", isOn: Binding(get: { !store.paused }, set: { if $0 == store.paused { store.togglePause() } }))
@@ -379,166 +757,7 @@ struct AccountsView: View {
             }
         }.disabled(store.demo)
     }
-    private func accountSection(_ title: String, kinds: [ConnectionKind], provider: MenuProvider) -> some View {
-        let accounts = store.accounts.filter { kinds.contains($0.kind) }
-        return VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                ProviderMark(provider: provider, size: 18)
-                Text(title).font(.system(size: 14, weight: .semibold))
-                Text("\(accounts.count)").font(.system(size: 10, weight: .medium)).foregroundStyle(.secondary)
-                    .padding(.horizontal, 6).padding(.vertical, 2).background(Color.primary.opacity(0.06), in: Capsule())
-                Spacer()
-                Button {
-                    if kinds.contains(.claudeCode) { store.connectClaude(existing: !store.accounts.contains { $0.kind == .claudeCode && $0.usesExistingClaude == true }) }
-                    else { store.connectOpenAI() }
-                } label: { Label("Add account", systemImage: "plus").font(.system(size: 11)) }
-                    .buttonStyle(.bordered).controlSize(.small)
-                    .disabled(store.demo || store.connectingClaude || store.signingIn != nil || !store.waitingForClaude.isEmpty)
-            }
-            if store.accounts.contains(where: { $0.kind == (provider == .claude ? .claudeCode : .codex) }) && store.signingIn == nil && store.waitingForClaude.isEmpty {
-                Text("Adding another account? Use a different Chrome profile or private window, and check the email before continuing.")
-                    .font(.system(size: 10)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-            }
-            if (provider == .claude ? store.claudeExecutable == nil : store.executable == nil) {
-                SettingsCard {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text(provider == .claude ? "Claude Code is needed to connect." : "Codex is needed to connect.")
-                            .font(.system(size: 12, weight: .medium))
-                        Text("Install it once, then return here. Already installed? Choose its location.")
-                            .font(.system(size: 11)).foregroundStyle(.secondary)
-                        HStack {
-                            Link("Installation guide ↗", destination: URL(string: provider == .claude ? "https://code.claude.com/docs/en/setup" : "https://developers.openai.com/codex/cli")!)
-                            Button("Choose installed app…") {
-                                if provider == .claude { store.chooseClaudeExecutable() } else { store.chooseExecutable() }
-                            }
-                        }.font(.system(size: 11))
-                    }
-                }
-            }
-            if accounts.isEmpty {
-                SettingsCard { Text("Connect \(title) to see your weekly usage here.").font(.system(size: 12)).foregroundStyle(.secondary) }
-            } else {
-                LazyVGrid(columns: [GridItem(.flexible(), alignment: .top), GridItem(.flexible(), alignment: .top)], alignment: .leading, spacing: 12) {
-                    ForEach(accounts) { account in
-                        SettingsCard {
-                            VStack(alignment: .leading, spacing: 14) {
-                                AccountReading(account: account, snapshot: store.snapshots[account.id], error: store.errors[account.id], now: store.now)
-                                if let other = store.duplicateIdentity(account) {
-                                    Text("Same email as \(other). If these use the same plan, keep just one connection to avoid counting it twice.")
-                                        .font(.system(size: 10)).foregroundStyle(.secondary)
-                                }
-                                Divider().opacity(0.4)
-                                accountActions(account)
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-    private func accountActions(_ account: Account) -> some View {
-        HStack(spacing: 11) {
-            if store.waitingForClaude[account.id] != nil {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Finish sign-in in your browser").foregroundStyle(.secondary)
-                    if store.accounts.first(where: { $0.kind == account.kind })?.id != account.id {
-                        Text("Use a different Chrome profile or private window. Check that you’re signing into the other email.")
-                            .foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-                    }
-                    Button("Stop waiting") { store.cancelClaudeSignIn(account) }.help("Close the sign-in Terminal window before retrying.")
-                }
-            } else if store.signingIn == account.id {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Finish sign-in in your browser").foregroundStyle(.secondary)
-                    if store.accounts.first(where: { $0.kind == account.kind })?.id != account.id {
-                        Text("Use a different Chrome profile or private window. Check that you’re signing into the other email.")
-                            .foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-                    }
-                    if store.codexSignInURL != nil {
-                        Button("Copy sign-in link") { store.copyCodexSignInLink() }
-                        Text("Open it in the Chrome profile for this account.").foregroundStyle(.secondary)
-                    }
-                    Button("Cancel sign-in") { store.cancelSignIn() }
-                }
-            } else if store.needsSignIn(account) {
-                if account.kind.isAPI {
-                    Button("Replace key") { replacement = ""; keyAccount = account }
-                } else if account.kind == .claudeCode {
-                    Button("Sign in") { store.openClaude(account, login: true) }
-                } else if account.kind == .codex && !account.usesExistingCodex {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Button("Sign in") { store.signIn(account) }
-                        Button("Use another browser profile") { store.signIn(account, openBrowser: false) }
-                    }.disabled(store.signingIn != nil)
-                } else if account.kind == .codex {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("Sign in through Codex CLI.").foregroundStyle(.secondary)
-                        Button("Check sign-in") { store.retryConnection(account) }
-                    }
-                }
-            } else {
-                Link("View usage ↗", destination: account.kind.dashboard).foregroundStyle(.secondary)
-            }
-            Spacer(minLength: 2)
-            if account.kind == .claudeCode {
-                Menu {
-                    Button("Open Claude Code") { store.openClaude(account) }
-                    Button("Open in a project…") { store.openClaude(account, chooseProject: true) }
-                    Button("Sign in again") { store.openClaude(account, login: true) }
-                    Button("Sign out in Terminal") { store.openClaude(account, logout: true) }
-                } label: { Image(systemName: "ellipsis") }.menuStyle(.borderlessButton).frame(width: 16).help("Claude connection options")
-            } else if account.kind.isAPI {
-                Button { replacement = ""; keyAccount = account } label: { Image(systemName: "key") }.help("Replace API key")
-            } else if !account.usesExistingCodex {
-                Button { store.signIn(account) } label: { Image(systemName: "person.crop.circle.badge.checkmark") }.help("Sign in again").disabled(store.signingIn != nil || !store.waitingForClaude.isEmpty)
-            }
-            Button { newName = account.name; renaming = account } label: { Image(systemName: "pencil") }.help("Rename account").accessibilityLabel("Rename \(account.name)")
-            Button { store.toggle(account) } label: { Image(systemName: account.enabled ? "pause.fill" : "play.fill") }
-                .help(account.enabled ? "Pause account" : "Resume account").accessibilityLabel(account.enabled ? "Pause \(account.name)" : "Resume \(account.name)")
-            Button(role: .destructive) { removing = account } label: { Image(systemName: "trash") }.help("Remove account").accessibilityLabel("Remove \(account.name)")
-                .disabled(store.refreshing || store.removing || store.signingIn != nil)
-        }.font(.system(size: 10)).buttonStyle(.plain).disabled(store.demo)
-    }
-    private var advancedSettings: some View {
-        SettingsCard {
-            DisclosureGroup("Advanced connections") {
-                VStack(alignment: .leading, spacing: 14) {
-                    Button("Use existing OpenAI / Codex sign-in") { store.connectOpenAI(existing: true) }
-                        .disabled(store.demo || store.refreshing || store.signingIn != nil || store.accounts.contains { $0.usesExistingCodex })
-                    Divider()
-                    Text("API spending").font(.system(size: 12, weight: .semibold))
-                    Picker("Provider", selection: $kind) {
-                        Text("OpenAI API").tag(ConnectionKind.openAIAPI)
-                        Text("Anthropic API").tag(ConnectionKind.claudeAPI)
-                    }.onChange(of: kind) { _, _ in secret = ""; error = nil }
-                    TextField("Account label (optional)", text: $name)
-                    SecureField("Organization admin API key", text: $secret)
-                    Text("API spending is separate from subscriptions and credit balances. The admin key is stored in Keychain.").font(.system(size: 10)).foregroundStyle(.secondary)
-                    Button("Connect API spending") {
-                        do {
-                            try store.add(name: name.isEmpty ? (kind == .openAIAPI ? "OpenAI API" : "Anthropic API") : name, kind: kind, secret: secret, existing: false)
-                            name = ""; secret = ""; error = nil
-                        } catch { self.error = store.safeMessage(error) }
-                    }.disabled(secret.isEmpty || store.demo)
-                    if let error { Text(error).font(.caption).foregroundStyle(.orange) }
-                    Divider()
-                    HStack {
-                        Button("Choose Codex CLI…") { store.chooseExecutable() }
-                        Button("Choose Claude CLI…") { store.chooseClaudeExecutable() }
-                    }
-                    HStack {
-                        if store.executable == nil { Link("Install Codex ↗", destination: URL(string: "https://developers.openai.com/codex/cli")!) }
-                        if store.claudeExecutable == nil { Link("Install Claude Code ↗", destination: URL(string: "https://code.claude.com/docs/en/setup")!) }
-                    }
-                    Text("Preview release · not notarized. No Ai-llowance analytics or backend. Provider websites open with your browser’s current account.")
-                        .font(.system(size: 10)).foregroundStyle(.secondary)
-                }.padding(.top, 12).disabled(store.demo)
-            }.font(.system(size: 12, weight: .medium))
-        }
-    }
-
 }
-
 
 private struct UpdateCheckButton: View {
     @ObservedObject var updater: AppUpdater
