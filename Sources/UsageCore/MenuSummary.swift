@@ -145,8 +145,10 @@ public enum MenuSummary {
                 return allowance + balanceAccounts(icon).map(balanceEntry)
             }
         case .byAccount:
-            return selected.map { account in
-                account.kind.isBalance ? balanceEntry(account) : entry([account], label: account.name, icon: provider(account))
+            return MenuProvider.allCases.flatMap { icon in
+                selected.filter { provider($0) == icon }.map { account in
+                    account.kind.isBalance ? balanceEntry(account) : entry([account], label: account.name, icon: icon)
+                }
             }
         }
     }
