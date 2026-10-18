@@ -165,7 +165,7 @@ final class AppStore: ObservableObject {
     func setMenuAggregation(_ value: MenuAggregation) { updateMenu { $0.aggregation = value } }
     func setAllMenuAccounts(_ value: Bool) {
         updateMenu {
-            if !value && $0.allAccounts { $0.selectedAccountIDs = Set(accounts.filter { !$0.kind.isAPI }.map(\.id)) }
+            if !value && $0.allAccounts { $0.selectedAccountIDs = Set(accounts.filter { !$0.kind.isAPI || $0.kind.isBalance }.map(\.id)) }
             $0.allAccounts = value
         }
     }
@@ -211,6 +211,61 @@ final class AppStore: ObservableObject {
             let account = try add(name: automaticName("OpenAI", kind: .codex), kind: .codex, secret: "", existing: existing, refreshAfter: false)
             selectedAccountID = account.id
             if existing { refresh(force: true) } else { signIn(account, openBrowser: accounts.filter { $0.kind == .codex }.count == 1) }
+        } catch { notice = safeMessage(error) }
+    }
+    func openAgentHelp(for kind: ConnectionKind, account: Account? = nil) {
+        guard !demo, !readOnly, kind == .claudeCode || kind == .codex else { return }
+        if let account, !accounts.contains(where: { $0.id == account.id }) { return }
+        if kind == .claudeCode && claudeExecutable == nil {
+            notice = "Install or locate Claude Code in Advanced settings, then try again."; return
+        }
+        if kind == .codex && executable == nil {
+            notice = "Install or locate Codex CLI in Advanced settings, then try again."; return
+        }
+        let agent = kind == .claudeCode ? "Claude Code" : "Codex"
+        let prompt = """
+        I’m setting up Ai-llowance to track my \(agent) subscription. Please guide me one step at a time through connecting the \(agent) sign-in I choose in Ai-llowance Settings → Accounts. I want subscription usage tracking, not API billing. Do not ask me to paste passwords, API keys, tokens, or other secrets into chat. Do not sign out, switch accounts, or change CLI configuration without explaining what will change and waiting for my confirmation. If Ai-llowance needs me to approve a browser sign-in or macOS permission, tell me to complete that directly in the app and then return here. Keep the instructions simple and stop when the account is connected.
+        """
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(prompt, forType: .string)
+        if kind == .claudeCode, let claudeExecutable {
+            var profile = existingClaudeConfig
+            if let account, account.usesExistingClaude != true {
+                do { profile = try claudeConnection().config(account) }
+                catch { notice = safeMessage(error); return }
+            }
+            let launcher = root.appendingPathComponent("AgentHelp/Claude-\(account?.id.uuidString ?? "default").command")
+            let script = """
+            #!/bin/zsh -f
+            set -eu
+            unset ANTHROPIC_API_KEY ANTHROPIC_AUTH_TOKEN CLAUDE_CODE_OAUTH_TOKEN ANTHROPIC_BASE_URL
+            export CLAUDE_CONFIG_DIR=\(ShellQuote.argument(profile.path))
+            export DISABLE_TELEMETRY=1 DISABLE_ERROR_REPORTING=1
+            cd "$HOME"
+            exec \(ShellQuote.argument(claudeExecutable.path))
+            """
+            do {
+                try Paths.writePrivate(Data(script.utf8), to: launcher, executable: true)
+                guard openExternal(launcher) else { throw UsageError.unavailable("Could not open Claude Code in Terminal.") }
+                notice = "Setup prompt copied. Paste it into the Claude Code window that opened."
+            } catch { notice = safeMessage(error) }
+            return
+        }
+        guard let executable else { notice = "Install or locate Codex CLI in Advanced settings, then try again."; return }
+        let defaultProfile = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".codex")
+        let profile = account.map { $0.usesExistingCodex ? defaultProfile : Paths.profile($0.id, root: root) } ?? defaultProfile
+        let launcher = root.appendingPathComponent("AgentHelp/Codex-\(account?.id.uuidString ?? "default").command")
+        let script = """
+        #!/bin/zsh -f
+        set -eu
+        export CODEX_HOME=\(ShellQuote.argument(profile.path))
+        cd "$HOME"
+        exec \(ShellQuote.argument(executable.path))
+        """
+        do {
+            try Paths.writePrivate(Data(script.utf8), to: launcher, executable: true)
+            guard openExternal(launcher) else { throw UsageError.unavailable("Could not open Codex CLI in Terminal.") }
+            notice = "Setup prompt copied. Paste it into the Codex window that opened."
         } catch { notice = safeMessage(error) }
     }
     private func claudeConnection() throws -> ClaudeConnection {

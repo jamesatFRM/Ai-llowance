@@ -38,6 +38,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
         store.objectWillChange.sink { [weak self] _ in
             DispatchQueue.main.async { self?.updateLabel() }
         }.store(in: &subscriptions)
+        store.$menuPreferences.sink { [weak self] _ in
+            DispatchQueue.main.async { self?.applyWindowAppearance() }
+        }.store(in: &subscriptions)
         if CommandLine.arguments.contains("--preview") {
             let controller = NSHostingController(rootView: Dashboard(store: store) { [weak self] in self?.showAccounts() })
             let preview = NSWindow(contentViewController: controller)
@@ -86,11 +89,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
                 attachment.attachmentCell = NSTextAttachmentCell(imageCell: image)
                 title.append(NSAttributedString(attachment: attachment))
             }
-            let value = entry.isUnlimited ? "∞" : (entry.remainingPercent.map { "\(Int($0))%" } ?? "0%!")
-            let name = store.menuPreferences.display == .byAccount && store.menuPreferences.showAccountNames ? " \(String(entry.label.prefix(14)))" : ""
+            let value = menuValue(entry)
+            let name = store.menuPreferences.showAccountNames && (store.menuPreferences.display == .byAccount || entry.isBalance) ? " \(String(entry.label.prefix(12)))" : ""
             title.append(NSAttributedString(string: "\(name) \(value)"))
-            descriptions.append(entry.isUnlimited ? "\(entry.label): unlimited allowance" : entry.remainingPercent == nil
-                ? "\(entry.label): unavailable · 0% shown; open for connection status"
+            descriptions.append(entry.isBalance ? "\(entry.label): \(entry.balanceUSD?.formatted(.currency(code: "USD")) ?? "balance unavailable")"
+                : entry.isUnlimited ? "\(entry.label): unlimited allowance" : entry.remainingPercent == nil
+                ? "\(entry.label): allowance unavailable"
                 : "\(entry.label): \(value) allowance remaining")
         }
         title.addAttributes([.font: NSFont.monospacedDigitSystemFont(ofSize: 12, weight: .medium), .foregroundColor: NSColor.labelColor], range: NSRange(location: 0, length: title.length))
@@ -98,12 +102,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
         button.toolTip = descriptions.joined(separator: "\n") + "\n\(store.menuPreferences.aggregation.title); each account has its own allowance."
         button.setAccessibilityLabel("Ai-llowance. " + descriptions.joined(separator: ". "))
     }
+    private func menuValue(_ entry: MenuEntry) -> String {
+        if entry.isBalance { return entry.balanceUSD?.formatted(.currency(code: "USD").precision(.fractionLength(0...2))) ?? "—" }
+        return entry.isUnlimited ? "∞" : (entry.remainingPercent.map { "\(Int($0))%" } ?? "—")
+    }
     @objc private func togglePopover() {
         if popover.isShown { closePopover() }
         else if let button = statusItem.button {
             store.setInterfaceVisible(true)
             NSApp.activate(ignoringOtherApps: true)
             popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
+            applyWindowAppearance()
             popover.contentViewController?.view.window?.makeKey()
             monitorOutsideClicks()
         }
@@ -149,7 +158,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
             created.setContentSize(NSSize(width: 680, height: 750)); created.center()
             created.isReleasedWhenClosed = false; created.delegate = self; window = created
         }
+        applyWindowAppearance()
         window?.makeKeyAndOrderFront(nil); NSApp.activate(ignoringOtherApps: true)
+    }
+    private func applyWindowAppearance() {
+        let appearance: NSAppearance?
+        switch store.menuPreferences.theme {
+        case .automatic: appearance = nil
+        case .light: appearance = NSAppearance(named: .aqua)
+        case .dark: appearance = NSAppearance(named: .darkAqua)
+        }
+        window?.appearance = appearance
+        popover.contentViewController?.view.window?.appearance = appearance
     }
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool { showAccounts(); return true }
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {

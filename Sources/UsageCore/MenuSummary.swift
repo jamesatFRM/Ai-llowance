@@ -55,9 +55,13 @@ public struct MenuEntry: Sendable, Equatable {
     public let remainingPercent: Double?
     public let accountCount: Int
     public let isUnlimited: Bool
-    public init(provider: MenuProvider?, label: String, remainingPercent: Double?, accountCount: Int, isUnlimited: Bool = false) {
+    public let balanceUSD: Decimal?
+    public let isBalance: Bool
+    public init(provider: MenuProvider?, label: String, remainingPercent: Double?, accountCount: Int, isUnlimited: Bool = false,
+                balanceUSD: Decimal? = nil, isBalance: Bool = false) {
         self.provider = provider; self.label = label; self.remainingPercent = remainingPercent
         self.accountCount = accountCount; self.isUnlimited = isUnlimited
+        self.balanceUSD = balanceUSD; self.isBalance = isBalance
     }
 }
 
@@ -80,7 +84,8 @@ public enum MenuSummary {
                                preferences: MenuPreferences, now: Date) -> [MenuEntry] {
         let duplicateIDs = duplicateSubscriptionAccountIDs(in: accounts, snapshots: snapshots)
         let selected = accounts.filter {
-            $0.enabled && !$0.kind.isAPI && (preferences.allAccounts || preferences.selectedAccountIDs.contains($0.id))
+            $0.enabled && (!$0.kind.isAPI || $0.kind.isBalance)
+                && (preferences.allAccounts || preferences.selectedAccountIDs.contains($0.id))
         }
         func provider(_ account: Account) -> MenuProvider { account.kind.provider }
         func identityMatches(_ snapshot: Snapshot, account: Account) -> Bool {
@@ -112,17 +117,38 @@ public enum MenuSummary {
             else { value = values.reduce(0, +) / Double(values.count) }
             return MenuEntry(provider: icon, label: label, remainingPercent: value, accountCount: group.count, isUnlimited: allUnlimited)
         }
+        func balanceEntry(_ account: Account) -> MenuEntry {
+            let balance: Decimal?
+            if !unavailable.contains(account.id), let snapshot = snapshots[account.id],
+               identityMatches(snapshot, account: account), (try? snapshot.validated()) != nil,
+               !snapshot.isStale(at: now), snapshot.providerRestricted != true {
+                balance = snapshot.balanceUSD
+            } else { balance = nil }
+            return MenuEntry(provider: provider(account), label: account.name, remainingPercent: nil,
+                             accountCount: 1, balanceUSD: balance, isBalance: true)
+        }
+        func allowanceAccounts(_ provider: MenuProvider? = nil) -> [Account] {
+            selected.filter { !$0.kind.isBalance && (provider == nil || $0.kind.provider == provider) }
+        }
+        func balanceAccounts(_ provider: MenuProvider? = nil) -> [Account] {
+            selected.filter { $0.kind.isBalance && (provider == nil || $0.kind.provider == provider) }
+        }
         switch preferences.display {
         case .combined:
-            return selected.isEmpty ? [] : [entry(selected, label: "All accounts", icon: nil)]
+            let allowances = allowanceAccounts()
+            return (allowances.isEmpty ? [] : [entry(allowances, label: "All accounts", icon: nil)])
+                + balanceAccounts().map(balanceEntry)
         case .byProvider:
-            return MenuProvider.allCases.compactMap { icon in
-                let group = selected.filter { provider($0) == icon }
-                return group.isEmpty ? nil : entry(group, label: icon.title, icon: icon)
+            return MenuProvider.allCases.flatMap { icon in
+                let group = allowanceAccounts(icon)
+                let allowance = group.isEmpty ? [] : [entry(group, label: icon.title, icon: icon)]
+                return allowance + balanceAccounts(icon).map(balanceEntry)
             }
         case .byAccount:
             return MenuProvider.allCases.flatMap { icon in
-                selected.filter { provider($0) == icon }.map { entry([$0], label: $0.name, icon: icon) }
+                selected.filter { provider($0) == icon }.map { account in
+                    account.kind.isBalance ? balanceEntry(account) : entry([account], label: account.name, icon: icon)
+                }
             }
         }
     }
