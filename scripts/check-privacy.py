@@ -37,7 +37,18 @@ def publication_data(kind, data):
     # message contents, which can accidentally include private app data.
     if kind in (b"commit", b"tag"):
         _, separator, message = data.partition(b"\n\n")
-        return message if separator else data
+        if not separator:
+            return data
+        # GitHub's squash merge adds public coauthor identities as trailers.
+        # Treat only a strict final Co-authored-by trailer as identity metadata;
+        # continue scanning the name, surrounding message, and all other secrets.
+        body, trailer_separator, trailers = message.rstrip(b"\n").rpartition(b"\n\n")
+        if trailer_separator:
+            lines = trailers.splitlines()
+            if lines and all(re.fullmatch(rb"Co-authored-by: [^<>\r\n]+ <[^<>\s]+@[^<>\s]+>", line, re.I) for line in lines):
+                trailers = re.sub(rb"<[^<>\s]+@[^<>\s]+>", b"<public-author@example.com>", trailers)
+                return body + trailer_separator + trailers
+        return message
     return data
 
 def git(*args):
@@ -62,6 +73,11 @@ def main():
         assert "non-example email address" in issues(publication_data(b"commit", header + b"private@" + b"mail.invalid"))
         assert "non-example email address" in issues(publication_data(b"tag", header + b"private@" + b"mail.invalid"))
         assert "non-example email address" in issues(publication_data(b"blob", header))
+        coauthor = b"Co-authored-by: Writer <writer@" + b"mail.invalid>"
+        assert not issues(publication_data(b"commit", header + b"Ordinary message\n\n" + coauthor + b"\n"))
+        assert "non-example email address" in issues(publication_data(b"commit", header + b"private@" + b"mail.invalid\n\n" + coauthor))
+        assert "non-example email address" in issues(publication_data(b"blob", coauthor))
+        assert "provider credential" in issues(publication_data(b"commit", header + b"Ordinary\n\nCo-authored-by: sk-" + b"A" * 40 + b" <writer@example.com>"))
         print("Privacy guard self-test passed.")
         return 0
     root = pathlib.Path(git("rev-parse", "--show-toplevel").decode().strip())
