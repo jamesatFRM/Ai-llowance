@@ -400,13 +400,13 @@ struct AccountsView: View {
     @ViewState private var secret = ""
     @ViewState private var scopeID = ""
     @ViewState private var connectionError: String?
-    @ViewState private var onboarding = false
     @ViewState private var removing: Account?
     @ViewState private var renaming: Account?
     @ViewState private var newName = ""
     @ViewState private var keyAccount: Account?
     @ViewState private var replacement = ""
     @ViewState private var selectedTab: SettingsTab = .accounts
+    @ViewState private var handledAccountNavigationVersion: UInt64 = 0
 
     var body: some View {
         VStack(spacing: 0) {
@@ -424,14 +424,32 @@ struct AccountsView: View {
             }.padding(.horizontal, 22).padding(.vertical, 18)
             Divider().opacity(0.4)
             settingsTabs.padding(.horizontal, 18).padding(.vertical, 12)
+            if let notice = store.notice {
+                HStack(alignment: .top, spacing: 8) {
+                    Label(notice, systemImage: "info.circle")
+                        .font(.system(size: 11)).foregroundStyle(.orange).fixedSize(horizontal: false, vertical: true)
+                    Spacer(minLength: 0)
+                    Button { store.notice = nil } label: { Image(systemName: "xmark").font(.system(size: 9)).frame(width: 20, height: 20) }
+                        .buttonStyle(QuietButtonStyle()).accessibilityLabel("Dismiss message")
+                }.padding(.horizontal, 22).padding(.bottom, 10)
+            }
             Divider().opacity(0.4)
             ScrollViewReader { proxy in
                 ScrollView {
                     selectedTabContent.padding(22)
                 }
-                .onAppear { if store.accounts.isEmpty { onboarding = true }; store.rediscoverTools(); scrollToSelected(proxy) }
-                .onChange(of: store.selectedAccountID) { _, _ in scrollToSelected(proxy) }
-                .onChange(of: onboarding) { _, _ in scrollToSelected(proxy) }
+                .onAppear {
+                    if handledAccountNavigationVersion != store.accountNavigationVersion {
+                        handledAccountNavigationVersion = store.accountNavigationVersion
+                        selectedTab = .accounts
+                    }
+                    store.rediscoverTools(); scrollToSelected(proxy)
+                }
+                .onChange(of: store.accountNavigationVersion) { _, _ in
+                    handledAccountNavigationVersion = store.accountNavigationVersion
+                    selectedTab = .accounts
+                    scrollToSelected(proxy)
+                }
             }
             Divider().opacity(0.4)
             HStack {
@@ -472,7 +490,7 @@ struct AccountsView: View {
         }
     }
     private func scrollToSelected(_ proxy: ScrollViewProxy) {
-        guard selectedTab == .accounts, !onboarding, let id = store.selectedAccountID else { return }
+        guard selectedTab == .accounts, let id = store.selectedAccountID else { return }
         DispatchQueue.main.async { proxy.scrollTo(id, anchor: .top) }
     }
     private var settingsTabs: some View {
@@ -501,11 +519,11 @@ struct AccountsView: View {
         if store.demo { Text("Sample accounts · sign-in is disabled").font(.caption).foregroundStyle(.orange) }
         switch selectedTab {
         case .accounts:
-            if store.accounts.isEmpty || onboarding { connectionSetup }
+            if store.accounts.isEmpty { connectionSetup }
             ForEach(MenuProvider.allCases, id: \.self) { provider in
                 if store.accounts.contains(where: { $0.kind.provider == provider }) { accountSection(provider) }
             }
-            if !store.accounts.isEmpty && !onboarding {
+            if !store.accounts.isEmpty {
                 simpleConnectOptions
             }
         case .menuBar: menuBarSettings
@@ -523,7 +541,6 @@ struct AccountsView: View {
                 moreConnections
             }
         }
-        if let notice = store.notice { Label(notice, systemImage: "info.circle").font(.system(size: 11)).foregroundStyle(.orange).fixedSize(horizontal: false, vertical: true) }
     }
     private var busyConnecting: Bool { store.connectingClaude || store.signingIn != nil || !store.waitingForClaude.isEmpty }
     private var setupAccount: Account? { store.accounts.last { $0.kind == selectedKind } }
@@ -610,7 +627,7 @@ struct AccountsView: View {
                     Label("First reading received · \(account.expectedIdentity ?? snapshot.identity ?? account.name)", systemImage: "checkmark.circle.fill")
                         .font(.system(size: 11)).foregroundStyle(.green).lineLimit(2)
                     Spacer()
-                    if onboarding { Button("Done") { onboarding = false; showMenu() }.controlSize(.small) }
+                    Button("View account") { store.selectedAccountID = account.id }.controlSize(.small)
                 }
             }
         }.disabled(store.demo)
