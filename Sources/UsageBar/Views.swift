@@ -14,7 +14,7 @@ private struct PanelBackground: View {
         } else {
             Rectangle().fill(.regularMaterial)
                 .overlay(alignment: .top) {
-                    LinearGradient(colors: [Color.accentColor.opacity(0.045), .clear], startPoint: .top, endPoint: .bottom)
+                    LinearGradient(colors: [Brand.blue.opacity(0.055), .clear], startPoint: .top, endPoint: .bottom)
                         .frame(height: 150)
                 }
         }
@@ -62,9 +62,8 @@ struct Dashboard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 9) {
             HStack(spacing: 6) {
-                Image(systemName: "gauge.with.dots.needle.33percent")
-                    .font(.system(size: 11, weight: .medium)).foregroundStyle(.secondary)
-                Text("Ai-llowance").font(.system(size: 12, weight: .semibold, design: .rounded))
+                BrandIcon(size: 22)
+                Text("Ai-llowance").font(.system(size: 12, weight: .semibold))
                 Spacer()
                 if store.refreshing { ProgressView().controlSize(.mini) }
                 Text(store.refreshSummary).font(.system(size: 10)).foregroundStyle(.secondary).lineLimit(1)
@@ -344,7 +343,7 @@ private struct SettingsCard<Content: View>: View {
                     .fill(LinearGradient(colors: [Color.primary.opacity(0.055), Color.primary.opacity(0.018)], startPoint: .topLeading, endPoint: .bottomTrailing))
                     .overlay {
                         RoundedRectangle(cornerRadius: 13, style: .continuous)
-                            .strokeBorder(LinearGradient(colors: [Color.accentColor.opacity(0.25), Color.primary.opacity(0.07), Color.accentColor.opacity(0.08)], startPoint: .topLeading, endPoint: .bottomTrailing), lineWidth: 0.7)
+                            .strokeBorder(LinearGradient(colors: [Brand.blue.opacity(0.25), Color.primary.opacity(0.07), Brand.violet.opacity(0.12)], startPoint: .topLeading, endPoint: .bottomTrailing), lineWidth: 0.7)
                     }
                     .overlay(alignment: .top) {
                         RoundedRectangle(cornerRadius: 13, style: .continuous)
@@ -412,12 +411,9 @@ struct AccountsView: View {
     var body: some View {
         VStack(spacing: 0) {
             HStack(spacing: 12) {
-                Image(systemName: "gauge.with.dots.needle.33percent").font(.system(size: 21, weight: .semibold))
-                    .foregroundStyle(.white).frame(width: 42, height: 42)
-                    .background(LinearGradient(colors: [Color.cyan.opacity(0.95), Color.blue, Color.purple.opacity(0.9)], startPoint: .topLeading, endPoint: .bottomTrailing), in: RoundedRectangle(cornerRadius: 13, style: .continuous))
-                    .shadow(color: Color.blue.opacity(0.25), radius: 12, y: 4)
+                BrandIcon(size: 44)
                 VStack(alignment: .leading, spacing: 3) {
-                    Text(store.accounts.isEmpty ? "Welcome to Ai-llowance" : selectedTab.title).font(.system(size: 21, weight: .semibold, design: .rounded))
+                    Text("Ai-llowance").font(.system(size: 23, weight: .semibold))
                     Text(store.accounts.isEmpty ? "Connect once. Know what’s left." : selectedTab.subtitle).font(.system(size: 11)).foregroundStyle(.secondary)
                 }
                 Spacer()
@@ -491,7 +487,7 @@ struct AccountsView: View {
                         .background {
                             if selectedTab == tab {
                                 RoundedRectangle(cornerRadius: 8, style: .continuous)
-                                    .fill(LinearGradient(colors: [Color.blue.opacity(0.8), Color.purple.opacity(0.72)], startPoint: .topLeading, endPoint: .bottomTrailing))
+                                    .fill(Brand.gradient)
                                     .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).strokeBorder(Color.white.opacity(0.18), lineWidth: 0.6))
                             }
                         }
@@ -876,7 +872,7 @@ struct AccountsView: View {
                     Text("Usage & balances").font(.system(size: 10)).foregroundStyle(.secondary)
                 }
                 HStack(spacing: 16) {
-                    if store.menuEntries.isEmpty { Label("Usage", systemImage: "gauge.with.dots.needle.33percent") }
+                    if store.menuEntries.isEmpty { HStack(spacing: 4) { ProviderMark(provider: nil, size: 13); Text("Usage") } }
                     ForEach(Array(store.menuEntries.enumerated()), id: \.offset) { _, entry in
                         HStack(spacing: 5) {
                             ProviderMark(provider: entry.provider)

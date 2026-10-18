@@ -26,7 +26,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
         }
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         if let button = statusItem.button {
-            button.image = NSImage(systemSymbolName: "gauge.with.dots.needle.33percent", accessibilityDescription: "Ai-llowance")
+            button.image = Brand.menuMark()
             button.imagePosition = .imageLeading
             button.title = " Usage"
             button.target = self; button.action = #selector(togglePopover)
@@ -73,7 +73,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
         renderedEntries = entries; renderedPreferences = store.menuPreferences
         guard !entries.isEmpty else {
             button.attributedTitle = NSAttributedString(string: "")
-            button.image = NSImage(systemSymbolName: "gauge.with.dots.needle.33percent", accessibilityDescription: "Ai-llowance")
+            button.image = Brand.menuMark()
             button.title = " Usage"
             button.toolTip = "Ai-llowance · Choose accounts in Settings"
             return

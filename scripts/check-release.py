@@ -15,6 +15,8 @@ allowed = {
     'Ai-llowance.app/Contents/MacOS/UsageBar',
     'Ai-llowance.app/Contents/MacOS/UsageBridge',
     'Ai-llowance.app/Contents/Resources/UsageBar.icns',
+    'Ai-llowance.app/Contents/Resources/BrandIcon.png',
+    'Ai-llowance.app/Contents/Resources/BrandMark.png',
     'Ai-llowance.app/Contents/Resources/LICENSE',
     'Ai-llowance.app/Contents/Resources/Claude.png',
     'Ai-llowance.app/Contents/Resources/ChatGPT.png',
