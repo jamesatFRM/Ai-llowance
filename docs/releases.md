@@ -43,3 +43,9 @@ The bundle's `AILPreviewBuild` metadata controls its version label. Default buil
 Before changing production publication, verify clean-Mac drag/install/launch, privacy permissions and provider sign-in, automatic launch, and an actual Sparkle update from an existing preview while preserving accounts. Test both Intel and Apple silicon. Local release publication does not require Apple credentials in CI. Moving notarized publication into CI later would require a separate credential setup and a production release gate; these are **not configured** by this change. Keep the existing Sparkle public key and bundle identity during that transition, and use a new build number higher than every published build.
 
 Official references: [Apple notarization requirements](https://developer.apple.com/documentation/security/notarizing-macos-software-before-distribution), [custom notarization workflow](https://developer.apple.com/documentation/security/customizing-the-notarization-workflow), and [Sparkle's explicit signing order](https://sparkle-project.org/documentation/sandboxing/#code-signing).
+
+## Release completion and artwork
+
+An update is complete when the notarized, signed release is live in the shared Sparkle feed and an existing installed copy can discover, install, and relaunch it. A source push or merge alone does not deliver an app update. Report production status explicitly.
+
+Every public release must include a promotional image showing the exact version/build and verified new features or fixes. Match the established deep navy, cyan/violet, glass-card Ai-llowance identity and white A monogram. Review text and provider logos (Codex uses OpenAI branding, never xAI). Use illustrative UI only as an illustration, never as screenshot proof. Save the image and generation prompt durably, attach the image to the versioned GitHub release, and share it with the user.

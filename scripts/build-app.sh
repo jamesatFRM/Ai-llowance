@@ -55,7 +55,7 @@ PY2
 )"
 ditto "$framework" "$app_dir/Contents/Frameworks/Sparkle.framework"
 codesign --verify --deep --strict "$app_dir/Contents/Frameworks/Sparkle.framework"
-cp "$project_dir/Resources/UsageBar.icns" "$project_dir/Resources/Claude.png" "$project_dir/Resources/ChatGPT.png" "$app_dir/Contents/Resources/"
+cp "$project_dir/Resources/UsageBar.icns" "$project_dir/Resources/BrandIcon.png" "$project_dir/Resources/BrandMark.png" "$project_dir/Resources/Claude.png" "$project_dir/Resources/ChatGPT.png" "$app_dir/Contents/Resources/"
 cp "$project_dir/LICENSE" "$project_dir/THIRD_PARTY_NOTICES.md" "$project_dir/PRIVACY.md" "$app_dir/Contents/Resources/"
 /usr/bin/strip -S "$app_dir/Contents/MacOS/UsageBar" "$app_dir/Contents/MacOS/UsageBridge"
 # SwiftPM may add build-machine framework search paths. Keep only portable paths.

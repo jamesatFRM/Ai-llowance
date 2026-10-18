@@ -34,7 +34,7 @@ enum ProviderImages {
         case .openRouter: NSImage(systemSymbolName: "arrow.triangle.branch", accessibilityDescription: "OpenRouter")
         case .vercelGateway: NSImage(systemSymbolName: "triangle", accessibilityDescription: "Vercel AI Gateway")
         case .xai: NSImage(systemSymbolName: "sparkle", accessibilityDescription: "xAI")
-        case nil: NSImage(systemSymbolName: "gauge.with.dots.needle.33percent", accessibilityDescription: "All accounts")
+        case nil: Brand.menuMark()
         }
     }
 }
