@@ -266,6 +266,10 @@ private func readingValue(_ snapshot: Snapshot?, window: QuotaWindow?) -> String
     if snapshot?.balanceLabel == "No key budget" { return "Not set" }
     return "No reading"
 }
+private func menuEntryValue(_ entry: MenuEntry) -> String {
+    if entry.isBalance { return entry.balanceUSD?.formatted(.currency(code: "USD").precision(.fractionLength(0...2))) ?? "—" }
+    return entry.isUnlimited ? "∞" : (entry.remainingPercent.map { "\(Int($0))%" } ?? "—")
+}
 private struct QuotaDetailRow: View {
     let window: QuotaWindow
     let now: Date
@@ -334,9 +338,29 @@ private struct SparklineShape: Shape {
 private struct SettingsCard<Content: View>: View {
     @ViewBuilder let content: Content
     var body: some View {
-        content.padding(14).frame(maxWidth: .infinity, alignment: .leading)
-            .modifier(InsetSurface(cornerRadius: 12))
+        content.padding(15).frame(maxWidth: .infinity, alignment: .leading)
+            .background {
+                RoundedRectangle(cornerRadius: 13, style: .continuous)
+                    .fill(LinearGradient(colors: [Color.primary.opacity(0.055), Color.primary.opacity(0.018)], startPoint: .topLeading, endPoint: .bottomTrailing))
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 13, style: .continuous)
+                            .strokeBorder(LinearGradient(colors: [Color.accentColor.opacity(0.25), Color.primary.opacity(0.07), Color.accentColor.opacity(0.08)], startPoint: .topLeading, endPoint: .bottomTrailing), lineWidth: 0.7)
+                    }
+                    .overlay(alignment: .top) {
+                        RoundedRectangle(cornerRadius: 13, style: .continuous)
+                            .fill(LinearGradient(colors: [Color.white.opacity(0.045), .clear], startPoint: .top, endPoint: .bottom))
+                            .frame(height: 34).clipShape(RoundedRectangle(cornerRadius: 13, style: .continuous))
+                    }
+            }
     }
+}
+
+private enum SettingsTab: String, CaseIterable, Identifiable {
+    case accounts, menuBar, behavior, updates, advanced
+    var id: String { rawValue }
+    var title: String { switch self { case .accounts: "Accounts"; case .menuBar: "Menu bar"; case .behavior: "Behavior"; case .updates: "Updates"; case .advanced: "Advanced" } }
+    var symbol: String { switch self { case .accounts: "person.2"; case .menuBar: "menubar.rectangle"; case .behavior: "bell.badge"; case .updates: "arrow.down.circle"; case .advanced: "slider.horizontal.3" } }
+    var subtitle: String { switch self { case .accounts: "Connections, limits, and account access"; case .menuBar: "Choose what appears beside the clock"; case .behavior: "Alerts and startup preferences"; case .updates: "Keep Ai-llowance current"; case .advanced: "Provider links and local diagnostics" } }
 }
 private struct AccountReading: View {
     let account: Account
@@ -377,22 +401,24 @@ struct AccountsView: View {
     @ViewState private var secret = ""
     @ViewState private var scopeID = ""
     @ViewState private var connectionError: String?
-    @ViewState private var addingConnection = false
     @ViewState private var onboarding = false
     @ViewState private var removing: Account?
     @ViewState private var renaming: Account?
     @ViewState private var newName = ""
     @ViewState private var keyAccount: Account?
     @ViewState private var replacement = ""
+    @ViewState private var selectedTab: SettingsTab = .accounts
 
     var body: some View {
         VStack(spacing: 0) {
             HStack(spacing: 12) {
-                Image(systemName: "gauge.with.dots.needle.33percent").font(.system(size: 22, weight: .medium))
-                    .foregroundStyle(.secondary).frame(width: 42, height: 42).modifier(InsetSurface())
+                Image(systemName: "gauge.with.dots.needle.33percent").font(.system(size: 21, weight: .semibold))
+                    .foregroundStyle(.white).frame(width: 42, height: 42)
+                    .background(LinearGradient(colors: [Color.cyan.opacity(0.95), Color.blue, Color.purple.opacity(0.9)], startPoint: .topLeading, endPoint: .bottomTrailing), in: RoundedRectangle(cornerRadius: 13, style: .continuous))
+                    .shadow(color: Color.blue.opacity(0.25), radius: 12, y: 4)
                 VStack(alignment: .leading, spacing: 3) {
-                    Text(store.accounts.isEmpty ? "Welcome to Ai-llowance" : "Settings").font(.system(size: 21, weight: .semibold, design: .rounded))
-                    Text(store.accounts.isEmpty ? "Connect once. Know what’s left." : "Your accounts. Your menu bar.").font(.system(size: 11)).foregroundStyle(.secondary)
+                    Text(store.accounts.isEmpty ? "Welcome to Ai-llowance" : selectedTab.title).font(.system(size: 21, weight: .semibold, design: .rounded))
+                    Text(store.accounts.isEmpty ? "Connect once. Know what’s left." : selectedTab.subtitle).font(.system(size: 11)).foregroundStyle(.secondary)
                 }
                 Spacer()
                 if store.refreshing { ProgressView().controlSize(.small) }
@@ -401,27 +427,11 @@ struct AccountsView: View {
                     .buttonStyle(QuietButtonStyle()).help("Refresh accounts").accessibilityLabel("Refresh accounts").disabled(store.demo || store.paused || store.refreshing)
             }.padding(.horizontal, 22).padding(.vertical, 18)
             Divider().opacity(0.4)
+            settingsTabs.padding(.horizontal, 18).padding(.vertical, 12)
+            Divider().opacity(0.4)
             ScrollViewReader { proxy in
                 ScrollView {
-                    VStack(alignment: .leading, spacing: 18) {
-                        if store.demo { Text("Sample accounts · sign-in is disabled").font(.caption).foregroundStyle(.orange) }
-                        if store.accounts.isEmpty || onboarding { connectionSetup }
-                        ForEach(MenuProvider.allCases, id: \.self) { provider in
-                            if store.accounts.contains(where: { $0.kind.provider == provider }) { accountSection(provider) }
-                        }
-                        if !store.accounts.isEmpty && !onboarding {
-                            SettingsCard {
-                                DisclosureGroup(isExpanded: $addingConnection) { connectionForm.padding(.top, 12) } label: {
-                                    Label("Add a connection", systemImage: "plus.circle").font(.system(size: 13, weight: .semibold))
-                                }
-                            }
-                        }
-                        behaviorSettings
-                        DisclosureGroup("Menu bar & appearance") { menuBarSettings.padding(.top, 8) }.font(.system(size: 12, weight: .medium))
-                        UpdateSettings(updater: store.updater)
-                        moreConnections
-                        if let notice = store.notice { Label(notice, systemImage: "info.circle").font(.system(size: 11)).foregroundStyle(.orange).fixedSize(horizontal: false, vertical: true) }
-                    }.padding(22)
+                    selectedTabContent.padding(22)
                 }
                 .onAppear { if store.accounts.isEmpty { onboarding = true }; store.rediscoverTools(); scrollToSelected(proxy) }
                 .onChange(of: store.selectedAccountID) { _, _ in scrollToSelected(proxy) }
@@ -435,7 +445,8 @@ struct AccountsView: View {
                 Text(AppUpdater.versionLabel).foregroundStyle(.tertiary)
                 Button { NSApplication.shared.terminate(nil) } label: { Image(systemName: "power").frame(width: 26, height: 26) }.buttonStyle(QuietButtonStyle()).help("Quit Ai-llowance")
             }.font(.system(size: 10)).padding(.horizontal, 22).padding(.vertical, 12)
-        }.frame(minWidth: 580, minHeight: 560).background(PanelBackground()).preferredColorScheme(store.menuPreferences.theme.colorScheme)
+        }.frame(minWidth: 680, minHeight: 620).background(PanelBackground()).preferredColorScheme(store.menuPreferences.theme.colorScheme)
+        .background(Color(nsColor: .windowBackgroundColor).opacity(0.001))
         .alert("Remove \(removing?.name ?? "account")?", isPresented: Binding(get: { removing != nil }, set: { if !$0 { removing = nil } })) {
             Button("Cancel", role: .cancel) { removing = nil }
             Button("Remove", role: .destructive) { if let account = removing { Task { await store.remove(account) } }; removing = nil }
@@ -465,29 +476,119 @@ struct AccountsView: View {
         }
     }
     private func scrollToSelected(_ proxy: ScrollViewProxy) {
-        guard !onboarding, let id = store.selectedAccountID else { return }
+        guard selectedTab == .accounts, !onboarding, let id = store.selectedAccountID else { return }
         DispatchQueue.main.async { proxy.scrollTo(id, anchor: .top) }
+    }
+    private var settingsTabs: some View {
+        HStack(spacing: 5) {
+            ForEach(SettingsTab.allCases) { tab in
+                Button { withAnimation(.easeOut(duration: 0.14)) { selectedTab = tab } } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: tab.symbol).font(.system(size: 10, weight: .semibold))
+                        Text(tab.title).font(.system(size: 11, weight: selectedTab == tab ? .semibold : .medium))
+                    }.frame(maxWidth: .infinity).frame(height: 30)
+                        .foregroundStyle(selectedTab == tab ? Color.white : Color.secondary)
+                        .background {
+                            if selectedTab == tab {
+                                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                    .fill(LinearGradient(colors: [Color.blue.opacity(0.8), Color.purple.opacity(0.72)], startPoint: .topLeading, endPoint: .bottomTrailing))
+                                    .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).strokeBorder(Color.white.opacity(0.18), lineWidth: 0.6))
+                            }
+                        }
+                        .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                }.buttonStyle(.plain).help(tab.subtitle)
+            }
+        }.padding(4).background(Color.primary.opacity(0.045), in: RoundedRectangle(cornerRadius: 11, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 11, style: .continuous).strokeBorder(Color.primary.opacity(0.07), lineWidth: 0.6))
+    }
+    @ViewBuilder private var selectedTabContent: some View {
+        if store.demo { Text("Sample accounts · sign-in is disabled").font(.caption).foregroundStyle(.orange) }
+        switch selectedTab {
+        case .accounts:
+            if store.accounts.isEmpty || onboarding { connectionSetup }
+            ForEach(MenuProvider.allCases, id: \.self) { provider in
+                if store.accounts.contains(where: { $0.kind.provider == provider }) { accountSection(provider) }
+            }
+            if !store.accounts.isEmpty && !onboarding {
+                simpleConnectOptions
+            }
+        case .menuBar: menuBarSettings
+        case .behavior: behaviorSettings
+        case .updates: UpdateSettings(updater: store.updater)
+        case .advanced:
+            VStack(alignment: .leading, spacing: 12) {
+                SettingsCard {
+                    VStack(alignment: .leading, spacing: 11) {
+                        Label("Advanced connections", systemImage: "slider.horizontal.3").font(.system(size: 13, weight: .semibold))
+                        Text("For API keys, additional providers, or a custom CLI location.").font(.system(size: 10)).foregroundStyle(.secondary)
+                        connectionForm
+                    }
+                }
+                moreConnections
+            }
+        }
+        if let notice = store.notice { Label(notice, systemImage: "info.circle").font(.system(size: 11)).foregroundStyle(.orange).fixedSize(horizontal: false, vertical: true) }
     }
     private var busyConnecting: Bool { store.connectingClaude || store.signingIn != nil || !store.waitingForClaude.isEmpty }
     private var setupAccount: Account? { store.accounts.last { $0.kind == selectedKind } }
-    private var setupStep: Int {
-        guard let account = setupAccount else { return 1 }
-        guard let snapshot = store.snapshots[account.id], !store.isCached(account), store.errors[account.id] == nil,
-              !snapshot.isStale(at: store.now), snapshot.providerRestricted != true else { return 2 }
-        return 3
-    }
     private var connectionSetup: some View {
         SettingsCard {
             VStack(alignment: .leading, spacing: 12) {
                 Label("Connect your first account", systemImage: "person.crop.circle.badge.plus").font(.system(size: 14, weight: .semibold))
-                HStack(spacing: 14) {
-                    Label("Choose", systemImage: setupStep > 1 ? "checkmark.circle" : "1.circle.fill")
-                    Label("Connect", systemImage: setupStep > 2 ? "checkmark.circle" : setupStep == 2 ? "2.circle.fill" : "2.circle")
-                    Label("First reading", systemImage: setupStep == 3 ? "checkmark.circle.fill" : "3.circle")
-                }.font(.system(size: 11)).foregroundStyle(.secondary)
-                connectionForm
+                Text("Choose the coding assistant you already use. We’ll check its local sign-in and show your usage.").font(.system(size: 11)).foregroundStyle(.secondary)
+                simpleProviderButton(.claudeCode)
+                simpleProviderButton(.codex)
+                agentHelpMenu
+                Button("Other providers, API keys, or CLI setup…") { selectedTab = .advanced }
+                    .buttonStyle(.plain).font(.system(size: 10, weight: .medium)).foregroundStyle(Color.accentColor)
             }
         }
+    }
+    private var simpleConnectOptions: some View {
+        SettingsCard {
+            VStack(alignment: .leading, spacing: 12) {
+                Label("Add an account", systemImage: "plus.circle.fill").font(.system(size: 13, weight: .semibold))
+                simpleProviderButton(.claudeCode)
+                simpleProviderButton(.codex)
+                agentHelpMenu
+                Button("More providers and API keys…") { selectedTab = .advanced }
+                    .buttonStyle(.plain).font(.system(size: 10, weight: .medium)).foregroundStyle(Color.accentColor)
+            }
+        }
+    }
+    private var agentHelpMenu: some View {
+        Menu {
+            Button("Copy prompt & open Claude Code") { store.openAgentHelp(for: .claudeCode) }
+            Button("Copy prompt & open Codex") { store.openAgentHelp(for: .codex) }
+        } label: {
+            Label("Get setup help from Claude or Codex", systemImage: "sparkles")
+                .font(.system(size: 10, weight: .medium))
+        }.menuStyle(.borderlessButton).foregroundStyle(Color.accentColor)
+    }
+    @ViewBuilder private func simpleProviderButton(_ kind: ConnectionKind) -> some View {
+        let installed = executable(for: kind) != nil
+        let existing = store.accounts.contains { $0.kind == kind && (kind == .claudeCode ? $0.usesExistingClaude == true : $0.usesExistingCodex) }
+        Button {
+            guard installed else { NSWorkspace.shared.open(installationURL(kind)); return }
+            if kind == .claudeCode { store.connectClaude(existing: !existing) }
+            else { store.connectOpenAI(existing: !existing) }
+        } label: {
+            HStack(spacing: 10) {
+                ProviderMark(provider: kind.provider, size: 26)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(installed ? (existing ? "Add another \(kind.provider.title) account" : "Connect \(kind.provider.title)") : "Install \(cliName(kind))")
+                        .font(.system(size: 12, weight: .semibold))
+                    Text(installed ? "Use your existing subscription sign-in · no API key" : "One-time setup · then return here")
+                        .font(.system(size: 10)).foregroundStyle(.secondary)
+                }
+                Spacer()
+                Image(systemName: installed ? "arrow.right.circle.fill" : "arrow.up.right.square")
+                    .foregroundStyle(Color.accentColor)
+            }
+            .padding(11).contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .modifier(InsetSurface(tint: kind.provider == .claude ? .orange : .green, cornerRadius: 10))
+        }
+        .buttonStyle(.plain).disabled(installed && busyConnecting)
     }
     private var connectionForm: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -628,6 +729,13 @@ struct AccountsView: View {
                 SettingsCard {
                     VStack(alignment: .leading, spacing: 12) {
                         AccountReading(account: account, snapshot: store.snapshots[account.id], error: store.errors[account.id], now: store.now, cached: store.isCached(account))
+                        if account.kind == .claudeCode || account.kind == .codex {
+                            Button { store.openAgentHelp(for: account.kind, account: account) } label: {
+                                Label("Copy setup prompt & open \(account.kind == .claudeCode ? "Claude" : "Codex")", systemImage: "sparkles")
+                                    .font(.system(size: 10, weight: .medium))
+                            }.buttonStyle(.plain).foregroundStyle(Color.accentColor)
+                                .help("Copies a safe setup prompt and opens this account’s CLI. Paste the prompt there.")
+                        }
                         accountActions(account)
                         DisclosureGroup("Details & link preferences") {
                             VStack(alignment: .leading, spacing: 10) {
@@ -711,6 +819,16 @@ struct AccountsView: View {
                 Toggle(isOn: Binding(get: { store.launchAtLogin }, set: { store.setLaunchAtLogin($0) })) {
                     Label("Launch at login", systemImage: "sunrise").font(.system(size: 12, weight: .medium))
                 }.toggleStyle(.switch).controlSize(.small)
+                Divider().opacity(0.4)
+                HStack {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("Automatic refresh").font(.system(size: 12, weight: .medium))
+                        Text("Adapts to activity and provider limits.").font(.system(size: 10)).foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    Toggle("Automatic refresh", isOn: Binding(get: { !store.paused }, set: { if $0 == store.paused { store.togglePause() } }))
+                        .labelsHidden().toggleStyle(.switch).controlSize(.small)
+                }
                 if store.loginItemNeedsApproval {
                     Link("Allow Ai-llowance in Login Items ↗", destination: URL(string: "x-apple.systempreferences:com.apple.LoginItems-Settings.extension")!)
                         .font(.system(size: 10))
@@ -755,16 +873,16 @@ struct AccountsView: View {
                 HStack {
                     Label("Menu bar", systemImage: "menubar.rectangle").font(.system(size: 13, weight: .semibold))
                     Spacer()
-                    Text("Quota remaining").font(.system(size: 10)).foregroundStyle(.secondary)
+                    Text("Usage & balances").font(.system(size: 10)).foregroundStyle(.secondary)
                 }
                 HStack(spacing: 16) {
                     if store.menuEntries.isEmpty { Label("Usage", systemImage: "gauge.with.dots.needle.33percent") }
                     ForEach(Array(store.menuEntries.enumerated()), id: \.offset) { _, entry in
                         HStack(spacing: 5) {
                             ProviderMark(provider: entry.provider)
-                            if store.menuPreferences.display == .byAccount && store.menuPreferences.showAccountNames { Text(entry.label).lineLimit(1) }
-                            Text(entry.isUnlimited ? "∞" : (entry.remainingPercent.map { "\(Int($0))%" } ?? "0%!")).monospacedDigit()
-                        }.accessibilityLabel("\(entry.label): \(entry.isUnlimited ? "unlimited allowance" : (entry.remainingPercent.map { "\(Int($0)) percent quota remaining" } ?? "unavailable"))")
+                            if store.menuPreferences.showAccountNames && (store.menuPreferences.display == .byAccount || entry.isBalance) { Text(entry.label).lineLimit(1) }
+                            Text(menuEntryValue(entry)).monospacedDigit()
+                        }.accessibilityLabel(entry.isBalance ? "\(entry.label): \(entry.balanceUSD?.formatted(.currency(code: "USD")) ?? "balance unavailable")" : "\(entry.label): \(entry.isUnlimited ? "unlimited allowance" : (entry.remainingPercent.map { "\(Int($0)) percent quota remaining" } ?? "allowance unavailable"))")
                     }
                     Spacer(minLength: 0)
                 }.font(.system(size: 12, weight: .medium)).padding(10)
@@ -789,7 +907,7 @@ struct AccountsView: View {
                 }
                 if !store.menuPreferences.allAccounts {
                     VStack(alignment: .leading, spacing: 8) {
-                        ForEach(store.accounts.filter { !$0.kind.isAPI }) { account in
+                        ForEach(store.accounts.filter { !$0.kind.isAPI || $0.kind.isBalance }) { account in
                             Toggle(isOn: Binding(get: { store.menuPreferences.selectedAccountIDs.contains(account.id) }, set: { store.setMenuAccount(account, included: $0) })) {
                                 HStack {
                                     Text(account.name)
@@ -800,18 +918,8 @@ struct AccountsView: View {
                         }
                     }
                 }
-                Text("Averages give each selected account equal weight. Accounts keep separate allowances; percentages are not pooled credits.")
+                Text("Subscription percentages are averaged only with subscriptions. API balances stay separate dollar amounts; spending totals are not treated as balances.")
                     .font(.system(size: 10)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-                Divider().opacity(0.4)
-                HStack {
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text("Automatic refresh").font(.system(size: 12, weight: .medium))
-                        Text("Adapts to activity and provider limits.").font(.system(size: 10)).foregroundStyle(.secondary)
-                    }
-                    Spacer()
-                    Toggle("Automatic refresh", isOn: Binding(get: { !store.paused }, set: { if $0 == store.paused { store.togglePause() } }))
-                        .labelsHidden().toggleStyle(.switch).controlSize(.small)
-                }
             }
         }.disabled(store.demo)
     }
