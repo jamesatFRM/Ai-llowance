@@ -117,7 +117,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
             monitorOutsideClicks()
         }
     }
-    private func closePopover() { popover.performClose(nil); removeClickMonitors(); store.setInterfaceVisible(window?.isVisible == true) }
+    private func closePopover() { popover.performClose(nil); removeClickMonitors(); store.setInterfaceVisible(hasVisibleSettings) }
     private func monitorOutsideClicks() {
         removeClickMonitors()
         outsideClickMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown, .otherMouseDown]) { [weak self] _ in
@@ -141,7 +141,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
         if let outsideClickMonitor { NSEvent.removeMonitor(outsideClickMonitor); self.outsideClickMonitor = nil }
         if let localClickMonitor { NSEvent.removeMonitor(localClickMonitor); self.localClickMonitor = nil }
     }
-    func popoverDidClose(_ notification: Notification) { removeClickMonitors(); store.setInterfaceVisible(window?.isVisible == true) }
+    func popoverDidClose(_ notification: Notification) { removeClickMonitors(); store.setInterfaceVisible(hasVisibleSettings) }
+    private var hasVisibleSettings: Bool {
+        window?.isVisible == true && window?.isMiniaturized != true && !NSApp.isHidden
+    }
+    func applicationDidHide(_ notification: Notification) { closePopover() }
+    func applicationDidUnhide(_ notification: Notification) { store.setInterfaceVisible(popover.isShown || hasVisibleSettings) }
+    func windowDidMiniaturize(_ notification: Notification) { store.setInterfaceVisible(popover.isShown || hasVisibleSettings) }
+    func windowDidDeminiaturize(_ notification: Notification) { store.setInterfaceVisible(popover.isShown || hasVisibleSettings) }
     func applicationDidResignActive(_ notification: Notification) { closePopover() }
     func applicationDidBecomeActive(_ notification: Notification) { store.rediscoverTools(); store.refresh() }
     func windowWillClose(_ notification: Notification) { store.setInterfaceVisible(popover.isShown) }
@@ -159,6 +166,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
             created.isReleasedWhenClosed = false; created.delegate = self; window = created
         }
         applyWindowAppearance()
+        if window?.isMiniaturized == true { window?.deminiaturize(nil) }
         window?.makeKeyAndOrderFront(nil); NSApp.activate(ignoringOtherApps: true)
     }
     private func applyWindowAppearance() {

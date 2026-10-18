@@ -23,7 +23,10 @@ final class AppStore: ObservableObject {
     @Published var offline = false
     @Published var now = Date()
     @Published private(set) var menuPreferences = MenuPreferences()
-    @Published var selectedAccountID: UUID?
+    @Published private(set) var accountNavigationVersion: UInt64 = 0
+    @Published var selectedAccountID: UUID? {
+        didSet { if selectedAccountID != nil { accountNavigationVersion &+= 1 } }
+    }
     @Published private(set) var notificationsEnabled = false
     @Published private(set) var launchAtLogin = false
     @Published private(set) var loginItemNeedsApproval = false
@@ -239,6 +242,7 @@ final class AppStore: ObservableObject {
             #!/bin/zsh -f
             set -eu
             unset ANTHROPIC_API_KEY ANTHROPIC_AUTH_TOKEN CLAUDE_CODE_OAUTH_TOKEN ANTHROPIC_BASE_URL
+            unset CLAUDE_CODE_USE_BEDROCK CLAUDE_CODE_USE_VERTEX CLAUDE_CODE_USE_FOUNDRY ANTHROPIC_PROFILE
             export CLAUDE_CONFIG_DIR=\(ShellQuote.argument(profile.path))
             export DISABLE_TELEMETRY=1 DISABLE_ERROR_REPORTING=1
             cd "$HOME"
@@ -254,13 +258,16 @@ final class AppStore: ObservableObject {
         guard let executable else { notice = "Install or locate Codex CLI in Advanced settings, then try again."; return }
         let defaultProfile = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".codex")
         let profile = account.map { $0.usesExistingCodex ? defaultProfile : Paths.profile($0.id, root: root) } ?? defaultProfile
+        let credentialArguments = account?.usesExistingCodex == false
+            ? " -c " + ShellQuote.argument("cli_auth_credentials_store=\"keyring\"") : ""
         let launcher = root.appendingPathComponent("AgentHelp/Codex-\(account?.id.uuidString ?? "default").command")
         let script = """
         #!/bin/zsh -f
         set -eu
+        unset OPENAI_API_KEY CODEX_API_KEY OPENAI_BASE_URL OPENAI_ORG_ID OPENAI_ORGANIZATION OPENAI_PROJECT_ID
         export CODEX_HOME=\(ShellQuote.argument(profile.path))
         cd "$HOME"
-        exec \(ShellQuote.argument(executable.path))
+        exec \(ShellQuote.argument(executable.path))\(credentialArguments)
         """
         do {
             try Paths.writePrivate(Data(script.utf8), to: launcher, executable: true)
