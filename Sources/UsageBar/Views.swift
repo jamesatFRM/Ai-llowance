@@ -358,9 +358,10 @@ private struct SparklineShape: Shape {
 }
 private struct SettingsCard<Content: View>: View {
     @Environment(\.colorScheme) private var scheme
+    var inset: CGFloat = 14
     @ViewBuilder let content: Content
     var body: some View {
-        content.padding(14).frame(maxWidth: .infinity, alignment: .leading)
+        content.padding(inset).frame(maxWidth: .infinity, alignment: .leading)
             .background {
                 RoundedRectangle(cornerRadius: 18, style: .continuous)
                     .fill(LinearGradient(colors: scheme == .dark ? [Color(red: 0.10, green: 0.14, blue: 0.25), Color(red: 0.065, green: 0.09, blue: 0.18)] : [Color.white, Color(red: 0.97, green: 0.98, blue: 1)], startPoint: .topLeading, endPoint: .bottomTrailing))
@@ -442,19 +443,9 @@ struct AccountsView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            HStack(spacing: 8) {
-                BrandIcon(size: 23)
-                Text("Ai-llowance").font(.system(size: 13, weight: .semibold))
-                Spacer()
-                if store.refreshing { ProgressView().controlSize(.small) }
-                Text(store.refreshSummary).font(.system(size: 10)).foregroundStyle(.secondary).lineLimit(1)
-                Button { store.rediscoverTools(); store.refresh(force: true) } label: { Label("Refresh", systemImage: "arrow.clockwise").font(.system(size: 12, weight: .medium)).padding(.horizontal, 8).frame(height: 26) }
-                    .buttonStyle(QuietButtonStyle()).help("Refresh accounts").accessibilityLabel("Refresh accounts").disabled(store.demo || store.paused || store.refreshing)
-            }.padding(.horizontal, 14).padding(.vertical, 9)
-            Divider().opacity(0.4)
+            dashboardNavigation
+            Divider().opacity(0.35)
             VStack(spacing: 0) {
-                dashboardNavigation
-                Divider().opacity(0.35)
                 VStack(spacing: 0) {
                     if section == .settings { settingsTabs.padding(12) }
                     if let notice = store.notice {
@@ -534,18 +525,35 @@ struct AccountsView: View {
     }
     private var dashboardNavigation: some View {
         HStack(spacing: 6) {
+            BrandIcon(size: 23)
+            Text("Ai-llowance").font(.system(size: 12, weight: .semibold)).padding(.trailing, 6)
             ForEach([DashboardSection.history, .overview, .settings]) { item in
                 Button { section = item } label: {
-                    Label(item == .history ? "Accounts" : item == .overview ? "Ready to work" : item.rawValue,
-                          systemImage: item == .history ? "chart.xyaxis.line" : item == .overview ? "bolt" : item == .accounts ? "person.2" : "gearshape")
-                        .font(.system(size: 11, weight: (section == item || (item == .history && section == .accounts)) ? .semibold : .medium))
-                        .padding(.horizontal, 12).frame(height: 30)
-                        .foregroundStyle((section == item || (item == .history && section == .accounts)) ? Color.primary : .secondary)
-                        .background((section == item || (item == .history && section == .accounts)) ? Brand.violet.opacity(0.22) : .clear, in: RoundedRectangle(cornerRadius: 8))
+                    Label(item == .history ? "Accounts" : item == .overview ? "Ready" : "Settings",
+                          systemImage: item == .history ? "chart.xyaxis.line" : item == .overview ? "bolt" : "gearshape")
+                        .font(.system(size: 11, weight: .medium))
+                        .padding(.horizontal, 8).frame(height: 28)
+                        .foregroundStyle(section == item || (item == .history && section == .accounts) ? Color.primary : .secondary)
+                        .background(section == item || (item == .history && section == .accounts) ? Brand.violet.opacity(0.22) : .clear, in: RoundedRectangle(cornerRadius: 8))
                 }.buttonStyle(.plain)
             }
-            Spacer(minLength: 0)
-        }.padding(.horizontal, 12).padding(.vertical, 6)
+            Spacer(minLength: 4)
+            if section == .history {
+                Picker("Account", selection: $historyAccountID) {
+                    Text("All accounts").tag(nil as UUID?)
+                    ForEach(store.accounts) { Text($0.name).tag(Optional($0.id)) }
+                }.labelsHidden().frame(width: 120)
+                Button { section = .accounts } label: { Image(systemName: "slider.horizontal.3").frame(width: 26, height: 28) }
+                    .buttonStyle(QuietButtonStyle()).help("Manage accounts").accessibilityLabel("Manage accounts")
+                Picker("Time range", selection: $historyHours) {
+                    Text("24 hours").tag(24); Text("7 days").tag(168)
+                }.pickerStyle(.segmented).labelsHidden().frame(width: 146)
+            }
+            Button { store.rediscoverTools(); store.refresh(force: true) } label: {
+                Image(systemName: "arrow.clockwise").frame(width: 28, height: 28)
+            }.buttonStyle(QuietButtonStyle()).help("Refresh · " + store.refreshSummary)
+                .accessibilityLabel("Refresh accounts").disabled(store.demo || store.paused || store.refreshing)
+        }.padding(.horizontal, 12).padding(.vertical, 8)
     }
     private func scrollToSelected(_ proxy: ScrollViewProxy) {
         guard section == .accounts, let id = store.selectedAccountID else { return }
@@ -653,17 +661,6 @@ struct AccountsView: View {
     @ViewState private var historyWidth: CGFloat = 800
     private var historyContent: some View {
         VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                Picker("Account", selection: $historyAccountID) {
-                    Text("All accounts").tag(nil as UUID?)
-                    ForEach(store.accounts) { Text($0.name).tag(Optional($0.id)) }
-                }.labelsHidden().fixedSize()
-                Button { section = .accounts } label: { Label("Manage", systemImage: "slider.horizontal.3") }.buttonStyle(QuietButtonStyle())
-                Spacer()
-                Picker("Time range", selection: $historyHours) {
-                    Text("24 hours").tag(24); Text("7 days").tag(168)
-                }.pickerStyle(.segmented).labelsHidden().frame(width: 160)
-            }
             if store.accounts.isEmpty { Text("Connect an account to start collecting history.").foregroundStyle(.secondary) }
             LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 12), count: min(4, max(1, Int((historyWidth + 16) / 280)))), spacing: 12) {
             ForEach(store.accounts.filter { historyAccountID == nil || $0.id == historyAccountID }) { account in
@@ -675,8 +672,6 @@ struct AccountsView: View {
             }
             ActivityHeatmap(accounts: store.accounts.filter { historyAccountID == nil || $0.id == historyAccountID },
                             histories: Dictionary(uniqueKeysWithValues: store.accounts.map { ($0.id, store.history(for: $0)) }), now: store.now)
-            Text("On this Mac · up to 96 readings per account · 7-day retention")
-                .font(.system(size: 10)).foregroundStyle(.tertiary).padding(.top, 4)
         }.background(GeometryReader { geometry in
             Color.clear.onAppear { historyWidth = geometry.size.width }
                 .onChange(of: geometry.size.width) { _, width in historyWidth = width }
@@ -1164,32 +1159,30 @@ private struct HistoryCard: View {
     var body: some View {
         let series = samples
         let segmentCounts = Dictionary(grouping: series, by: \.segment).mapValues(\.count)
-        SettingsCard {
-            VStack(alignment: .leading, spacing: 8) {
+        SettingsCard(inset: 10) {
+            VStack(alignment: .leading, spacing: 6) {
                 HStack {
-                    ProviderMark(provider: account.kind.provider, size: 20).foregroundStyle(providerAccent(account.kind.provider))
-                    Text(account.name).font(.system(size: 14, weight: .semibold))
+                    ProviderMark(provider: account.kind.provider, size: 16).foregroundStyle(providerAccent(account.kind.provider))
+                    Text(account.name).font(.system(size: 12, weight: .semibold))
                     Spacer()
-                    Text("\(plotted.count) readings").font(.system(size: 10)).foregroundStyle(.tertiary)
+                    Image(systemName: !account.enabled ? "pause.circle" : cached ? "clock" : status.symbol)
+                        .foregroundStyle(statusColor).help(!account.enabled ? "Paused" : cached ? "Saved reading" : status.title)
                 }
                 Text(account.expectedIdentity ?? account.kind.title)
                     .font(.system(size: 11)).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
-                HStack {
-                    Label(!account.enabled ? "Paused" : cached ? "Saved reading" : status.title, systemImage: !account.enabled ? "pause.circle" : cached ? "clock" : status.symbol)
-                        .font(.system(size: 10, weight: .medium)).foregroundStyle(statusColor)
-                        .padding(.horizontal, 8).padding(.vertical, 4)
-                        .background(statusColor.opacity(0.12), in: Capsule())
-                    Spacer(minLength: 0)
+                HStack(alignment: .firstTextBaseline) {
+                    Text(readingValue(snapshot, window: snapshot?.limitingWindow(for: account.kind)))
+                        .font(.system(size: 24, weight: .semibold, design: .rounded)).monospacedDigit()
+                        .foregroundStyle(error || cached || status.state == .stale || !account.enabled ? Color.secondary : Color.primary)
+                    Spacer(minLength: 4)
+                    Text(!account.enabled ? "Paused" : cached ? "Saved reading" : status.title)
+                        .font(.system(size: 9, weight: .medium)).foregroundStyle(statusColor).lineLimit(1)
                 }
-                Text(readingValue(snapshot, window: snapshot?.limitingWindow(for: account.kind)))
-                    .font(.system(size: 28, weight: .semibold, design: .rounded)).monospacedDigit()
-                    .foregroundStyle(error || cached || status.state == .stale || !account.enabled ? Color.secondary : Color.primary)
                 Text(status.resetText(at: now) ?? (account.kind.isAPI ? metric : "Current allowance"))
                     .font(.system(size: 10)).foregroundStyle(.secondary).lineLimit(1)
-                Divider().opacity(0.3)
                 if plotted.isEmpty {
                     Text("No readings in this range yet. History grows as this Mac refreshes your accounts.")
-                        .font(.system(size: 12)).foregroundStyle(.secondary).frame(maxWidth: .infinity, minHeight: 100)
+                        .font(.system(size: 12)).foregroundStyle(.secondary).frame(maxWidth: .infinity, minHeight: 66)
                 } else {
                     Chart {
                         ForEach(series) { sample in
@@ -1219,7 +1212,7 @@ private struct HistoryCard: View {
                             AxisValueLabel()
                         }
                     }
-                    .frame(height: 138).padding(.top, 4)
+                    .frame(height: 66).padding(.top, 2)
                     if let last = plotted.last {
                         HStack {
                             Text("History")
@@ -1230,8 +1223,8 @@ private struct HistoryCard: View {
 
                 }
                 HStack(spacing: 8) {
-                    Button(action: openUsage) { Label("Open usage", systemImage: "arrow.up.right").frame(maxWidth: .infinity).frame(height: 28) }
-                    Button(action: manage) { Image(systemName: "slider.horizontal.3").frame(width: 28, height: 28) }.help("Manage account").accessibilityLabel("Manage " + account.name)
+                    Button(action: openUsage) { Label("Open usage", systemImage: "arrow.up.right").frame(maxWidth: .infinity).frame(height: 24) }
+                    Button(action: manage) { Image(systemName: "slider.horizontal.3").frame(width: 28, height: 24) }.help("Manage account").accessibilityLabel("Manage " + account.name)
                 }.font(.system(size: 11, weight: .medium)).buttonStyle(QuietButtonStyle())
             }
         }
@@ -1252,14 +1245,14 @@ private struct ActivityHeatmap: View {
             for (hour, value) in hours where hour >= (days.first ?? today) && hour <= now { result[hour, default: 0] += value }
         }
         let peak = buckets.values.max() ?? 0
-        SettingsCard {
-            VStack(alignment: .leading, spacing: 10) {
+        SettingsCard(inset: 10) {
+            VStack(alignment: .leading, spacing: 6) {
                 HStack {
                     Label("Work rhythm", systemImage: "square.grid.3x3.fill").font(.system(size: 13, weight: .semibold))
                     Spacer()
                     Text("Last 7 days · " + (calendar.timeZone.abbreviation() ?? calendar.timeZone.identifier)).font(.system(size: 10)).foregroundStyle(.secondary)
                 }
-                Grid(horizontalSpacing: 4, verticalSpacing: 4) {
+                Grid(horizontalSpacing: 4, verticalSpacing: 2) {
                     GridRow {
                         Color.clear.frame(width: 62, height: 12)
                         ForEach(0..<24) { hour in
@@ -1277,7 +1270,7 @@ private struct ActivityHeatmap: View {
                                 RoundedRectangle(cornerRadius: 3)
                                     .fill(value == nil ? Color.primary.opacity(0.025) : Brand.cyan.opacity(0.12 + strength * 0.88))
                                     .overlay(RoundedRectangle(cornerRadius: 3).strokeBorder(Color.primary.opacity(value == nil ? 0.08 : 0), lineWidth: 0.5))
-                                    .frame(maxWidth: .infinity).frame(height: 16)
+                                    .frame(maxWidth: .infinity).frame(height: 12)
                                     .help("\(day.formatted(date: .abbreviated, time: .omitted)) · \(hour):00 · " + (value.map { String(format: "%.1f allowance percentage points consumed", $0) } ?? "No measured interval"))
                                     .accessibilityLabel("\(day.formatted(date: .abbreviated, time: .omitted)), hour \(hour), " + (value.map { String(format: "%.1f allowance points consumed", $0) } ?? "Not measured"))
                             }
@@ -1289,10 +1282,8 @@ private struct ActivityHeatmap: View {
                     ForEach(0..<5) { level in RoundedRectangle(cornerRadius: 2).fill(Brand.cyan.opacity(0.12 + Double(level) * 0.22)).frame(width: 12, height: 10) }
                     Text("More")
                     Spacer()
-                    Text("Outlined = unmeasured")
+                    Text("Allowance use · outlined = unmeasured").help("Recorded subscription allowance consumption, not coding hours. Gaps and resets are excluded; API spending is not mixed in.")
                 }.font(.system(size: 9)).foregroundStyle(.secondary)
-                Text("Recorded subscription allowance consumption, not coding hours. Gaps and resets are excluded; API spending is not mixed in.")
-                    .font(.system(size: 10)).foregroundStyle(.secondary)
             }
         }
     }
