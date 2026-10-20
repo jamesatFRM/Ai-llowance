@@ -32,3 +32,22 @@ struct BrandIcon: View {
         }
     }
 }
+
+
+extension NSColor {
+    static func accountHex(_ hex: String?) -> NSColor? {
+        guard let hex, hex.count == 6, let rgb = UInt32(hex, radix: 16) else { return nil }
+        return NSColor(srgbRed: CGFloat((rgb >> 16) & 255) / 255, green: CGFloat((rgb >> 8) & 255) / 255, blue: CGFloat(rgb & 255) / 255, alpha: 1)
+    }
+    static func allowance(_ percent: Double) -> NSColor {
+        if percent <= 0 { return .systemRed }
+        if percent >= 100 { return .white }
+        let stops: [(Double, NSColor)] = [(0, .systemRed), (15, .systemOrange), (30, .systemYellow), (50, .systemPurple), (70, .systemBlue), (85, .systemCyan), (100, .white)]
+        let value = max(0, min(100, percent))
+        for index in 1..<stops.count where value <= stops[index].0 {
+            let a = stops[index - 1], b = stops[index]
+            return a.1.blended(withFraction: CGFloat((value - a.0) / (b.0 - a.0)), of: b.1) ?? b.1
+        }
+        return .white
+    }
+}

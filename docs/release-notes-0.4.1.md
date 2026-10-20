@@ -14,3 +14,7 @@ The dashboard and menu share navy surfaces, mint OpenAI accents, warm Claude acc
 
 - Account tiles now combine current status, identity, allowance, reset timing, history, and direct actions.
 - A rolling seven-day hourly heatmap shows relative recorded subscription allowance consumption, with missing intervals distinguished from measured quiet periods. This is not a measure of coding hours; API dollars are excluded.
+
+- Native grouped settings add Dock visibility, refresh interval choices, and a feedback link alongside launch-at-login and notifications.
+- Rename accounts and choose a custom accent for the menu, dashboard, and/or graph.
+- Optional menu allowance colors progress from white at 100% through cool and warm colors to red at 0%. Unavailable readings stay neutral.

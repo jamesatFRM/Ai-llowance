@@ -84,6 +84,9 @@ public struct Account: Codable, Identifiable, Equatable, Sendable {
     // Non-secret identity binding; old settings decode without a binding.
     public var expectedIdentity: String?
     public var scopeID: String?
+    public var menuColorHex: String?
+    public var dashboardColorHex: String?
+    public var graphColorHex: String?
     public init(id: UUID = UUID(), name: String, kind: ConnectionKind, enabled: Bool = true, usesExistingCodex: Bool = false, usesExistingClaude: Bool = false, scopeID: String? = nil) {
         self.id = id; self.name = name; self.kind = kind; self.enabled = enabled; self.usesExistingCodex = usesExistingCodex
         self.usesExistingClaude = usesExistingClaude

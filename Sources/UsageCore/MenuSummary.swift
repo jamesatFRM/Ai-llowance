@@ -23,10 +23,11 @@ public struct MenuPreferences: Codable, Equatable, Sendable {
     public var aggregation: MenuAggregation = .average
     public var showAccountNames = true
     public var detailedQuotaLabels = false
+    public var colorByAllowance = false
     public var allAccounts = true
     public var selectedAccountIDs: Set<UUID> = []
     public init() {}
-    private enum CodingKeys: String, CodingKey { case theme, display, aggregation, showAccountNames, detailedQuotaLabels, allAccounts, selectedAccountIDs }
+    private enum CodingKeys: String, CodingKey { case colorByAllowance, theme, display, aggregation, showAccountNames, detailedQuotaLabels, allAccounts, selectedAccountIDs }
     public init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
         theme = try values.decodeIfPresent(AppTheme.self, forKey: .theme) ?? .automatic
@@ -34,6 +35,7 @@ public struct MenuPreferences: Codable, Equatable, Sendable {
         aggregation = try values.decodeIfPresent(MenuAggregation.self, forKey: .aggregation) ?? .average
         showAccountNames = try values.decodeIfPresent(Bool.self, forKey: .showAccountNames) ?? true
         detailedQuotaLabels = try values.decodeIfPresent(Bool.self, forKey: .detailedQuotaLabels) ?? false
+        colorByAllowance = try values.decodeIfPresent(Bool.self, forKey: .colorByAllowance) ?? false
         allAccounts = try values.decodeIfPresent(Bool.self, forKey: .allAccounts) ?? true
         selectedAccountIDs = try values.decodeIfPresent(Set<UUID>.self, forKey: .selectedAccountIDs) ?? []
     }
@@ -59,11 +61,12 @@ public struct MenuEntry: Sendable, Equatable {
     public let isUnlimited: Bool
     public let balanceUSD: Decimal?
     public let isBalance: Bool
+    public let colorHex: String?
     public init(provider: MenuProvider?, label: String, remainingPercent: Double?, accountCount: Int, isUnlimited: Bool = false,
-                balanceUSD: Decimal? = nil, isBalance: Bool = false) {
+                balanceUSD: Decimal? = nil, isBalance: Bool = false, colorHex: String? = nil) {
         self.provider = provider; self.label = label; self.remainingPercent = remainingPercent
         self.accountCount = accountCount; self.isUnlimited = isUnlimited
-        self.balanceUSD = balanceUSD; self.isBalance = isBalance
+        self.balanceUSD = balanceUSD; self.isBalance = isBalance; self.colorHex = colorHex
     }
 }
 
@@ -117,7 +120,7 @@ public enum MenuSummary {
             if values.count != group.count || values.isEmpty { value = nil }
             else if preferences.aggregation == .lowest { value = values.min() }
             else { value = values.reduce(0, +) / Double(values.count) }
-            return MenuEntry(provider: icon, label: label, remainingPercent: value, accountCount: group.count, isUnlimited: allUnlimited)
+            return MenuEntry(provider: icon, label: label, remainingPercent: value, accountCount: group.count, isUnlimited: allUnlimited, colorHex: Set(group.compactMap(\.menuColorHex)).count == 1 && group.allSatisfy { $0.menuColorHex != nil } ? group.first?.menuColorHex : nil)
         }
         func balanceEntry(_ account: Account) -> MenuEntry {
             let balance: Decimal?
@@ -127,7 +130,7 @@ public enum MenuSummary {
                 balance = snapshot.balanceUSD
             } else { balance = nil }
             return MenuEntry(provider: provider(account), label: account.name, remainingPercent: nil,
-                             accountCount: 1, balanceUSD: balance, isBalance: true)
+                             accountCount: 1, balanceUSD: balance, isBalance: true, colorHex: account.menuColorHex)
         }
         func allowanceAccounts(_ provider: MenuProvider? = nil) -> [Account] {
             selected.filter { !$0.kind.isBalance && (provider == nil || $0.kind.provider == provider) }

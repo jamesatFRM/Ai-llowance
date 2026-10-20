@@ -19,7 +19,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
     private var renderedPreferences: MenuPreferences?
     private let store = AppStore(demo: CommandLine.arguments.contains("--demo") || CommandLine.arguments.contains("--preview") || CommandLine.arguments.contains("--export-preview"))
     func applicationDidFinishLaunching(_ notification: Notification) {
-        NSApp.setActivationPolicy(.accessory)
+        NSApp.setActivationPolicy((UserDefaults.standard.object(forKey: "hideFromDock") as? Bool ?? true) ? .accessory : .regular)
         if let index = CommandLine.arguments.firstIndex(of: "--export-preview"), CommandLine.arguments.count > index + 1 {
             do { try SharePreview.export(store: store, directory: URL(fileURLWithPath: CommandLine.arguments[index + 1])) }
             catch { fputs("Could not render the sample preview.\n", stderr); exit(1) }
@@ -92,13 +92,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
             }
             let value = menuValue(entry)
             let name = store.menuPreferences.showAccountNames && (store.menuPreferences.display == .byAccount || entry.isBalance) ? " \(String(entry.label.prefix(12)))" : ""
-            title.append(NSAttributedString(string: "\(name) \(value)"))
+            let color: NSColor
+            if store.menuPreferences.colorByAllowance, !entry.isBalance, let percent = entry.remainingPercent { color = .allowance(percent) }
+            else { color = NSColor.accountHex(entry.colorHex) ?? .labelColor }
+            title.append(NSAttributedString(string: "\(name) \(value)", attributes: [.foregroundColor: color]))
             descriptions.append(entry.isBalance ? "\(entry.label): \(entry.balanceUSD?.formatted(.currency(code: "USD")) ?? "balance unavailable")"
                 : entry.isUnlimited ? "\(entry.label): unlimited allowance" : entry.remainingPercent == nil
                 ? "\(entry.label): allowance unavailable"
                 : "\(entry.label): \(value) allowance remaining")
         }
-        title.addAttributes([.font: NSFont.monospacedDigitSystemFont(ofSize: 12, weight: .medium), .foregroundColor: NSColor.labelColor], range: NSRange(location: 0, length: title.length))
+        title.addAttributes([.font: NSFont.monospacedDigitSystemFont(ofSize: 12, weight: .medium)], range: NSRange(location: 0, length: title.length))
         button.attributedTitle = title
         button.toolTip = descriptions.joined(separator: "\n") + "\n\(store.menuPreferences.aggregation.title); each account has its own allowance."
         button.setAccessibilityLabel("Ai-llowance. " + descriptions.joined(separator: ". "))
@@ -184,7 +187,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
             })
             let created = NSWindow(contentViewController: controller)
             created.title = "Ai-llowance · Dashboard"; created.styleMask = [.titled, .closable, .miniaturizable, .resizable]
-            created.setContentSize(NSSize(width: 980, height: 560)); created.center()
+            created.setContentSize(NSSize(width: 980, height: 536)); created.center()
             created.isReleasedWhenClosed = false; created.delegate = self; window = created
         }
         applyWindowAppearance()

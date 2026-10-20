@@ -175,7 +175,7 @@ struct Dashboard: View {
                         ForEach(accounts) { account in
                             CompactAccountRow(account: account, snapshot: store.snapshots[account.id], error: store.errors[account.id], now: store.now, cached: store.isCached(account),
                                 expanded: expandedAccountID == account.id,
-                                detailedLabels: store.menuPreferences.detailedQuotaLabels,
+                                detailedLabels: store.menuPreferences.detailedQuotaLabels, colorByAllowance: store.menuPreferences.colorByAllowance,
                                 history: expandedAccountID == account.id ? store.history(for: account) : [],
                                 expand: { expandedAccountID = expandedAccountID == account.id ? nil : account.id },
                                 manage: { manage(account) }, openUsage: { store.openUsage(account) })
@@ -197,6 +197,7 @@ private struct CompactAccountRow: View {
     let cached: Bool
     let expanded: Bool
     let detailedLabels: Bool
+    let colorByAllowance: Bool
     let history: [UsageHistoryPoint]
     let expand: () -> Void
     let manage: () -> Void
@@ -224,11 +225,11 @@ private struct CompactAccountRow: View {
             Button(action: expand) {
                 VStack(spacing: 4) {
                     HStack(spacing: 7) {
-                        ProviderMark(provider: account.kind.provider, size: 14).foregroundStyle(providerAccent(account.kind.provider))
+                        ProviderMark(provider: account.kind.provider, size: 14).foregroundStyle(NSColor.accountHex(account.menuColorHex).map { Color(nsColor: $0) } ?? providerAccent(account.kind.provider))
                         Text(account.name).font(.system(size: 12, weight: .semibold)).lineLimit(1)
                         Spacer(minLength: 5)
                         Text(readingValue(snapshot, window: window)).font(.system(size: 13, weight: .semibold, design: .rounded)).monospacedDigit()
-                            .foregroundStyle(error != nil || cached || status.state == .stale || !account.enabled ? .secondary : .primary)
+                            .foregroundStyle(error != nil || cached || status.state == .stale || !account.enabled ? Color.secondary : (colorByAllowance && window != nil ? Color(nsColor: .allowance(window!.remainingPercent)) : NSColor.accountHex(account.menuColorHex).map { Color(nsColor: $0) } ?? Color.primary))
                         Image(systemName: expanded ? "chevron.up" : "chevron.down").font(.system(size: 8, weight: .semibold))
                             .foregroundStyle(.secondary).frame(width: 12)
                     }
@@ -386,7 +387,7 @@ private enum DashboardSection: String, CaseIterable, Identifiable {
 private enum SettingsTab: String, CaseIterable, Identifiable {
     case accounts, menuBar, behavior, updates, advanced
     var id: String { rawValue }
-    var title: String { switch self { case .accounts: "Accounts"; case .menuBar: "Menu bar"; case .behavior: "Behavior"; case .updates: "Updates"; case .advanced: "Advanced" } }
+    var title: String { switch self { case .accounts: "Accounts"; case .menuBar: "Menu bar"; case .behavior: "General"; case .updates: "Updates"; case .advanced: "Advanced" } }
     var symbol: String { switch self { case .accounts: "person.2"; case .menuBar: "menubar.rectangle"; case .behavior: "bell.badge"; case .updates: "arrow.down.circle"; case .advanced: "slider.horizontal.3" } }
     var subtitle: String { switch self { case .accounts: "Connections, limits, and account access"; case .menuBar: "Choose what appears beside the clock"; case .behavior: "Alerts and startup preferences"; case .updates: "Keep Ai-llowance current"; case .advanced: "Provider links and local diagnostics" } }
 }
@@ -438,7 +439,8 @@ struct AccountsView: View {
     @ViewState private var section: DashboardSection = .history
     @ViewState private var historyHours = 24
     @ViewState private var historyAccountID: UUID?
-    @ViewState private var selectedTab: SettingsTab = .menuBar
+    @ViewState private var selectedTab: SettingsTab = .behavior
+    @AppStorage("hideFromDock") private var hideFromDock = true
     @ViewState private var handledAccountNavigationVersion: UInt64 = 0
 
     var body: some View {
@@ -465,7 +467,7 @@ struct AccountsView: View {
                                 case .overview: overviewContent
                                 case .history: historyContent
                                 case .accounts: accountsContent
-                                case .settings: selectedTabContent
+                                case .settings: selectedTabContent.frame(maxWidth: 640).frame(maxWidth: .infinity, alignment: .top)
                                 }
                             }.padding(12)
                         }
@@ -493,7 +495,7 @@ struct AccountsView: View {
                 Text(AppUpdater.versionLabel).foregroundStyle(.tertiary)
                 Button { NSApplication.shared.terminate(nil) } label: { Image(systemName: "power").frame(width: 26, height: 26) }.buttonStyle(QuietButtonStyle()).help("Quit Ai-llowance")
             }.font(.system(size: 10)).padding(.horizontal, 14).padding(.vertical, 6)
-        }.frame(minWidth: 760, minHeight: 480).controlSize(.regular).background(WorkspaceBackground()).preferredColorScheme(store.menuPreferences.theme.colorScheme)
+        }.frame(minWidth: 760, minHeight: 480).controlSize(.regular).background { if section == .settings { Color(nsColor: .windowBackgroundColor) } else { WorkspaceBackground() } }.preferredColorScheme(store.menuPreferences.theme.colorScheme)
         .background(Color(nsColor: .windowBackgroundColor).opacity(0.001))
         .alert("Remove \(removing?.name ?? "account")?", isPresented: Binding(get: { removing != nil }, set: { if !$0 { removing = nil } })) {
             Button("Cancel", role: .cancel) { removing = nil }
@@ -502,11 +504,9 @@ struct AccountsView: View {
             Text("The connection and its app-owned key or OpenAI sign-in will be removed. Existing CLI sign-ins are kept. For Claude, use Sign out in Terminal first if you also want to clear that login.")
         }
         .sheet(item: $renaming) { account in
-            VStack(alignment: .leading, spacing: 16) {
-                Text("Rename account").font(.headline)
-                TextField("Account name", text: $newName).textFieldStyle(.roundedBorder)
-                HStack { Button("Cancel") { renaming = nil }; Spacer(); Button("Save") { store.rename(account, to: newName); renaming = nil }.keyboardShortcut(.defaultAction) }
-            }.padding(24).frame(width: 340)
+            AccountAppearanceEditor(account: account) { name, menu, dashboard, graph in
+                if store.setAccountAppearance(account, name: name, menu: menu, dashboard: dashboard, graph: graph) { renaming = nil }
+            } cancel: { renaming = nil }
         }
         .sheet(item: $keyAccount) { account in
             VStack(alignment: .leading, spacing: 16) {
@@ -560,26 +560,9 @@ struct AccountsView: View {
         DispatchQueue.main.async { proxy.scrollTo(id, anchor: .top) }
     }
     private var settingsTabs: some View {
-        HStack(spacing: 5) {
-            ForEach(SettingsTab.allCases.filter { $0 != .accounts }) { tab in
-                Button { withAnimation(.easeOut(duration: 0.14)) { selectedTab = tab } } label: {
-                    HStack(spacing: 6) {
-                        Image(systemName: tab.symbol).font(.system(size: 10, weight: .semibold))
-                        Text(tab.title).font(.system(size: 11, weight: selectedTab == tab ? .semibold : .medium))
-                    }.frame(maxWidth: .infinity).frame(height: 30)
-                        .foregroundStyle(selectedTab == tab ? Color.white : Color.secondary)
-                        .background {
-                            if selectedTab == tab {
-                                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                                    .fill(Brand.gradient)
-                                    .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).strokeBorder(Color.white.opacity(0.18), lineWidth: 0.6))
-                            }
-                        }
-                        .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-                }.buttonStyle(.plain).help(tab.subtitle)
-            }
-        }.padding(4).background(Color.primary.opacity(0.045), in: RoundedRectangle(cornerRadius: 11, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 11, style: .continuous).strokeBorder(Color.primary.opacity(0.07), lineWidth: 0.6))
+        Picker("Settings", selection: $selectedTab) {
+            ForEach([SettingsTab.behavior, .menuBar, .updates, .advanced]) { tab in Text(tab.title).tag(tab) }
+        }.pickerStyle(.segmented).labelsHidden().frame(maxWidth: 480)
     }
     @ViewBuilder private var selectedTabContent: some View {
         if store.demo { Text("Sample accounts · sign-in is disabled").font(.caption).foregroundStyle(.orange) }
@@ -667,7 +650,7 @@ struct AccountsView: View {
                 let points = store.history(for: account).filter { $0.timestamp >= store.now.addingTimeInterval(-Double(historyHours) * 3600) }
                 HistoryCard(account: account, points: points, snapshot: store.snapshots[account.id],
                             error: store.errors[account.id] != nil, cached: store.isCached(account), now: store.now,
-                            openUsage: { store.openUsage(account) }, manage: { store.selectedAccountID = account.id; section = .accounts })
+                            openUsage: { store.openUsage(account) }, manage: { renaming = account })
             }
             }
             ActivityHeatmap(accounts: store.accounts.filter { historyAccountID == nil || $0.id == historyAccountID },
@@ -976,7 +959,7 @@ struct AccountsView: View {
                         Button("Replace key") { replacement = ""; keyAccount = account }
                         Divider()
                     }
-                    Button("Rename account") { newName = account.name; renaming = account }
+                    Button("Name & color…") { newName = account.name; renaming = account }
                     Button(account.enabled ? "Pause account" : "Resume account") { store.toggle(account) }
                     Button("Remove account", role: .destructive) { removing = account }.disabled(store.refreshing || store.removing || busyConnecting)
                 } label: { Image(systemName: "ellipsis").frame(width: 32, height: 32) }
@@ -985,32 +968,46 @@ struct AccountsView: View {
         }.font(.system(size: 13)).controlSize(.large).disabled(store.demo)
     }
     private var behaviorSettings: some View {
-        SettingsCard {
-            VStack(alignment: .leading, spacing: 12) {
-                Toggle(isOn: Binding(get: { store.notificationsEnabled }, set: { store.setNotificationsEnabled($0) })) {
-                    Label("Quiet allowance alerts", systemImage: "bell.badge").font(.system(size: 12, weight: .medium))
-                }.toggleStyle(.switch).controlSize(.small)
-                Text("Low, empty, and available again. Only meaningful changes, grouped across accounts.").font(.system(size: 10)).foregroundStyle(.secondary)
-                Divider().opacity(0.4)
-                Toggle(isOn: Binding(get: { store.launchAtLogin }, set: { store.setLaunchAtLogin($0) })) {
-                    Label("Launch at login", systemImage: "sunrise").font(.system(size: 12, weight: .medium))
-                }.toggleStyle(.switch).controlSize(.small)
-                Divider().opacity(0.4)
-                HStack {
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text("Automatic refresh").font(.system(size: 12, weight: .medium))
-                        Text("Adapts to activity and provider limits.").font(.system(size: 10)).foregroundStyle(.secondary)
+        VStack(alignment: .leading, spacing: 16) {
+            GroupBox("Startup") {
+                VStack(spacing: 12) {
+                    Toggle("Launch at login", isOn: Binding(get: { store.launchAtLogin }, set: { store.setLaunchAtLogin($0) }))
+                    Divider()
+                    Toggle("Hide from Dock", isOn: $hideFromDock)
+                        .onChange(of: hideFromDock) { _, hidden in
+                            NSApplication.shared.setActivationPolicy(hidden ? .accessory : .regular)
+                            NSApplication.shared.activate(ignoringOtherApps: true)
+                        }
+                    if store.loginItemNeedsApproval {
+                        Link("Open Login Items Settings…", destination: URL(string: "x-apple.systempreferences:com.apple.LoginItems-Settings.extension")!)
                     }
-                    Spacer()
-                    Toggle("Automatic refresh", isOn: Binding(get: { !store.paused }, set: { if $0 == store.paused { store.togglePause() } }))
-                        .labelsHidden().toggleStyle(.switch).controlSize(.small)
-                }
-                if store.loginItemNeedsApproval {
-                    Link("Allow Ai-llowance in Login Items ↗", destination: URL(string: "x-apple.systempreferences:com.apple.LoginItems-Settings.extension")!)
-                        .font(.system(size: 10))
-                }
+                }.padding(10)
             }
-        }.disabled(store.demo)
+            GroupBox("Usage monitoring") {
+                VStack(spacing: 12) {
+                    Toggle("Refresh automatically", isOn: Binding(get: { !store.paused }, set: { if $0 == store.paused { store.togglePause() } }))
+                    Divider()
+                    HStack {
+                        Text("Refresh interval")
+                        Spacer()
+                        Picker("Refresh interval", selection: Binding(get: { store.refreshMinutes }, set: { store.setRefreshMinutes($0) })) {
+                            Text("Automatic").tag(0)
+                            Text("Every 5 minutes").tag(5)
+                            Text("Every 15 minutes").tag(15)
+                            Text("Every 30 minutes").tag(30)
+                        }.labelsHidden().frame(width: 190).disabled(store.paused)
+                    }
+                    Text("Provider limits and power-saving mode may delay refreshes.").font(.callout).foregroundStyle(.secondary).frame(maxWidth: .infinity, alignment: .leading)
+                    Divider()
+                    Toggle("Allowance notifications", isOn: Binding(get: { store.notificationsEnabled }, set: { store.setNotificationsEnabled($0) }))
+                }.padding(10)
+            }
+            HStack {
+                Link("Submit Feedback…", destination: URL(string: "https://github.com/jamesatFRM/Ai-llowance/issues/new")!)
+                Spacer()
+                Text("Ai-llowance " + AppUpdater.version).foregroundStyle(.secondary)
+            }
+        }.font(.system(size: 13)).toggleStyle(.switch).controlSize(.regular).disabled(store.demo)
     }
     private var moreConnections: some View {
         SettingsCard {
@@ -1036,72 +1033,57 @@ struct AccountsView: View {
         }.disabled(store.demo)
     }
     private var menuBarSettings: some View {
-        SettingsCard {
-            VStack(alignment: .leading, spacing: 14) {
-                HStack {
-                    Text("Appearance").font(.system(size: 11)).foregroundStyle(.secondary)
-                    Spacer()
-                    Picker("Appearance", selection: Binding(get: { store.menuPreferences.theme }, set: { store.setTheme($0) })) {
-                        ForEach(AppTheme.allCases) { theme in Text(theme.title).tag(theme) }
-                    }.pickerStyle(.segmented).labelsHidden().frame(width: 240)
-                }
-                Toggle("Detailed quota labels in the popover", isOn: Binding(get: { store.menuPreferences.detailedQuotaLabels }, set: { store.setDetailedQuotaLabels($0) }))
-                    .toggleStyle(.switch).controlSize(.small).font(.system(size: 11))
-                Text("Show each quota window and its remaining percentage. Compact labels are the default; click any account for full details.").font(.system(size: 10)).foregroundStyle(.secondary)
-                Divider().opacity(0.4)
-                HStack {
-                    Label("Menu bar", systemImage: "menubar.rectangle").font(.system(size: 13, weight: .semibold))
-                    Spacer()
-                    Text("Usage & balances").font(.system(size: 10)).foregroundStyle(.secondary)
-                }
-                HStack(spacing: 16) {
-                    if store.menuEntries.isEmpty { HStack(spacing: 4) { ProviderMark(provider: nil, size: 13); Text("Usage") } }
-                    ForEach(Array(store.menuEntries.enumerated()), id: \.offset) { _, entry in
-                        HStack(spacing: 5) {
-                            ProviderMark(provider: entry.provider)
-                            if store.menuPreferences.showAccountNames && (store.menuPreferences.display == .byAccount || entry.isBalance) { Text(entry.label).lineLimit(1) }
-                            Text(menuEntryValue(entry)).monospacedDigit()
-                        }.accessibilityLabel(entry.isBalance ? "\(entry.label): \(entry.balanceUSD?.formatted(.currency(code: "USD")) ?? "balance unavailable")" : "\(entry.label): \(entry.isUnlimited ? "unlimited allowance" : (entry.remainingPercent.map { "\(Int($0)) percent quota remaining" } ?? "allowance unavailable"))")
+        VStack(alignment: .leading, spacing: 16) {
+            GroupBox("Appearance") {
+                VStack(spacing: 12) {
+                    HStack {
+                        Text("Appearance")
+                        Spacer()
+                        Picker("Appearance", selection: Binding(get: { store.menuPreferences.theme }, set: { store.setTheme($0) })) {
+                            ForEach(AppTheme.allCases) { theme in Text(theme.title).tag(theme) }
+                        }.pickerStyle(.segmented).labelsHidden().frame(width: 240)
                     }
-                    Spacer(minLength: 0)
-                }.font(.system(size: 12, weight: .medium)).padding(10)
-                    .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 8))
-                Picker("Display", selection: Binding(get: { store.menuPreferences.display }, set: { store.setMenuDisplay($0) })) {
-                    ForEach(MenuDisplay.allCases) { mode in Text(mode.title).tag(mode) }
-                }.pickerStyle(.segmented).labelsHidden()
-                if store.menuPreferences.display == .byAccount {
-                    Toggle("Show account names", isOn: Binding(get: { store.menuPreferences.showAccountNames }, set: { store.setShowAccountNames($0) }))
-                        .toggleStyle(.switch).controlSize(.mini).font(.system(size: 11))
-                    Text("Turn off for just icons and percentages. Hover over the menu bar to identify accounts.")
-                        .font(.system(size: 10)).foregroundStyle(.secondary)
-                }
-                HStack {
-                    Text("Combine using").font(.system(size: 11)).foregroundStyle(.secondary)
-                    Picker("Combine using", selection: Binding(get: { store.menuPreferences.aggregation }, set: { store.setMenuAggregation($0) })) {
-                        ForEach(MenuAggregation.allCases) { aggregation in Text(aggregation.title).tag(aggregation) }
-                    }.labelsHidden().frame(width: 190).disabled(store.menuPreferences.display == .byAccount)
-                    Spacer()
-                    Toggle("All accounts", isOn: Binding(get: { store.menuPreferences.allAccounts }, set: { store.setAllMenuAccounts($0) }))
-                        .toggleStyle(.switch).controlSize(.mini).font(.system(size: 11))
-                }
-                if !store.menuPreferences.allAccounts {
-                    VStack(alignment: .leading, spacing: 8) {
-                        ForEach(store.accounts.filter { !$0.kind.isAPI || $0.kind.isBalance }) { account in
-                            Toggle(isOn: Binding(get: { store.menuPreferences.selectedAccountIDs.contains(account.id) }, set: { store.setMenuAccount(account, included: $0) })) {
-                                HStack {
-                                    Text(account.name)
-                                    if let email = store.snapshots[account.id]?.identity { Text(email).foregroundStyle(.secondary).lineLimit(1) }
-                                    if !account.enabled { Text("Paused").foregroundStyle(.secondary) }
-                                }.font(.system(size: 11))
-                            }.toggleStyle(.checkbox)
+                    Divider()
+                    Toggle("Show detailed quota labels", isOn: Binding(get: { store.menuPreferences.detailedQuotaLabels }, set: { store.setDetailedQuotaLabels($0) }))
+                }.padding(10)
+            }
+            GroupBox("Menu bar") {
+                VStack(alignment: .leading, spacing: 12) {
+                    HStack {
+                        Text("Display")
+                        Spacer()
+                        Picker("Display", selection: Binding(get: { store.menuPreferences.display }, set: { store.setMenuDisplay($0) })) {
+                            ForEach(MenuDisplay.allCases) { mode in Text(mode.title).tag(mode) }
+                        }.labelsHidden().frame(width: 190)
+                    }
+                    if store.menuPreferences.display == .byAccount {
+                        Toggle("Show account names", isOn: Binding(get: { store.menuPreferences.showAccountNames }, set: { store.setShowAccountNames($0) }))
+                    } else {
+                        HStack {
+                            Text("Combined allowance")
+                            Spacer()
+                            Picker("Combined allowance", selection: Binding(get: { store.menuPreferences.aggregation }, set: { store.setMenuAggregation($0) })) {
+                                ForEach(MenuAggregation.allCases) { mode in Text(mode.title).tag(mode) }
+                            }.labelsHidden().frame(width: 190)
                         }
                     }
-                }
-                Text("Subscription percentages are averaged only with subscriptions. API balances stay separate dollar amounts; spending totals are not treated as balances.")
-                    .font(.system(size: 10)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                    Divider()
+                    Toggle("Color by remaining allowance", isOn: Binding(get: { store.menuPreferences.colorByAllowance }, set: { store.setColorByAllowance($0) }))
+                    Text("White at 100%, cool colors through the middle, red at 0%. Overrides custom menu colors for percentages.")
+                        .font(.callout).foregroundStyle(.secondary)
+                    Divider()
+                    Toggle("Include all accounts", isOn: Binding(get: { store.menuPreferences.allAccounts }, set: { store.setAllMenuAccounts($0) }))
+                    if !store.menuPreferences.allAccounts {
+                        ForEach(store.accounts.filter { !$0.kind.isAPI || $0.kind.isBalance }) { account in
+                            Toggle(account.name, isOn: Binding(get: { store.menuPreferences.selectedAccountIDs.contains(account.id) }, set: { store.setMenuAccount(account, included: $0) })).toggleStyle(.checkbox)
+                        }
+                    }
+                    Text("API credit balances appear as dollar amounts.").font(.callout).foregroundStyle(.secondary)
+                }.padding(10)
             }
-        }.disabled(store.demo)
+        }.font(.system(size: 13)).toggleStyle(.switch).controlSize(.regular).disabled(store.demo)
     }
+
 }
 
 private struct UpdateCheckButton: View {
@@ -1114,18 +1096,18 @@ private struct UpdateCheckButton: View {
 private struct UpdateSettings: View {
     @ObservedObject var updater: AppUpdater
     var body: some View {
-        SettingsCard {
-            VStack(alignment: .leading, spacing: 10) {
+        GroupBox("Software Update") {
+            VStack(alignment: .leading, spacing: 12) {
                 HStack {
                     Label("Updates", systemImage: "arrow.down.circle").font(.system(size: 13, weight: .semibold))
                     Spacer()
-                    Text(AppUpdater.version).font(.system(size: 11)).foregroundStyle(.secondary)
-                    Button("Check for Updates…") { updater.check() }.disabled(!updater.canCheck).controlSize(.small)
+                    Text(AppUpdater.version).font(.system(size: 13)).foregroundStyle(.secondary)
+                    Button("Check for Updates…") { updater.check() }.disabled(!updater.canCheck).controlSize(.regular)
                 }
                 Toggle("Automatically check for updates", isOn: Binding(get: { updater.automaticChecks }, set: { updater.setAutomaticChecks($0) }))
-                    .toggleStyle(.switch).controlSize(.mini).font(.system(size: 11)).disabled(!updater.canCheck)
-                Text("Updates install when you choose. Your accounts stay on this Mac.").font(.system(size: 10)).foregroundStyle(.secondary)
-            }
+                    .toggleStyle(.switch).controlSize(.regular).font(.system(size: 13)).disabled(!updater.canCheck)
+                Text("Updates install when you choose. Your accounts stay on this Mac.").font(.system(size: 12)).foregroundStyle(.secondary)
+            }.padding(10)
         }
     }
 }
@@ -1148,6 +1130,8 @@ private struct HistoryCard: View {
         default: return .secondary
         }
     }
+    private var graphTint: Color { NSColor.accountHex(account.graphColorHex).map { Color(nsColor: $0) } ?? providerAccent(account.kind.provider) }
+    private var dashboardTint: Color { NSColor.accountHex(account.dashboardColorHex).map { Color(nsColor: $0) } ?? providerAccent(account.kind.provider) }
     private var metric: String { account.kind.isBalance ? "Balance (USD)" : account.kind.isAPI ? "Month-to-date spending (USD)" : "Limiting allowance remaining (%)" }
     private func value(_ point: UsageHistoryPoint) -> Double? {
         if account.kind.isBalance { return point.balanceUSD.map { NSDecimalNumber(decimal: $0).doubleValue } }
@@ -1162,8 +1146,8 @@ private struct HistoryCard: View {
         SettingsCard(inset: 10) {
             VStack(alignment: .leading, spacing: 6) {
                 HStack {
-                    ProviderMark(provider: account.kind.provider, size: 16).foregroundStyle(providerAccent(account.kind.provider))
-                    Text(account.name).font(.system(size: 12, weight: .semibold))
+                    ProviderMark(provider: account.kind.provider, size: 16).foregroundStyle(dashboardTint)
+                    Text(account.name).font(.system(size: 12, weight: .semibold)).foregroundStyle(dashboardTint)
                     Spacer()
                     Image(systemName: !account.enabled ? "pause.circle" : cached ? "clock" : status.symbol)
                         .foregroundStyle(statusColor).help(!account.enabled ? "Paused" : cached ? "Saved reading" : status.title)
@@ -1187,15 +1171,15 @@ private struct HistoryCard: View {
                     Chart {
                         ForEach(series) { sample in
                             AreaMark(x: .value("Time", sample.timestamp), yStart: .value("Baseline", 0), yEnd: .value(metric, sample.value), series: .value("Period", sample.segment))
-                                .foregroundStyle(LinearGradient(colors: [providerAccent(account.kind.provider).opacity(0.12), providerAccent(account.kind.provider).opacity(0)], startPoint: .top, endPoint: .bottom))
+                                .foregroundStyle(LinearGradient(colors: [graphTint.opacity(0.12), graphTint.opacity(0)], startPoint: .top, endPoint: .bottom))
                                 .interpolationMethod(.monotone)
                             LineMark(x: .value("Time", sample.timestamp), y: .value(metric, sample.value), series: .value("Period", sample.segment))
-                                .foregroundStyle(LinearGradient(colors: [providerAccent(account.kind.provider).opacity(0.75), providerAccent(account.kind.provider)], startPoint: .leading, endPoint: .trailing))
+                                .foregroundStyle(LinearGradient(colors: [graphTint.opacity(0.75), graphTint], startPoint: .leading, endPoint: .trailing))
                                 .lineStyle(StrokeStyle(lineWidth: 2.8, lineCap: .round, lineJoin: .round))
                                 .interpolationMethod(.monotone)
                             if sample.id == series.last?.id || segmentCounts[sample.segment] == 1 {
                                 PointMark(x: .value("Time", sample.timestamp), y: .value(metric, sample.value))
-                                    .foregroundStyle(providerAccent(account.kind.provider)).symbolSize(sample.id == series.last?.id ? 38 : 12)
+                                    .foregroundStyle(graphTint).symbolSize(sample.id == series.last?.id ? 38 : 12)
                             }
                         }
                     }
@@ -1224,7 +1208,7 @@ private struct HistoryCard: View {
                 }
                 HStack(spacing: 8) {
                     Button(action: openUsage) { Label("Open usage", systemImage: "arrow.up.right").frame(maxWidth: .infinity).frame(height: 24) }
-                    Button(action: manage) { Image(systemName: "slider.horizontal.3").frame(width: 28, height: 24) }.help("Manage account").accessibilityLabel("Manage " + account.name)
+                    Button(action: manage) { Image(systemName: "slider.horizontal.3").frame(width: 28, height: 24) }.help("Name & color").accessibilityLabel("Edit " + account.name)
                 }.font(.system(size: 11, weight: .medium)).buttonStyle(QuietButtonStyle())
             }
         }
@@ -1286,5 +1270,53 @@ private struct ActivityHeatmap: View {
                 }.font(.system(size: 9)).foregroundStyle(.secondary)
             }
         }
+    }
+}
+
+
+private struct AccountAppearanceEditor: View {
+    let account: Account
+    var save: (String, String?, String?, String?) -> Void
+    var cancel: () -> Void
+    @ViewState private var name: String
+    @ViewState private var color: Color
+    @ViewState private var menu: Bool
+    @ViewState private var dashboard: Bool
+    @ViewState private var graph: Bool
+    init(account: Account, save: @escaping (String, String?, String?, String?) -> Void, cancel: @escaping () -> Void) {
+        self.account = account; self.save = save; self.cancel = cancel
+        _name = ViewState(initialValue: account.name)
+        _color = ViewState(initialValue: NSColor.accountHex(account.graphColorHex ?? account.dashboardColorHex ?? account.menuColorHex).map { Color(nsColor: $0) } ?? providerAccent(account.kind.provider))
+        _menu = ViewState(initialValue: account.menuColorHex != nil)
+        _dashboard = ViewState(initialValue: account.dashboardColorHex != nil)
+        _graph = ViewState(initialValue: account.graphColorHex != nil)
+    }
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text("Account Appearance").font(.headline)
+            TextField("Account name", text: $name).textFieldStyle(.roundedBorder)
+            ColorPicker("Accent color", selection: $color, supportsOpacity: false)
+            GroupBox("Apply color to") {
+                VStack(alignment: .leading, spacing: 10) {
+                    Toggle("Menu bar & dropdown", isOn: $menu)
+                    Toggle("Dashboard", isOn: $dashboard)
+                    Toggle("Usage graph", isOn: $graph)
+                    HStack {
+                        Button("All") { menu = true; dashboard = true; graph = true }
+                        Button("Use provider colors") { menu = false; dashboard = false; graph = false }
+                    }
+                }.frame(maxWidth: .infinity, alignment: .leading).padding(8)
+            }
+            Text("Combined menu items use a custom color only when all included accounts share it.").font(.callout).foregroundStyle(.secondary)
+            HStack {
+                Button("Cancel", action: cancel).keyboardShortcut(.cancelAction)
+                Spacer()
+                Button("Save") {
+                    guard let rgb = NSColor(color).usingColorSpace(.sRGB) else { return }
+                    let hex = String(format: "%02X%02X%02X", Int((rgb.redComponent * 255).rounded()), Int((rgb.greenComponent * 255).rounded()), Int((rgb.blueComponent * 255).rounded()))
+                    save(name, menu ? hex : nil, dashboard ? hex : nil, graph ? hex : nil)
+                }.keyboardShortcut(.defaultAction).disabled(name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }
+        }.font(.system(size: 13)).padding(20).frame(width: 360)
     }
 }
