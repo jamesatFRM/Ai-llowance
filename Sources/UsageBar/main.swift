@@ -11,6 +11,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
     private var window: NSWindow?
     private var previewWindow: NSWindow?
     private var subscriptions: Set<AnyCancellable> = []
+    private var popoverResizeObserver: NSObjectProtocol?
     private var outsideClickMonitor: Any?
     private var localClickMonitor: Any?
     private var notificationDelegate: AllowanceNotificationDelegate?
@@ -111,11 +112,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
         else if let button = statusItem.button {
             store.setInterfaceVisible(true)
             NSApp.activate(ignoringOtherApps: true)
+            if let controller = popover.contentViewController as? NSHostingController<Dashboard> {
+                controller.rootView = Dashboard(store: store, maximumHeight: (button.window?.screen?.visibleFrame.height ?? 700) - 24) { [weak self] in self?.showAccounts() }
+            }
             popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
             applyWindowAppearance()
             popover.contentViewController?.view.window?.makeKey()
+            constrainPopoverToScreen()
             monitorOutsideClicks()
         }
+    }
+    func popoverDidShow(_ notification: Notification) {
+        constrainPopoverToScreen()
+        if let popoverWindow = popover.contentViewController?.view.window {
+            popoverResizeObserver = NotificationCenter.default.addObserver(forName: NSWindow.didResizeNotification, object: popoverWindow, queue: .main) { [weak self] _ in
+                Task { @MainActor in self?.constrainPopoverToScreen() }
+            }
+        }
+    }
+    private func constrainPopoverToScreen() {
+        guard popover.isShown, let panel = popover.contentViewController?.view.window,
+              let screen = statusItem.button?.window?.screen ?? panel.screen else { return }
+        let available = screen.visibleFrame.insetBy(dx: 6, dy: 6)
+        let origin = PopoverPlacement.origin(for: panel.frame, inside: available)
+        if panel.frame.origin != origin { panel.setFrameOrigin(origin) }
     }
     private func closePopover() { popover.performClose(nil); removeClickMonitors(); store.setInterfaceVisible(hasVisibleSettings) }
     private func monitorOutsideClicks() {
@@ -141,7 +161,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
         if let outsideClickMonitor { NSEvent.removeMonitor(outsideClickMonitor); self.outsideClickMonitor = nil }
         if let localClickMonitor { NSEvent.removeMonitor(localClickMonitor); self.localClickMonitor = nil }
     }
-    func popoverDidClose(_ notification: Notification) { removeClickMonitors(); store.setInterfaceVisible(hasVisibleSettings) }
+    func popoverDidClose(_ notification: Notification) {
+        if let popoverResizeObserver { NotificationCenter.default.removeObserver(popoverResizeObserver); self.popoverResizeObserver = nil }
+        removeClickMonitors(); store.setInterfaceVisible(hasVisibleSettings) }
     private var hasVisibleSettings: Bool {
         window?.isVisible == true && window?.isMiniaturized != true && !NSApp.isHidden
     }
@@ -162,7 +184,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
             })
             let created = NSWindow(contentViewController: controller)
             created.title = "Ai-llowance · Dashboard"; created.styleMask = [.titled, .closable, .miniaturizable, .resizable]
-            created.setContentSize(NSSize(width: 680, height: 750)); created.center()
+            created.setContentSize(NSSize(width: 1060, height: 800)); created.center()
             created.isReleasedWhenClosed = false; created.delegate = self; window = created
         }
         applyWindowAppearance()
