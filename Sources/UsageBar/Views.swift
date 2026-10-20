@@ -22,14 +22,22 @@ private struct PanelBackground: View {
     }
 }
 
-// Static brand surfaces keep the dashboard crisp without animated glow or blur layers.
+// One native material backing; cards use inexpensive translucent fills.
 private struct WorkspaceBackground: View {
     @Environment(\.colorScheme) private var scheme
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     var body: some View {
-        LinearGradient(colors: scheme == .dark
-            ? [Color(red: 0.035, green: 0.055, blue: 0.12), Color(red: 0.065, green: 0.08, blue: 0.18)]
-            : [Color(red: 0.95, green: 0.97, blue: 1), Color(red: 0.94, green: 0.93, blue: 0.99)],
-            startPoint: .topLeading, endPoint: .bottomTrailing)
+        ZStack {
+            if reduceTransparency {
+                Color(nsColor: .windowBackgroundColor)
+            } else {
+                Rectangle().fill(.regularMaterial)
+            }
+            LinearGradient(colors: scheme == .dark
+                ? [Color.white.opacity(0.055), Color.white.opacity(0.015), Color.black.opacity(0.10)]
+                : [Color.white.opacity(0.55), Color.white.opacity(0.20), Color.black.opacity(0.025)],
+                startPoint: .topLeading, endPoint: .bottomTrailing)
+        }
     }
 }
 
@@ -365,10 +373,10 @@ private struct SettingsCard<Content: View>: View {
         content.padding(inset).frame(maxWidth: .infinity, alignment: .leading)
             .background {
                 RoundedRectangle(cornerRadius: 18, style: .continuous)
-                    .fill(LinearGradient(colors: scheme == .dark ? [Color(red: 0.10, green: 0.14, blue: 0.25), Color(red: 0.065, green: 0.09, blue: 0.18)] : [Color.white, Color(red: 0.97, green: 0.98, blue: 1)], startPoint: .topLeading, endPoint: .bottomTrailing))
+                    .fill(LinearGradient(colors: scheme == .dark ? [Color.white.opacity(0.085), Color.white.opacity(0.025)] : [Color.white.opacity(0.78), Color.white.opacity(0.38)], startPoint: .topLeading, endPoint: .bottomTrailing))
                     .overlay {
                         RoundedRectangle(cornerRadius: 18, style: .continuous)
-                            .strokeBorder(LinearGradient(colors: [Brand.cyan.opacity(0.30), Brand.blue.opacity(0.12), Brand.violet.opacity(0.25)], startPoint: .topLeading, endPoint: .bottomTrailing), lineWidth: 0.7)
+                            .strokeBorder(LinearGradient(colors: [Color.white.opacity(scheme == .dark ? 0.20 : 0.85), Color.primary.opacity(0.055), Color.primary.opacity(0.10)], startPoint: .topLeading, endPoint: .bottomTrailing), lineWidth: 0.7)
                     }
                     .overlay(alignment: .top) {
                         RoundedRectangle(cornerRadius: 18, style: .continuous)
@@ -534,7 +542,7 @@ struct AccountsView: View {
                         .font(.system(size: 11, weight: .medium))
                         .padding(.horizontal, 8).frame(height: 28)
                         .foregroundStyle(section == item || (item == .history && section == .accounts) ? Color.primary : .secondary)
-                        .background(section == item || (item == .history && section == .accounts) ? Brand.violet.opacity(0.22) : .clear, in: RoundedRectangle(cornerRadius: 8))
+                        .background(section == item || (item == .history && section == .accounts) ? Color.primary.opacity(0.10) : .clear, in: RoundedRectangle(cornerRadius: 8))
                 }.buttonStyle(.plain)
             }
             Spacer(minLength: 4)
