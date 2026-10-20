@@ -68,3 +68,29 @@ func setupHelpKeepsTheSelectedSubscriptionRatherThanInheritedAPIBilling(kind: Co
     #expect(!script.contains("cli_auth_credentials_store"))
     await store.shutdown()
 }
+
+@Test @MainActor func recommendedAccountLaunchUsesItsProfileAndRejectsExpiredReading() async throws {
+    let root = try helpRoot(); defer { try? FileManager.default.removeItem(at: root) }
+    var opened: [URL] = []
+    let store = AppStore(root: root, monitor: false, openExternal: { opened.append($0); return true })
+    store.paused = true
+    let fake = root.appendingPathComponent("fake-cli")
+    try Paths.writePrivate(Data("#!/bin/sh\nexit 0\n".utf8), to: fake, executable: true)
+    store.executable = fake
+    var account = try store.add(name: "Work", kind: .codex, secret: "", existing: false, refreshAfter: false)
+    account.expectedIdentity = "fixture@example.com"
+    store.accounts = [account]
+    let now = Date()
+    let window = try QuotaWindow(id: "codex.week", label: "Week", usedPercent: 20, resetsAt: now.addingTimeInterval(86400), durationMinutes: 10080)
+    store.snapshots[account.id] = Snapshot(observedAt: now, windows: [window], identity: account.expectedIdentity, source: "fixture")
+    store.useAccount(account)
+    #expect(opened.count == 1)
+    let script = try String(contentsOf: try #require(opened.first), encoding: .utf8)
+    #expect(script.contains(ShellQuote.argument(Paths.profile(account.id, root: root).path)))
+    #expect(script.contains("cli_auth_credentials_store"))
+    #expect(store.notice == "Opened Codex with this account’s profile.")
+    store.snapshots[account.id] = Snapshot(observedAt: now.addingTimeInterval(-86400), windows: [window], identity: account.expectedIdentity, source: "fixture")
+    store.useAccount(account)
+    #expect(opened.count == 1)
+    await store.shutdown()
+}

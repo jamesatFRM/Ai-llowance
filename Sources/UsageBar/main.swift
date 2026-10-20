@@ -161,7 +161,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
                 self?.togglePopover()
             })
             let created = NSWindow(contentViewController: controller)
-            created.title = "Ai-llowance · Settings"; created.styleMask = [.titled, .closable, .miniaturizable, .resizable]
+            created.title = "Ai-llowance · Dashboard"; created.styleMask = [.titled, .closable, .miniaturizable, .resizable]
             created.setContentSize(NSSize(width: 680, height: 750)); created.center()
             created.isReleasedWhenClosed = false; created.delegate = self; window = created
         }
