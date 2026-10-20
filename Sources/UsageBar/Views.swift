@@ -537,8 +537,8 @@ struct AccountsView: View {
             Text("Ai-llowance").font(.system(size: 12, weight: .semibold)).padding(.trailing, 6)
             ForEach([DashboardSection.history, .overview, .settings]) { item in
                 Button { section = item } label: {
-                    Label(item == .history ? "Accounts" : item == .overview ? "Ready" : "Settings",
-                          systemImage: item == .history ? "chart.xyaxis.line" : item == .overview ? "bolt" : "gearshape")
+                    Label(item == .history ? "Accounts" : item == .overview ? "Connect" : "Settings",
+                          systemImage: item == .history ? "chart.xyaxis.line" : item == .overview ? "square.grid.2x2" : "gearshape")
                         .font(.system(size: 11, weight: .medium))
                         .padding(.horizontal, 8).frame(height: 28)
                         .foregroundStyle(section == item || (item == .history && section == .accounts) ? Color.primary : .secondary)
@@ -606,47 +606,80 @@ struct AccountsView: View {
             }
     }
     private var overviewContent: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            Text("Ready when you are").font(.system(size: 22, weight: .semibold))
-            Text("Fresh readings help you choose an account. Opening a CLI starts a new session with that profile.")
-                .font(.system(size: 11)).foregroundStyle(.secondary)
-            ForEach([ConnectionKind.claudeCode, .codex], id: \.self) { kind in
-                if store.accounts.contains(where: { $0.kind == kind }) {
-                    SettingsCard {
-                        HStack(spacing: 12) {
-                            ProviderMark(provider: kind.provider, size: 28)
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text(kind == .codex ? "Codex" : "Claude Code").font(.headline)
-                                if let account = store.recommendedAccount(for: kind) {
-                                    Text(account.name).font(.subheadline)
-                                    Text(account.expectedIdentity ?? "").font(.caption).foregroundStyle(.secondary)
-                                    Text(readingValue(store.snapshots[account.id], window: store.snapshots[account.id]?.limitingWindow(for: kind)))
-                                        .font(.caption).foregroundStyle(.secondary)
-                                } else { Text("No verified available account").font(.caption).foregroundStyle(.secondary) }
-                            }
-                            Spacer()
-                            if let account = store.recommendedAccount(for: kind) {
-                                Button("Use this account") { store.useAccount(account) }.disabled(store.demo)
-                            } else { Button("Check accounts") { section = .accounts } }
-                        }
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Text("Connect a service").font(.system(size: 15, weight: .semibold))
+                Spacer()
+                agentHelpMenu.fixedSize()
+            }
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 210, maximum: 340), spacing: 10)], spacing: 10) {
+                ForEach([ConnectionKind.claudeCode, .codex, .copilot, .openAIAPI, .claudeAPI, .openRouter, .vercelGateway, .xai], id: \.self) { kind in
+                    connectionTile(kind)
+                }
+            }
+            setupProgress
+        }
+    }
+    private func connectionTile(_ kind: ConnectionKind) -> some View {
+        let accounts = store.accounts.filter { $0.kind == kind }
+        let recommended = (kind == .claudeCode || kind == .codex) ? store.recommendedAccount(for: kind) : nil
+        let title: String = switch kind {
+        case .claudeCode: "Claude Code"
+        case .codex: "Codex"
+        case .copilot: "GitHub Copilot"
+        case .openAIAPI: "OpenAI API"
+        case .claudeAPI: "Claude API"
+        case .openRouter: "OpenRouter"
+        case .vercelGateway: "Vercel AI Gateway"
+        case .xai: "xAI"
+        }
+        let detail = kind.isBalance ? "Credits & balance" : kind.isAPI ? "API spending" : "Subscription allowance"
+        return SettingsCard(inset: 12) {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(spacing: 9) {
+                    ProviderMark(provider: kind.provider, size: 24)
+                        .foregroundStyle(providerAccent(kind.provider))
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(title).font(.system(size: 12, weight: .semibold)).lineLimit(1)
+                        Text(detail).font(.system(size: 10)).foregroundStyle(.secondary)
+                    }
+                    Spacer(minLength: 0)
+                }
+                HStack(spacing: 6) {
+                    Text(accounts.isEmpty ? "Not connected" : "\(accounts.count) account\(accounts.count == 1 ? "" : "s") added")
+                        .font(.system(size: 10)).foregroundStyle(.secondary)
+                    Spacer(minLength: 0)
+                    if !accounts.isEmpty {
+                        Button(recommended != nil && !kind.isAPI ? "Open" : "Manage") {
+                            if let recommended, !kind.isAPI { store.useAccount(recommended) }
+                            else { section = .accounts }
+                        }.controlSize(.small).disabled(store.demo)
+                        Button { connectService(kind) } label: { Image(systemName: "plus") }
+                            .controlSize(.small).help("Add another \(title) account")
+                            .accessibilityLabel("Add another \(title) account")
+                            .disabled(busyConnecting || store.demo)
+                    } else {
+                        Button("Connect") { connectService(kind) }
+                            .controlSize(.small).disabled(busyConnecting || store.demo)
                     }
                 }
             }
-            if store.accounts.isEmpty { connectionSetup }
-            ForEach(store.accounts.filter { $0.enabled }) { account in
-                let status = AllowanceStatus.evaluate(snapshot: store.snapshots[account.id], kind: account.kind, now: store.now, hasError: store.errors[account.id] != nil)
-                if store.needsSignIn(account) || store.errors[account.id] != nil || [.restricted, .exhausted].contains(status.state) {
-                    Button { store.selectedAccountID = account.id } label: {
-                        HStack {
-                            Label(account.name, systemImage: "exclamationmark.circle")
-                            Spacer()
-                            Text(store.needsSignIn(account) ? "Sign in" : status.title).foregroundStyle(.secondary)
-                            Image(systemName: "chevron.right")
-                        }.font(.system(size: 12)).padding(12).modifier(InsetSurface(tint: .orange))
-                    }.buttonStyle(.plain)
-                }
-            }
-            Button("Explore usage history") { section = .history }.font(.system(size: 12))
+        }
+    }
+    private func connectService(_ kind: ConnectionKind) {
+        selectedKind = kind
+        if kind == .claudeCode || kind == .codex {
+            guard executable(for: kind) != nil else { NSWorkspace.shared.open(installationURL(kind)); return }
+            let existing = store.accounts.contains { $0.kind == kind && (kind == .claudeCode ? $0.usesExistingClaude == true : $0.usesExistingCodex) }
+            section = .accounts
+            setupStarted = true
+            if kind == .claudeCode { store.connectClaude(existing: !existing) }
+            else { store.connectOpenAI(existing: !existing) }
+        } else {
+            secret = ""; scopeID = ""; name = ""; connectionError = nil
+            section = .settings
+            selectedTab = .advanced
+            store.rediscoverTools()
         }
     }
     @ViewState private var historyWidth: CGFloat = 800
