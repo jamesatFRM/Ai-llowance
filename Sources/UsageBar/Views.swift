@@ -22,6 +22,17 @@ private struct PanelBackground: View {
     }
 }
 
+// Static brand surfaces keep the dashboard crisp without animated glow or blur layers.
+private struct WorkspaceBackground: View {
+    @Environment(\.colorScheme) private var scheme
+    var body: some View {
+        LinearGradient(colors: scheme == .dark
+            ? [Color(red: 0.035, green: 0.055, blue: 0.12), Color(red: 0.065, green: 0.08, blue: 0.18)]
+            : [Color(red: 0.95, green: 0.97, blue: 1), Color(red: 0.94, green: 0.93, blue: 0.99)],
+            startPoint: .topLeading, endPoint: .bottomTrailing)
+    }
+}
+
 private struct InsetSurface: ViewModifier {
     @Environment(\.colorScheme) private var colorScheme
     var tint: Color = .clear
@@ -334,20 +345,21 @@ private struct SparklineShape: Shape {
     }
 }
 private struct SettingsCard<Content: View>: View {
+    @Environment(\.colorScheme) private var scheme
     @ViewBuilder let content: Content
     var body: some View {
-        content.padding(15).frame(maxWidth: .infinity, alignment: .leading)
+        content.padding(20).frame(maxWidth: .infinity, alignment: .leading)
             .background {
-                RoundedRectangle(cornerRadius: 13, style: .continuous)
-                    .fill(LinearGradient(colors: [Color.primary.opacity(0.055), Color.primary.opacity(0.018)], startPoint: .topLeading, endPoint: .bottomTrailing))
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .fill(LinearGradient(colors: scheme == .dark ? [Color(red: 0.10, green: 0.14, blue: 0.25), Color(red: 0.065, green: 0.09, blue: 0.18)] : [Color.white, Color(red: 0.97, green: 0.98, blue: 1)], startPoint: .topLeading, endPoint: .bottomTrailing))
                     .overlay {
-                        RoundedRectangle(cornerRadius: 13, style: .continuous)
-                            .strokeBorder(LinearGradient(colors: [Brand.blue.opacity(0.25), Color.primary.opacity(0.07), Brand.violet.opacity(0.12)], startPoint: .topLeading, endPoint: .bottomTrailing), lineWidth: 0.7)
+                        RoundedRectangle(cornerRadius: 18, style: .continuous)
+                            .strokeBorder(LinearGradient(colors: [Brand.cyan.opacity(0.30), Brand.blue.opacity(0.12), Brand.violet.opacity(0.25)], startPoint: .topLeading, endPoint: .bottomTrailing), lineWidth: 0.7)
                     }
                     .overlay(alignment: .top) {
-                        RoundedRectangle(cornerRadius: 13, style: .continuous)
+                        RoundedRectangle(cornerRadius: 18, style: .continuous)
                             .fill(LinearGradient(colors: [Color.white.opacity(0.045), .clear], startPoint: .top, endPoint: .bottom))
-                            .frame(height: 34).clipShape(RoundedRectangle(cornerRadius: 13, style: .continuous))
+                            .frame(height: 34).clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
                     }
             }
     }
@@ -481,7 +493,7 @@ struct AccountsView: View {
                 Text(AppUpdater.versionLabel).foregroundStyle(.tertiary)
                 Button { NSApplication.shared.terminate(nil) } label: { Image(systemName: "power").frame(width: 26, height: 26) }.buttonStyle(QuietButtonStyle()).help("Quit Ai-llowance")
             }.font(.system(size: 10)).padding(.horizontal, 22).padding(.vertical, 12)
-        }.frame(minWidth: 900, minHeight: 660).controlSize(.large).background(PanelBackground()).preferredColorScheme(store.menuPreferences.theme.colorScheme)
+        }.frame(minWidth: 900, minHeight: 660).controlSize(.large).background(WorkspaceBackground()).preferredColorScheme(store.menuPreferences.theme.colorScheme)
         .background(Color(nsColor: .windowBackgroundColor).opacity(0.001))
         .alert("Remove \(removing?.name ?? "account")?", isPresented: Binding(get: { removing != nil }, set: { if !$0 { removing = nil } })) {
             Button("Cancel", role: .cancel) { removing = nil }
@@ -1149,7 +1161,7 @@ private struct HistoryCard: View {
                         Text(account.kind.isAPI ? (account.kind.isBalance ? "balance" : "spent") : "remaining").font(.system(size: 11)).foregroundStyle(.secondary)
                     }
                 }
-                Text(metric).font(.system(size: 10)).foregroundStyle(.secondary)
+                Text(account.kind.isAPI ? metric : "Allowance history").font(.system(size: 12, weight: .medium)).foregroundStyle(.secondary)
                 if plotted.isEmpty {
                     Text("No readings in this range yet. History grows as this Mac refreshes your accounts.")
                         .font(.system(size: 12)).foregroundStyle(.secondary).frame(maxWidth: .infinity, minHeight: 100)
@@ -1157,12 +1169,12 @@ private struct HistoryCard: View {
                     Chart {
                         ForEach(series) { sample in
                             AreaMark(x: .value("Time", sample.timestamp), yStart: .value("Baseline", 0), yEnd: .value(metric, sample.value), series: .value("Period", sample.segment))
-                                .foregroundStyle(LinearGradient(colors: [Brand.violet.opacity(0.15), Brand.blue.opacity(0.01)], startPoint: .top, endPoint: .bottom))
-                                .interpolationMethod(.linear)
+                                .foregroundStyle(LinearGradient(colors: [Brand.cyan.opacity(0.075), Brand.blue.opacity(0.0)], startPoint: .top, endPoint: .bottom))
+                                .interpolationMethod(.monotone)
                             LineMark(x: .value("Time", sample.timestamp), y: .value(metric, sample.value), series: .value("Period", sample.segment))
                                 .foregroundStyle(LinearGradient(colors: [Brand.cyan, Brand.blue, Brand.violet], startPoint: .leading, endPoint: .trailing))
-                                .lineStyle(StrokeStyle(lineWidth: 2.6, lineCap: .round, lineJoin: .round))
-                                .interpolationMethod(.linear)
+                                .lineStyle(StrokeStyle(lineWidth: 2.8, lineCap: .round, lineJoin: .round))
+                                .interpolationMethod(.monotone)
                             if sample.id == series.last?.id || segmentCounts[sample.segment] == 1 {
                                 PointMark(x: .value("Time", sample.timestamp), y: .value(metric, sample.value))
                                     .foregroundStyle(Brand.violet).symbolSize(sample.id == series.last?.id ? 38 : 12)
@@ -1182,16 +1194,16 @@ private struct HistoryCard: View {
                             AxisValueLabel()
                         }
                     }
-                    .frame(height: 150)
+                    .frame(height: 170).padding(.top, 8)
                     if let last = plotted.last {
                         HStack {
-                            Text("Latest: \(value(last) ?? 0, specifier: "%.1f")\(account.kind.isAPI ? " USD" : "%")")
+                            Label("Latest reading", systemImage: "clock")
                             Spacer()
                             Text(last.timestamp, format: .dateTime.month(.abbreviated).day().hour().minute())
                         }.font(.system(size: 10)).foregroundStyle(.secondary)
                     }
                     if !account.kind.isAPI {
-                        Text("Allowance remaining · window may change or reset").font(.system(size: 10)).foregroundStyle(.secondary)
+                        Text("Gaps mark pauses or allowance resets").font(.system(size: 11)).foregroundStyle(.secondary)
                     }
                 }
             }
