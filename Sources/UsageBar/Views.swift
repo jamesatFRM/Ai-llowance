@@ -33,6 +33,18 @@ private struct WorkspaceBackground: View {
     }
 }
 
+@MainActor
+private func providerAccent(_ provider: MenuProvider) -> Color {
+    switch provider {
+    case .openAI: Color(red: 0.23, green: 0.78, blue: 0.61)
+    case .claude: Color(red: 0.95, green: 0.55, blue: 0.37)
+    case .copilot: Brand.violet
+    case .openRouter: Color(red: 0.78, green: 0.54, blue: 0.98)
+    case .vercelGateway: Brand.cyan
+    case .xai: Color(red: 0.86, green: 0.72, blue: 0.40)
+    }
+}
+
 private struct InsetSurface: ViewModifier {
     @Environment(\.colorScheme) private var colorScheme
     var tint: Color = .clear
@@ -45,7 +57,7 @@ private struct InsetSurface: ViewModifier {
                     Color.white.opacity(colorScheme == .dark ? 0.035 : 0.42)
                 ], startPoint: .topLeading, endPoint: .bottomTrailing))
                 .overlay {
-                    RoundedRectangle(cornerRadius: cornerRadius, style: .continuous).fill(tint.opacity(0.045))
+                    RoundedRectangle(cornerRadius: cornerRadius, style: .continuous).fill(tint.opacity(0.09))
                 }
                 .overlay {
                     RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
@@ -108,7 +120,7 @@ struct Dashboard: View {
                 Button { NSApplication.shared.terminate(nil) } label: { Image(systemName: "power").frame(width: 22, height: 22) }
                     .help("Quit Ai-llowance").accessibilityLabel("Quit Ai-llowance")
             }.font(.system(size: 10)).buttonStyle(QuietButtonStyle()).foregroundStyle(.secondary).padding(.horizontal, 9).padding(.bottom, 3)
-        }.padding(7).frame(width: 350).background(PanelBackground()).preferredColorScheme(store.menuPreferences.theme.colorScheme)
+        }.padding(7).frame(width: 350).background(WorkspaceBackground()).preferredColorScheme(store.menuPreferences.theme.colorScheme)
     }
 
     private func manage(_ account: Account) { store.selectedAccountID = account.id; manage() }
@@ -170,7 +182,7 @@ struct Dashboard: View {
                             if account.id != accounts.last?.id { Divider().opacity(0.35).padding(.leading, 21).padding(.vertical, 4) }
                         }
                     }.padding(.horizontal, 11).padding(.vertical, 9)
-                        .modifier(InsetSurface())
+                        .modifier(InsetSurface(tint: providerAccent(provider), cornerRadius: 14))
                 }
             }
         }
@@ -212,7 +224,7 @@ private struct CompactAccountRow: View {
             Button(action: expand) {
                 VStack(spacing: 4) {
                     HStack(spacing: 7) {
-                        ProviderMark(provider: account.kind.provider, size: 14)
+                        ProviderMark(provider: account.kind.provider, size: 14).foregroundStyle(providerAccent(account.kind.provider))
                         Text(account.name).font(.system(size: 12, weight: .semibold)).lineLimit(1)
                         Spacer(minLength: 5)
                         Text(readingValue(snapshot, window: window)).font(.system(size: 13, weight: .semibold, design: .rounded)).monospacedDigit()
@@ -640,6 +652,7 @@ struct AccountsView: View {
             Button("Explore usage history") { section = .history }.font(.system(size: 12))
         }
     }
+    @ViewState private var historyWidth: CGFloat = 800
     private var historyContent: some View {
         VStack(alignment: .leading, spacing: 16) {
             HStack {
@@ -651,17 +664,12 @@ struct AccountsView: View {
             }
             Text("Allowance and balances, across your accounts.")
                 .font(.system(size: 11)).foregroundStyle(.secondary)
-            HStack(spacing: 12) {
-                summaryTile("Accounts", value: "\(store.accounts.count)", icon: "person.2", destination: .accounts)
-                summaryTile("Ready to work", value: "\([ConnectionKind.claudeCode, .codex].compactMap { store.recommendedAccount(for: $0) }.count)", icon: "bolt", destination: .overview)
-                summaryTile("Needs attention", value: "\(store.accounts.filter { $0.enabled && (store.needsSignIn($0) || store.errors[$0.id] != nil || AllowanceStatus.evaluate(snapshot: store.snapshots[$0.id], kind: $0.kind, now: store.now).state == .exhausted) }.count)", icon: "exclamationmark.circle", destination: .accounts)
-            }.padding(.vertical, 8)
             Picker("Account", selection: $historyAccountID) {
                 Text("All accounts").tag(nil as UUID?)
                 ForEach(store.accounts) { Text($0.name).tag(Optional($0.id)) }
             }
             if store.accounts.isEmpty { Text("Connect an account to start collecting history.").foregroundStyle(.secondary) }
-            LazyVGrid(columns: [GridItem(.adaptive(minimum: 310), spacing: 16)], spacing: 16) {
+            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 16), count: min(4, max(1, Int((historyWidth + 16) / 280)))), spacing: 16) {
             ForEach(store.accounts.filter { historyAccountID == nil || $0.id == historyAccountID }) { account in
                 let points = store.history(for: account).filter { $0.timestamp >= store.now.addingTimeInterval(-Double(historyHours) * 3600) }
                 HistoryCard(account: account, points: points)
@@ -669,17 +677,12 @@ struct AccountsView: View {
             }
             Text("Local history · up to 96 recent readings per account, retained for up to seven days. Lines connect observed readings; gaps and resets stay separate.")
                 .font(.system(size: 10)).foregroundStyle(.tertiary).padding(.top, 4)
-        }.onChange(of: store.accounts.map(\.id)) { _, ids in
+        }.background(GeometryReader { geometry in
+            Color.clear.onAppear { historyWidth = geometry.size.width }
+                .onChange(of: geometry.size.width) { _, width in historyWidth = width }
+        }).onChange(of: store.accounts.map(\.id)) { _, ids in
             if let selected = historyAccountID, !ids.contains(selected) { historyAccountID = nil }
         }
-    }
-    private func summaryTile(_ title: String, value: String, icon: String, destination: DashboardSection) -> some View {
-        Button { section = destination } label: {
-            VStack(alignment: .leading, spacing: 10) {
-                Label(title, systemImage: icon).font(.system(size: 11, weight: .medium)).foregroundStyle(.secondary)
-                HStack { Text(value).font(.system(size: 28, weight: .semibold, design: .rounded)); Spacer(); Image(systemName: "arrow.up.right").font(.system(size: 11)).foregroundStyle(.tertiary) }
-            }.padding(16).frame(maxWidth: .infinity, alignment: .leading).modifier(InsetSurface())
-        }.buttonStyle(.plain)
     }
     private var busyConnecting: Bool { store.connectingClaude || store.signingIn != nil || !store.waitingForClaude.isEmpty }
     private var setupAccount: Account? { store.accounts.last { $0.kind == selectedKind } }
@@ -1149,7 +1152,7 @@ private struct HistoryCard: View {
         SettingsCard {
             VStack(alignment: .leading, spacing: 12) {
                 HStack {
-                    ProviderMark(provider: account.kind.provider, size: 20)
+                    ProviderMark(provider: account.kind.provider, size: 20).foregroundStyle(providerAccent(account.kind.provider))
                     Text(account.name).font(.system(size: 14, weight: .semibold))
                     Spacer()
                     Text("\(plotted.count) readings").font(.system(size: 10)).foregroundStyle(.tertiary)
@@ -1169,15 +1172,15 @@ private struct HistoryCard: View {
                     Chart {
                         ForEach(series) { sample in
                             AreaMark(x: .value("Time", sample.timestamp), yStart: .value("Baseline", 0), yEnd: .value(metric, sample.value), series: .value("Period", sample.segment))
-                                .foregroundStyle(LinearGradient(colors: [Brand.cyan.opacity(0.075), Brand.blue.opacity(0.0)], startPoint: .top, endPoint: .bottom))
+                                .foregroundStyle(LinearGradient(colors: [providerAccent(account.kind.provider).opacity(0.12), providerAccent(account.kind.provider).opacity(0)], startPoint: .top, endPoint: .bottom))
                                 .interpolationMethod(.monotone)
                             LineMark(x: .value("Time", sample.timestamp), y: .value(metric, sample.value), series: .value("Period", sample.segment))
-                                .foregroundStyle(LinearGradient(colors: [Brand.cyan, Brand.blue, Brand.violet], startPoint: .leading, endPoint: .trailing))
+                                .foregroundStyle(LinearGradient(colors: [providerAccent(account.kind.provider).opacity(0.75), providerAccent(account.kind.provider)], startPoint: .leading, endPoint: .trailing))
                                 .lineStyle(StrokeStyle(lineWidth: 2.8, lineCap: .round, lineJoin: .round))
                                 .interpolationMethod(.monotone)
                             if sample.id == series.last?.id || segmentCounts[sample.segment] == 1 {
                                 PointMark(x: .value("Time", sample.timestamp), y: .value(metric, sample.value))
-                                    .foregroundStyle(Brand.violet).symbolSize(sample.id == series.last?.id ? 38 : 12)
+                                    .foregroundStyle(providerAccent(account.kind.provider)).symbolSize(sample.id == series.last?.id ? 38 : 12)
                             }
                         }
                     }

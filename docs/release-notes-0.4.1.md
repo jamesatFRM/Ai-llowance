@@ -1,6 +1,6 @@
 # Ai-llowance 0.4.1 — A more refined workspace
 
-- History is now the dashboard home, with a persistent sidebar, summary cards, responsive chart grid, and larger navigation and account controls.
+- History is now the dashboard home, with a persistent sidebar, a chart-first responsive grid of up to four cards per row, and larger navigation and account controls.
 - Charts use a clean stroke, subtle fill, and latest-reading marker. Missing data, changed quota windows, restored allowance, and billing rollovers stay separate instead of being joined into misleading lines.
 - Connected Claude and Codex accounts hide their setup prompt; sign-in help remains available when needed.
 - The menu popover is kept within the active screen’s usable bounds when it opens or resizes. Its height adapts to the screen and routine launch notices no longer crowd it.
@@ -9,3 +9,5 @@
 History stays local and bounded. No new polling, background service, or dependency was added.
 
 Release artwork is an illustration, not an application screenshot.
+
+The dashboard and menu share navy surfaces, mint OpenAI accents, warm Claude accents, and amber attention states.
