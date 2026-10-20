@@ -11,3 +11,6 @@ History stays local and bounded. No new polling, background service, or dependen
 Release artwork is an illustration, not an application screenshot.
 
 The dashboard and menu share navy surfaces, mint OpenAI accents, warm Claude accents, and amber attention states.
+
+- Account tiles now combine current status, identity, allowance, reset timing, history, and direct actions.
+- A rolling seven-day hourly heatmap shows relative recorded subscription allowance consumption, with missing intervals distinguished from measured quiet periods. This is not a measure of coding hours; API dollars are excluded.
