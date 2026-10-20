@@ -388,7 +388,7 @@ private struct SettingsCard<Content: View>: View {
 }
 
 private enum DashboardSection: String, CaseIterable, Identifiable {
-    case overview = "Overview", history = "History", accounts = "Accounts", settings = "Settings"
+    case overview = "Overview", history = "History", accounts = "Accounts", settings = "Settings", connection = "Connection"
     var id: String { rawValue }
 }
 
@@ -435,6 +435,7 @@ struct AccountsView: View {
     var showMenu: () -> Void
     @ViewState private var selectedKind: ConnectionKind = .claudeCode
     @ViewState private var setupStarted = false
+    @ViewState private var manualConnection = false
     @ViewState private var name = ""
     @ViewState private var secret = ""
     @ViewState private var scopeID = ""
@@ -473,6 +474,7 @@ struct AccountsView: View {
                             VStack(alignment: .leading, spacing: 16) {
                                 switch section {
                                 case .overview: overviewContent
+                                case .connection: connectionPage
                                 case .history: historyContent
                                 case .accounts: accountsContent
                                 case .settings: selectedTabContent.frame(maxWidth: 640).frame(maxWidth: .infinity, alignment: .top)
@@ -541,8 +543,8 @@ struct AccountsView: View {
                           systemImage: item == .history ? "chart.xyaxis.line" : item == .overview ? "square.grid.2x2" : "gearshape")
                         .font(.system(size: 11, weight: .medium))
                         .padding(.horizontal, 8).frame(height: 28)
-                        .foregroundStyle(section == item || (item == .history && section == .accounts) ? Color.primary : .secondary)
-                        .background(section == item || (item == .history && section == .accounts) ? Color.primary.opacity(0.10) : .clear, in: RoundedRectangle(cornerRadius: 8))
+                        .foregroundStyle(section == item || (item == .overview && (section == .accounts || section == .connection)) ? Color.primary : .secondary)
+                        .background(section == item || (item == .overview && (section == .accounts || section == .connection)) ? Color.primary.opacity(0.10) : .clear, in: RoundedRectangle(cornerRadius: 8))
                 }.buttonStyle(.plain)
             }
             Spacer(minLength: 4)
@@ -668,19 +670,51 @@ struct AccountsView: View {
     }
     private func connectService(_ kind: ConnectionKind) {
         selectedKind = kind
-        if kind == .claudeCode || kind == .codex {
-            guard executable(for: kind) != nil else { NSWorkspace.shared.open(installationURL(kind)); return }
-            let existing = store.accounts.contains { $0.kind == kind && (kind == .claudeCode ? $0.usesExistingClaude == true : $0.usesExistingCodex) }
-            section = .accounts
-            setupStarted = true
-            if kind == .claudeCode { store.connectClaude(existing: !existing) }
-            else { store.connectOpenAI(existing: !existing) }
-        } else {
-            secret = ""; scopeID = ""; name = ""; connectionError = nil
-            section = .settings
-            selectedTab = .advanced
-            store.rediscoverTools()
-        }
+        secret = ""; scopeID = ""; name = ""; connectionError = nil
+        manualConnection = false
+        setupStarted = false
+        section = .connection
+        store.rediscoverTools()
+    }
+    private var connectionPage: some View {
+        VStack(alignment: .leading, spacing: 20) {
+            Button { secret = ""; section = .overview } label: {
+                Label("Back to Accounts", systemImage: "chevron.left")
+            }.buttonStyle(.plain).foregroundStyle(.secondary)
+            VStack(spacing: 16) {
+                ProviderMark(provider: selectedKind.provider, size: 36)
+                    .foregroundStyle(providerAccent(selectedKind.provider))
+                Text("Connect \(selectedKind == .codex ? "Codex" : selectedKind == .claudeCode ? "Claude Code" : selectedKind.provider.title)")
+                    .font(.system(size: 22, weight: .semibold))
+                Text(selectedKind == .xai ? "Track your prepaid API credits." : selectedKind.isAPI ? "Track your API usage and balance." : "Use your existing subscription sign-in.")
+                    .font(.system(size: 12)).foregroundStyle(.secondary)
+                Button {
+                    if selectedKind == .claudeCode || selectedKind == .codex {
+                        guard executable(for: selectedKind) != nil else { NSWorkspace.shared.open(installationURL(selectedKind)); return }
+                        let existing = store.accounts.contains { $0.kind == selectedKind && (selectedKind == .claudeCode ? $0.usesExistingClaude == true : $0.usesExistingCodex) }
+                        setupStarted = true
+                        if selectedKind == .claudeCode { store.connectClaude(existing: !existing) }
+                        else { store.connectOpenAI(existing: !existing) }
+                    } else if selectedKind == .copilot { store.connectCopilot() }
+                    else {
+                        NSWorkspace.shared.open(selectedKind == .xai ? URL(string: "https://console.x.ai")! : selectedKind.documentation)
+                        manualConnection = true
+                    }
+                } label: {
+                    Label(selectedKind.isAPI ? "Open \(selectedKind.provider.title) setup" : "Connect account", systemImage: "arrow.up.right.square")
+                        .font(.system(size: 14, weight: .semibold)).frame(minWidth: 230).padding(.vertical, 7)
+                }.buttonStyle(.borderedProminent).controlSize(.large).disabled(busyConnecting || store.demo)
+                if selectedKind.isAPI {
+                    Text("This provider requires an API key. After signing in, return here to finish setup.")
+                        .font(.system(size: 11)).foregroundStyle(.secondary).multilineTextAlignment(.center)
+                }
+            }.frame(maxWidth: .infinity).padding(.vertical, 12)
+            setupProgress
+            DisclosureGroup("Manual setup & advanced options", isExpanded: $manualConnection) {
+                connectionForm.padding(.top, 12)
+            }.font(.system(size: 12)).padding(16)
+                .background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 12))
+        }.frame(maxWidth: 520).frame(maxWidth: .infinity).padding(.top, 8)
     }
     @ViewState private var historyWidth: CGFloat = 800
     private var historyContent: some View {
@@ -792,14 +826,14 @@ struct AccountsView: View {
     }
     private var connectionForm: some View {
         VStack(alignment: .leading, spacing: 12) {
-            HStack {
+            if section != .connection { HStack {
                 ProviderMark(provider: selectedKind.provider, size: 19)
                 Picker("Service", selection: $selectedKind) {
                     ForEach(ConnectionKind.allCases) { kind in Text(kind.title).tag(kind) }
                 }.labelsHidden()
             }
             .disabled(busyConnecting)
-            .onChange(of: selectedKind) { _, _ in secret = ""; scopeID = ""; name = ""; connectionError = nil; store.rediscoverTools() }
+            .onChange(of: selectedKind) { _, _ in secret = ""; scopeID = ""; name = ""; connectionError = nil; store.rediscoverTools() } }
             if selectedKind.isAPI { apiConnectionForm }
             else { cliConnectionForm }
             if let account = setupAccount, busyConnecting || store.needsSignIn(account) || store.errors[account.id] != nil {
@@ -864,24 +898,16 @@ struct AccountsView: View {
     private var apiConnectionForm: some View {
         VStack(alignment: .leading, spacing: 10) {
             if selectedKind == .xai {
-                VStack(alignment: .leading, spacing: 8) {
-                    Link(destination: URL(string: "https://console.x.ai")!) {
-                        Label("Open xAI & sign in", systemImage: "arrow.up.right.square")
-                    }.buttonStyle(.borderedProminent).controlSize(.regular)
-                    Text("1. Sign in to xAI, choose your team, then open Settings → Management Keys.")
-                    Text("2. Create a management key with access to read billing credits, then paste it below.")
-                    HStack {
-                        Text("3. Copy your team ID from")
-                        Link("Team settings ↗", destination: URL(string: "https://console.x.ai/team/default/settings/team")!)
-                    }
-                    Text("xAI requires a key to read API credits. Signing in alone won’t connect Ai-llowance.").foregroundStyle(.secondary)
-                }.font(.system(size: 11)).fixedSize(horizontal: false, vertical: true)
-                Divider()
+                Text("In xAI Settings → Management Keys, create a key with permission to read billing credits.")
+                    .font(.system(size: 11)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             }
             TextField("Account label (optional)", text: $name).textFieldStyle(.roundedBorder)
             SecureField(keyLabel(selectedKind), text: $secret).textFieldStyle(.roundedBorder)
             if selectedKind == .xai {
-                TextField("xAI team ID", text: $scopeID).textFieldStyle(.roundedBorder)
+                HStack {
+                    TextField("xAI team ID", text: $scopeID).textFieldStyle(.roundedBorder)
+                    Link("Find team ID ↗", destination: URL(string: "https://console.x.ai/team/default/settings/team")!).font(.system(size: 11))
+                }
                 Text("Use a Management API key, not a standard model API key. Grok subscriptions aren’t supported.")
                     .font(.system(size: 10)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             }
