@@ -17,8 +17,11 @@ public struct UsageHistoryPoint: Codable, Equatable, Identifiable, Sendable {
     public let remainingPercent: Double?
     public let balanceUSD: Decimal?
     public let costUSD: Decimal?
-    public init(timestamp: Date, remainingPercent: Double? = nil, balanceUSD: Decimal? = nil, costUSD: Decimal? = nil) {
+    public let windowID: String?
+    public let resetsAt: Date?
+    public init(timestamp: Date, remainingPercent: Double? = nil, balanceUSD: Decimal? = nil, costUSD: Decimal? = nil, windowID: String? = nil, resetsAt: Date? = nil) {
         self.timestamp = timestamp; self.remainingPercent = remainingPercent; self.balanceUSD = balanceUSD; self.costUSD = costUSD
+        self.windowID = windowID; self.resetsAt = resetsAt
     }
 }
 
@@ -84,7 +87,9 @@ public struct SnapshotCache: Sendable {
         let status = AllowanceStatus.evaluate(snapshot: snapshot, kind: account.kind, now: snapshot.observedAt)
         if ![.unavailable, .stale, .restricted].contains(status.state) {
             let point = UsageHistoryPoint(timestamp: snapshot.observedAt, remainingPercent: status.remainingPercent,
-                                          balanceUSD: snapshot.balanceUSD, costUSD: snapshot.costUSD)
+                                          balanceUSD: snapshot.balanceUSD, costUSD: snapshot.costUSD,
+                                          windowID: snapshot.limitingWindow(for: account.kind)?.id,
+                                          resetsAt: snapshot.limitingWindow(for: account.kind)?.resetsAt)
             // Preserve the sample timestamp. Replacing it every minute would move
             // the five-minute boundary forever and leave the chart with one point.
             if history.last.map({ point.timestamp.timeIntervalSince($0.timestamp) >= 300 }) ?? true { history.append(point) }

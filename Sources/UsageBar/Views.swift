@@ -1,4 +1,5 @@
 import SwiftUI
+import Charts
 import AppKit
 import UsageCore
 
@@ -85,8 +86,8 @@ struct Dashboard: View {
             }
             if let notice = store.notice { Text(notice).font(.system(size: 10)).foregroundStyle(.orange).lineLimit(2).padding(.horizontal, 9) }
             HStack(spacing: 5) {
-                Button(action: manage) { Label("Settings", systemImage: "gearshape").padding(.horizontal, 5).frame(height: 22) }
-                    .buttonStyle(QuietButtonStyle()).help("Settings")
+                Button(action: manage) { Label("Dashboard", systemImage: "square.grid.2x2").padding(.horizontal, 5).frame(height: 22) }
+                    .buttonStyle(QuietButtonStyle()).help("Open dashboard")
                 Spacer()
                 Text(AppUpdater.versionLabel).monospacedDigit().foregroundStyle(.secondary).padding(.trailing, 3)
                 UpdateCheckButton(updater: store.updater)
@@ -151,6 +152,7 @@ struct Dashboard: View {
                         ForEach(accounts) { account in
                             CompactAccountRow(account: account, snapshot: store.snapshots[account.id], error: store.errors[account.id], now: store.now, cached: store.isCached(account),
                                 expanded: expandedAccountID == account.id,
+                                detailedLabels: store.menuPreferences.detailedQuotaLabels,
                                 history: expandedAccountID == account.id ? store.history(for: account) : [],
                                 expand: { expandedAccountID = expandedAccountID == account.id ? nil : account.id },
                                 manage: { manage(account) }, openUsage: { store.openUsage(account) })
@@ -171,6 +173,7 @@ private struct CompactAccountRow: View {
     let now: Date
     let cached: Bool
     let expanded: Bool
+    let detailedLabels: Bool
     let history: [UsageHistoryPoint]
     let expand: () -> Void
     let manage: () -> Void
@@ -187,6 +190,9 @@ private struct CompactAccountRow: View {
         if let balanceLabel = snapshot?.balanceLabel { return balanceLabel }
         if snapshot?.balanceUSD != nil { return "Credit balance" }
         if snapshot?.costUSD != nil { return "Spent this month · UTC" }
+        if detailedLabels, let snapshot, !snapshot.applicableWindows(for: account.kind).isEmpty {
+            return snapshot.applicableWindows(for: account.kind).map { "\(shortWindowLabel($0)) \(Int($0.remainingPercent))%" }.joined(separator: " · ")
+        }
         if let window { return "\(shortWindowLabel(window)) · \(resetText(window.resetsAt, at: now))" }
         return snapshot == nil ? "Waiting for first reading" : "Quota unavailable"
     }
@@ -354,6 +360,11 @@ private struct SettingsCard<Content: View>: View {
     }
 }
 
+private enum DashboardSection: String, CaseIterable, Identifiable {
+    case overview = "Overview", history = "History", accounts = "Accounts", settings = "Settings"
+    var id: String { rawValue }
+}
+
 private enum SettingsTab: String, CaseIterable, Identifiable {
     case accounts, menuBar, behavior, updates, advanced
     var id: String { rawValue }
@@ -396,6 +407,7 @@ struct AccountsView: View {
     @ObservedObject var store: AppStore
     var showMenu: () -> Void
     @ViewState private var selectedKind: ConnectionKind = .claudeCode
+    @ViewState private var setupStarted = false
     @ViewState private var name = ""
     @ViewState private var secret = ""
     @ViewState private var scopeID = ""
@@ -405,7 +417,10 @@ struct AccountsView: View {
     @ViewState private var newName = ""
     @ViewState private var keyAccount: Account?
     @ViewState private var replacement = ""
-    @ViewState private var selectedTab: SettingsTab = .accounts
+    @ViewState private var section: DashboardSection = .overview
+    @ViewState private var historyHours = 24
+    @ViewState private var historyAccountID: UUID?
+    @ViewState private var selectedTab: SettingsTab = .menuBar
     @ViewState private var handledAccountNavigationVersion: UInt64 = 0
 
     var body: some View {
@@ -414,7 +429,7 @@ struct AccountsView: View {
                 BrandIcon(size: 44)
                 VStack(alignment: .leading, spacing: 3) {
                     Text("Ai-llowance").font(.system(size: 23, weight: .semibold))
-                    Text(store.accounts.isEmpty ? "Connect once. Know what’s left." : selectedTab.subtitle).font(.system(size: 11)).foregroundStyle(.secondary)
+                    Text(store.accounts.isEmpty ? "Connect once. Know what’s left." : "Your accounts. Your allowance. Your next move.").font(.system(size: 11)).foregroundStyle(.secondary)
                 }
                 Spacer()
                 if store.refreshing { ProgressView().controlSize(.small) }
@@ -423,7 +438,10 @@ struct AccountsView: View {
                     .buttonStyle(QuietButtonStyle()).help("Refresh accounts").accessibilityLabel("Refresh accounts").disabled(store.demo || store.paused || store.refreshing)
             }.padding(.horizontal, 22).padding(.vertical, 18)
             Divider().opacity(0.4)
-            settingsTabs.padding(.horizontal, 18).padding(.vertical, 12)
+            Picker("Dashboard section", selection: $section) {
+                ForEach(DashboardSection.allCases) { Text($0.rawValue).tag($0) }
+            }.pickerStyle(.segmented).labelsHidden().padding(.horizontal, 22).padding(.vertical, 12)
+            if section == .settings { settingsTabs.padding(.horizontal, 18).padding(.bottom, 12) }
             if let notice = store.notice {
                 HStack(alignment: .top, spacing: 8) {
                     Label(notice, systemImage: "info.circle")
@@ -436,18 +454,26 @@ struct AccountsView: View {
             Divider().opacity(0.4)
             ScrollViewReader { proxy in
                 ScrollView {
-                    selectedTabContent.padding(22)
+                    VStack(alignment: .leading, spacing: 16) {
+                        switch section {
+                        case .overview: overviewContent
+                        case .history: historyContent
+                        case .accounts: accountsContent
+                        case .settings: selectedTabContent
+                        }
+                    }.padding(22)
                 }
                 .onAppear {
                     if handledAccountNavigationVersion != store.accountNavigationVersion {
                         handledAccountNavigationVersion = store.accountNavigationVersion
-                        selectedTab = .accounts
+                        section = .accounts
                     }
+                    if store.accounts.isEmpty { section = .accounts }
                     store.rediscoverTools(); scrollToSelected(proxy)
                 }
                 .onChange(of: store.accountNavigationVersion) { _, _ in
                     handledAccountNavigationVersion = store.accountNavigationVersion
-                    selectedTab = .accounts
+                    section = .accounts
                     scrollToSelected(proxy)
                 }
             }
@@ -490,12 +516,12 @@ struct AccountsView: View {
         }
     }
     private func scrollToSelected(_ proxy: ScrollViewProxy) {
-        guard selectedTab == .accounts, let id = store.selectedAccountID else { return }
+        guard section == .accounts, let id = store.selectedAccountID else { return }
         DispatchQueue.main.async { proxy.scrollTo(id, anchor: .top) }
     }
     private var settingsTabs: some View {
         HStack(spacing: 5) {
-            ForEach(SettingsTab.allCases) { tab in
+            ForEach(SettingsTab.allCases.filter { $0 != .accounts }) { tab in
                 Button { withAnimation(.easeOut(duration: 0.14)) { selectedTab = tab } } label: {
                     HStack(spacing: 6) {
                         Image(systemName: tab.symbol).font(.system(size: 10, weight: .semibold))
@@ -518,14 +544,7 @@ struct AccountsView: View {
     @ViewBuilder private var selectedTabContent: some View {
         if store.demo { Text("Sample accounts · sign-in is disabled").font(.caption).foregroundStyle(.orange) }
         switch selectedTab {
-        case .accounts:
-            if store.accounts.isEmpty { connectionSetup }
-            ForEach(MenuProvider.allCases, id: \.self) { provider in
-                if store.accounts.contains(where: { $0.kind.provider == provider }) { accountSection(provider) }
-            }
-            if !store.accounts.isEmpty {
-                simpleConnectOptions
-            }
+        case .accounts: accountsContent
         case .menuBar: menuBarSettings
         case .behavior: behaviorSettings
         case .updates: UpdateSettings(updater: store.updater)
@@ -542,6 +561,83 @@ struct AccountsView: View {
             }
         }
     }
+    @ViewBuilder private var accountsContent: some View {
+            if store.accounts.isEmpty { connectionSetup }
+            ForEach(MenuProvider.allCases, id: \.self) { provider in
+                if store.accounts.contains(where: { $0.kind.provider == provider }) { accountSection(provider) }
+            }
+            if !store.accounts.isEmpty {
+                simpleConnectOptions
+            }
+    }
+    private var overviewContent: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text("Ready when you are").font(.system(size: 22, weight: .semibold))
+            Text("Fresh readings help you choose an account. Opening a CLI starts a new session with that profile.")
+                .font(.system(size: 11)).foregroundStyle(.secondary)
+            ForEach([ConnectionKind.claudeCode, .codex], id: \.self) { kind in
+                if store.accounts.contains(where: { $0.kind == kind }) {
+                    SettingsCard {
+                        HStack(spacing: 12) {
+                            ProviderMark(provider: kind.provider, size: 28)
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(kind == .codex ? "Codex" : "Claude Code").font(.headline)
+                                if let account = store.recommendedAccount(for: kind) {
+                                    Text(account.name).font(.subheadline)
+                                    Text(account.expectedIdentity ?? "").font(.caption).foregroundStyle(.secondary)
+                                    Text(readingValue(store.snapshots[account.id], window: store.snapshots[account.id]?.limitingWindow(for: kind)))
+                                        .font(.caption).foregroundStyle(.secondary)
+                                } else { Text("No verified available account").font(.caption).foregroundStyle(.secondary) }
+                            }
+                            Spacer()
+                            if let account = store.recommendedAccount(for: kind) {
+                                Button("Use this account") { store.useAccount(account) }.disabled(store.demo)
+                            } else { Button("Check accounts") { section = .accounts } }
+                        }
+                    }
+                }
+            }
+            if store.accounts.isEmpty { connectionSetup }
+            ForEach(store.accounts.filter { $0.enabled }) { account in
+                let status = AllowanceStatus.evaluate(snapshot: store.snapshots[account.id], kind: account.kind, now: store.now, hasError: store.errors[account.id] != nil)
+                if store.needsSignIn(account) || store.errors[account.id] != nil || [.restricted, .exhausted].contains(status.state) {
+                    Button { store.selectedAccountID = account.id } label: {
+                        HStack {
+                            Label(account.name, systemImage: "exclamationmark.circle")
+                            Spacer()
+                            Text(store.needsSignIn(account) ? "Sign in" : status.title).foregroundStyle(.secondary)
+                            Image(systemName: "chevron.right")
+                        }.font(.system(size: 12)).padding(12).modifier(InsetSurface(tint: .orange))
+                    }.buttonStyle(.plain)
+                }
+            }
+            Button("Explore usage history") { section = .history }.font(.system(size: 12))
+        }
+    }
+    private var historyContent: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            HStack {
+                Text("Usage history").font(.system(size: 22, weight: .semibold))
+                Spacer()
+                Picker("Time range", selection: $historyHours) {
+                    Text("24 hours").tag(24); Text("7 days").tag(168)
+                }.labelsHidden().frame(width: 140)
+            }
+            Text("Saved on this Mac · up to 96 recent readings per account · no extra polling. Dots show observed values; gaps are not estimated.")
+                .font(.system(size: 11)).foregroundStyle(.secondary)
+            Picker("Account", selection: $historyAccountID) {
+                Text("All accounts").tag(nil as UUID?)
+                ForEach(store.accounts) { Text($0.name).tag(Optional($0.id)) }
+            }
+            if store.accounts.isEmpty { Text("Connect an account to start collecting history.").foregroundStyle(.secondary) }
+            ForEach(store.accounts.filter { historyAccountID == nil || $0.id == historyAccountID }) { account in
+                let points = store.history(for: account).filter { $0.timestamp >= store.now.addingTimeInterval(-Double(historyHours) * 3600) }
+                HistoryCard(account: account, points: points)
+            }
+        }.onChange(of: store.accounts.map(\.id)) { _, ids in
+            if let selected = historyAccountID, !ids.contains(selected) { historyAccountID = nil }
+        }
+    }
     private var busyConnecting: Bool { store.connectingClaude || store.signingIn != nil || !store.waitingForClaude.isEmpty }
     private var setupAccount: Account? { store.accounts.last { $0.kind == selectedKind } }
     private var connectionSetup: some View {
@@ -551,8 +647,9 @@ struct AccountsView: View {
                 Text("Choose the coding assistant you already use. We’ll check its local sign-in and show your usage.").font(.system(size: 11)).foregroundStyle(.secondary)
                 simpleProviderButton(.claudeCode)
                 simpleProviderButton(.codex)
+                setupProgress
                 agentHelpMenu
-                Button("Other providers, API keys, or CLI setup…") { selectedTab = .advanced }
+                Button("Other providers, API keys, or CLI setup…") { section = .settings; selectedTab = .advanced }
                     .buttonStyle(.plain).font(.system(size: 10, weight: .medium)).foregroundStyle(Color.accentColor)
             }
         }
@@ -563,9 +660,31 @@ struct AccountsView: View {
                 Label("Add an account", systemImage: "plus.circle.fill").font(.system(size: 13, weight: .semibold))
                 simpleProviderButton(.claudeCode)
                 simpleProviderButton(.codex)
+                setupProgress
                 agentHelpMenu
-                Button("More providers and API keys…") { selectedTab = .advanced }
+                Button("More providers and API keys…") { section = .settings; selectedTab = .advanced }
                     .buttonStyle(.plain).font(.system(size: 10, weight: .medium)).foregroundStyle(Color.accentColor)
+            }
+        }
+    }
+    @ViewBuilder private var setupProgress: some View {
+        if setupStarted, let account = setupAccount {
+            let snapshot = store.snapshots[account.id]
+            let verified = account.expectedIdentity != nil && snapshot?.identity == account.expectedIdentity && snapshot != nil && !store.isCached(account) && store.errors[account.id] == nil && snapshot?.providerRestricted != true && !(snapshot?.isStale(at: store.now) ?? true)
+            VStack(alignment: .leading, spacing: 8) {
+                HStack {
+                    Label("Find assistant", systemImage: executable(for: account.kind) != nil ? "checkmark.circle.fill" : "circle")
+                    Image(systemName: "chevron.right")
+                    Label("Sign in", systemImage: !store.needsSignIn(account) && snapshot != nil ? "checkmark.circle.fill" : "circle")
+                    Image(systemName: "chevron.right")
+                    Label("Verify", systemImage: verified ? "checkmark.circle.fill" : "circle")
+                }.font(.system(size: 10)).foregroundStyle(.secondary)
+                if verified {
+                    Label("Verified · \(account.expectedIdentity ?? account.name)", systemImage: "checkmark.shield.fill").font(.system(size: 11)).foregroundStyle(.green)
+                } else {
+                    Text(store.errors[account.id] ?? "Finish sign-in, then we’ll verify your account and first reading.").font(.system(size: 11)).foregroundStyle(.secondary)
+                    accountActions(account)
+                }
             }
         }
     }
@@ -583,6 +702,9 @@ struct AccountsView: View {
         let existing = store.accounts.contains { $0.kind == kind && (kind == .claudeCode ? $0.usesExistingClaude == true : $0.usesExistingCodex) }
         Button {
             guard installed else { NSWorkspace.shared.open(installationURL(kind)); return }
+            section = .accounts
+            selectedKind = kind
+            setupStarted = true
             if kind == .claudeCode { store.connectClaude(existing: !existing) }
             else { store.connectOpenAI(existing: !existing) }
         } label: {
@@ -882,6 +1004,9 @@ struct AccountsView: View {
                         ForEach(AppTheme.allCases) { theme in Text(theme.title).tag(theme) }
                     }.pickerStyle(.segmented).labelsHidden().frame(width: 240)
                 }
+                Toggle("Detailed quota labels in the popover", isOn: Binding(get: { store.menuPreferences.detailedQuotaLabels }, set: { store.setDetailedQuotaLabels($0) }))
+                    .toggleStyle(.switch).controlSize(.small).font(.system(size: 11))
+                Text("Show each quota window and its remaining percentage. Compact labels are the default; click any account for full details.").font(.system(size: 10)).foregroundStyle(.secondary)
                 Divider().opacity(0.4)
                 HStack {
                     Label("Menu bar", systemImage: "menubar.rectangle").font(.system(size: 13, weight: .semibold))
@@ -959,6 +1084,53 @@ private struct UpdateSettings: View {
                 Toggle("Automatically check for updates", isOn: Binding(get: { updater.automaticChecks }, set: { updater.setAutomaticChecks($0) }))
                     .toggleStyle(.switch).controlSize(.mini).font(.system(size: 11)).disabled(!updater.canCheck)
                 Text("Updates install when you choose. Your accounts stay on this Mac.").font(.system(size: 10)).foregroundStyle(.secondary)
+            }
+        }
+    }
+}
+
+private struct HistoryCard: View {
+    let account: Account
+    let points: [UsageHistoryPoint]
+    private var metric: String { account.kind.isBalance ? "Balance (USD)" : account.kind.isAPI ? "Month-to-date spending (USD)" : "Limiting allowance remaining (%)" }
+    private func value(_ point: UsageHistoryPoint) -> Double? {
+        if account.kind.isBalance { return point.balanceUSD.map { NSDecimalNumber(decimal: $0).doubleValue } }
+        if account.kind.isAPI { return point.costUSD.map { NSDecimalNumber(decimal: $0).doubleValue } }
+        return point.remainingPercent
+    }
+    private var plotted: [UsageHistoryPoint] { points.filter { value($0) != nil } }
+    var body: some View {
+        SettingsCard {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack {
+                    ProviderMark(provider: account.kind.provider, size: 20)
+                    Text(account.name).font(.system(size: 14, weight: .semibold))
+                    Spacer()
+                    Text("\(plotted.count) readings").font(.caption).foregroundStyle(.secondary)
+                }
+                Text(metric).font(.system(size: 11)).foregroundStyle(.secondary)
+                if plotted.isEmpty {
+                    Text("No readings in this range yet. History grows as this Mac refreshes your accounts.")
+                        .font(.system(size: 12)).foregroundStyle(.secondary).frame(maxWidth: .infinity, minHeight: 100)
+                } else {
+                    Chart(plotted) { point in
+                        PointMark(x: .value("Time", point.timestamp), y: .value(metric, value(point) ?? 0))
+                            .foregroundStyle(Brand.gradient).symbolSize(20)
+                    }
+                    .chartYScale(domain: account.kind.isAPI ? .automatic : .automatic(includesZero: true))
+                    .chartXAxis { AxisMarks(values: .automatic(desiredCount: 4)) }
+                    .frame(height: 150)
+                    if let last = plotted.last {
+                        HStack {
+                            Text("Latest: \(value(last) ?? 0, specifier: "%.1f")\(account.kind.isAPI ? " USD" : "%")")
+                            Spacer()
+                            Text(last.timestamp, format: .dateTime.month(.abbreviated).day().hour().minute())
+                        }.font(.system(size: 10)).foregroundStyle(.secondary)
+                    }
+                    if !account.kind.isAPI {
+                        Text("The limiting window can change between readings or reset. These are allowance snapshots, not token counts.").font(.system(size: 10)).foregroundStyle(.secondary)
+                    }
+                }
             }
         }
     }

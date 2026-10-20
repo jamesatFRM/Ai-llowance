@@ -163,6 +163,7 @@ final class AppStore: ObservableObject {
         do { try persist() } catch { menuPreferences = previous; notice = "Could not save the menu-bar setting." }
     }
     func setTheme(_ value: AppTheme) { updateMenu { $0.theme = value } }
+    func setDetailedQuotaLabels(_ value: Bool) { updateMenu { $0.detailedQuotaLabels = value } }
     func setShowAccountNames(_ value: Bool) { updateMenu { $0.showAccountNames = value } }
     func setMenuDisplay(_ value: MenuDisplay) { updateMenu { $0.display = value } }
     func setMenuAggregation(_ value: MenuAggregation) { updateMenu { $0.aggregation = value } }
@@ -216,7 +217,20 @@ final class AppStore: ObservableObject {
             if existing { refresh(force: true) } else { signIn(account, openBrowser: accounts.filter { $0.kind == .codex }.count == 1) }
         } catch { notice = safeMessage(error) }
     }
-    func openAgentHelp(for kind: ConnectionKind, account: Account? = nil) {
+    func recommendedAccount(for kind: ConnectionKind) -> Account? {
+        AccountRecommendation.best(kind: kind, accounts: accounts, snapshots: snapshots,
+            unavailable: Set(errors.keys).union(cachedAccounts).union(authenticationRequired), now: now)
+    }
+    func useAccount(_ account: Account) {
+        guard let current = accounts.first(where: { $0.id == account.id }),
+              recommendedAccount(for: current.kind)?.id == current.id,
+              AccountRecommendation.best(kind: current.kind, accounts: [current], snapshots: snapshots,
+                unavailable: Set(errors.keys).union(cachedAccounts).union(authenticationRequired), now: Date()) != nil else {
+            notice = "Refresh this account before opening it."; return
+        }
+        openAgentHelp(for: current.kind, account: current, setupHelp: false)
+    }
+    func openAgentHelp(for kind: ConnectionKind, account: Account? = nil, setupHelp: Bool = true) {
         guard !demo, !readOnly, kind == .claudeCode || kind == .codex else { return }
         if let account, !accounts.contains(where: { $0.id == account.id }) { return }
         if kind == .claudeCode && claudeExecutable == nil {
@@ -227,10 +241,12 @@ final class AppStore: ObservableObject {
         }
         let agent = kind == .claudeCode ? "Claude Code" : "Codex"
         let prompt = """
-        I’m setting up Ai-llowance to track my \(agent) subscription. Please guide me one step at a time through connecting the \(agent) sign-in I choose in Ai-llowance Settings → Accounts. I want subscription usage tracking, not API billing. Do not ask me to paste passwords, API keys, tokens, or other secrets into chat. Do not sign out, switch accounts, or change CLI configuration without explaining what will change and waiting for my confirmation. If Ai-llowance needs me to approve a browser sign-in or macOS permission, tell me to complete that directly in the app and then return here. Keep the instructions simple and stop when the account is connected.
+        I’m setting up Ai-llowance to track my \(agent) subscription. Please guide me one step at a time through connecting the \(agent) sign-in I choose in Ai-llowance Dashboard → Accounts. I want subscription usage tracking, not API billing. Do not ask me to paste passwords, API keys, tokens, or other secrets into chat. Do not sign out, switch accounts, or change CLI configuration without explaining what will change and waiting for my confirmation. If Ai-llowance needs me to approve a browser sign-in or macOS permission, tell me to complete that directly in the app and then return here. Keep the instructions simple and stop when the account is connected.
         """
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(prompt, forType: .string)
+        if setupHelp {
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.setString(prompt, forType: .string)
+        }
         if kind == .claudeCode, let claudeExecutable {
             var profile = existingClaudeConfig
             if let account, account.usesExistingClaude != true {
@@ -251,7 +267,7 @@ final class AppStore: ObservableObject {
             do {
                 try Paths.writePrivate(Data(script.utf8), to: launcher, executable: true)
                 guard openExternal(launcher) else { throw UsageError.unavailable("Could not open Claude Code in Terminal.") }
-                notice = "Setup prompt copied. Paste it into the Claude Code window that opened."
+                notice = setupHelp ? "Setup prompt copied. Paste it into the Claude Code window that opened." : "Opened Claude Code with this account’s profile."
             } catch { notice = safeMessage(error) }
             return
         }
@@ -272,7 +288,7 @@ final class AppStore: ObservableObject {
         do {
             try Paths.writePrivate(Data(script.utf8), to: launcher, executable: true)
             guard openExternal(launcher) else { throw UsageError.unavailable("Could not open Codex CLI in Terminal.") }
-            notice = "Setup prompt copied. Paste it into the Codex window that opened."
+            notice = setupHelp ? "Setup prompt copied. Paste it into the Codex window that opened." : "Opened Codex with this account’s profile."
         } catch { notice = safeMessage(error) }
     }
     private func claudeConnection() throws -> ClaudeConnection {

@@ -22,16 +22,18 @@ public struct MenuPreferences: Codable, Equatable, Sendable {
     public var display: MenuDisplay = .byProvider
     public var aggregation: MenuAggregation = .average
     public var showAccountNames = true
+    public var detailedQuotaLabels = false
     public var allAccounts = true
     public var selectedAccountIDs: Set<UUID> = []
     public init() {}
-    private enum CodingKeys: String, CodingKey { case theme, display, aggregation, showAccountNames, allAccounts, selectedAccountIDs }
+    private enum CodingKeys: String, CodingKey { case theme, display, aggregation, showAccountNames, detailedQuotaLabels, allAccounts, selectedAccountIDs }
     public init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
         theme = try values.decodeIfPresent(AppTheme.self, forKey: .theme) ?? .automatic
         display = try values.decodeIfPresent(MenuDisplay.self, forKey: .display) ?? .byProvider
         aggregation = try values.decodeIfPresent(MenuAggregation.self, forKey: .aggregation) ?? .average
         showAccountNames = try values.decodeIfPresent(Bool.self, forKey: .showAccountNames) ?? true
+        detailedQuotaLabels = try values.decodeIfPresent(Bool.self, forKey: .detailedQuotaLabels) ?? false
         allAccounts = try values.decodeIfPresent(Bool.self, forKey: .allAccounts) ?? true
         selectedAccountIDs = try values.decodeIfPresent(Set<UUID>.self, forKey: .selectedAccountIDs) ?? []
     }
