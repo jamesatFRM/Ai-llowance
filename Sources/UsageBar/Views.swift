@@ -537,7 +537,7 @@ struct AccountsView: View {
             Text("Ai-llowance").font(.system(size: 12, weight: .semibold)).padding(.trailing, 6)
             ForEach([DashboardSection.history, .overview, .settings]) { item in
                 Button { section = item } label: {
-                    Label(item == .history ? "Accounts" : item == .overview ? "Connect" : "Settings",
+                    Label(item == .history ? "Usage" : item == .overview ? "Accounts" : "Settings",
                           systemImage: item == .history ? "chart.xyaxis.line" : item == .overview ? "square.grid.2x2" : "gearshape")
                         .font(.system(size: 11, weight: .medium))
                         .padding(.horizontal, 8).frame(height: 28)
@@ -863,14 +863,31 @@ struct AccountsView: View {
     }
     private var apiConnectionForm: some View {
         VStack(alignment: .leading, spacing: 10) {
+            if selectedKind == .xai {
+                VStack(alignment: .leading, spacing: 8) {
+                    Link(destination: URL(string: "https://console.x.ai")!) {
+                        Label("Open xAI & sign in", systemImage: "arrow.up.right.square")
+                    }.buttonStyle(.borderedProminent).controlSize(.regular)
+                    Text("1. Sign in to xAI, choose your team, then open Settings → Management Keys.")
+                    Text("2. Create a management key with access to read billing credits, then paste it below.")
+                    HStack {
+                        Text("3. Copy your team ID from")
+                        Link("Team settings ↗", destination: URL(string: "https://console.x.ai/team/default/settings/team")!)
+                    }
+                    Text("xAI requires a key to read API credits. Signing in alone won’t connect Ai-llowance.").foregroundStyle(.secondary)
+                }.font(.system(size: 11)).fixedSize(horizontal: false, vertical: true)
+                Divider()
+            }
             TextField("Account label (optional)", text: $name).textFieldStyle(.roundedBorder)
             SecureField(keyLabel(selectedKind), text: $secret).textFieldStyle(.roundedBorder)
             if selectedKind == .xai {
                 TextField("xAI team ID", text: $scopeID).textFieldStyle(.roundedBorder)
-                Text("Prepaid API credits · beta. Requires a team Management API key; a standard model API key or Grok subscription will not work.")
+                Text("Use a Management API key, not a standard model API key. Grok subscriptions aren’t supported.")
                     .font(.system(size: 10)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             }
-            Text(selectedKind.explanation).font(.system(size: 10)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            if selectedKind != .xai {
+                Text(selectedKind.explanation).font(.system(size: 10)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            }
             HStack {
                 Button("Connect securely") {
                     do {
