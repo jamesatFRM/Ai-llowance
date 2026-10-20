@@ -360,7 +360,7 @@ private struct SettingsCard<Content: View>: View {
     @Environment(\.colorScheme) private var scheme
     @ViewBuilder let content: Content
     var body: some View {
-        content.padding(20).frame(maxWidth: .infinity, alignment: .leading)
+        content.padding(14).frame(maxWidth: .infinity, alignment: .leading)
             .background {
                 RoundedRectangle(cornerRadius: 18, style: .continuous)
                     .fill(LinearGradient(colors: scheme == .dark ? [Color(red: 0.10, green: 0.14, blue: 0.25), Color(red: 0.065, green: 0.09, blue: 0.18)] : [Color.white, Color(red: 0.97, green: 0.98, blue: 1)], startPoint: .topLeading, endPoint: .bottomTrailing))
@@ -442,24 +442,21 @@ struct AccountsView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            HStack(spacing: 12) {
-                BrandIcon(size: 44)
-                VStack(alignment: .leading, spacing: 3) {
-                    Text("Ai-llowance").font(.system(size: 23, weight: .semibold))
-                    Text(store.accounts.isEmpty ? "Connect once. Know what’s left." : "Your accounts. Your allowance. Your next move.").font(.system(size: 11)).foregroundStyle(.secondary)
-                }
+            HStack(spacing: 8) {
+                BrandIcon(size: 23)
+                Text("Ai-llowance").font(.system(size: 13, weight: .semibold))
                 Spacer()
                 if store.refreshing { ProgressView().controlSize(.small) }
                 Text(store.refreshSummary).font(.system(size: 10)).foregroundStyle(.secondary).lineLimit(1)
-                Button { store.rediscoverTools(); store.refresh(force: true) } label: { Label("Refresh", systemImage: "arrow.clockwise").font(.system(size: 12, weight: .medium)).padding(.horizontal, 12).frame(height: 36) }
+                Button { store.rediscoverTools(); store.refresh(force: true) } label: { Label("Refresh", systemImage: "arrow.clockwise").font(.system(size: 12, weight: .medium)).padding(.horizontal, 8).frame(height: 26) }
                     .buttonStyle(QuietButtonStyle()).help("Refresh accounts").accessibilityLabel("Refresh accounts").disabled(store.demo || store.paused || store.refreshing)
-            }.padding(.horizontal, 22).padding(.vertical, 18)
+            }.padding(.horizontal, 14).padding(.vertical, 9)
             Divider().opacity(0.4)
-            HStack(alignment: .top, spacing: 0) {
-                dashboardSidebar
+            VStack(spacing: 0) {
+                dashboardNavigation
                 Divider().opacity(0.35)
                 VStack(spacing: 0) {
-                    if section == .settings { settingsTabs.padding(20) }
+                    if section == .settings { settingsTabs.padding(12) }
                     if let notice = store.notice {
                         HStack(alignment: .top, spacing: 8) {
                             Label(notice, systemImage: "info.circle")
@@ -479,7 +476,7 @@ struct AccountsView: View {
                                 case .accounts: accountsContent
                                 case .settings: selectedTabContent
                                 }
-                            }.padding(22)
+                            }.padding(12)
                         }
                         .onAppear {
                             if handledAccountNavigationVersion != store.accountNavigationVersion {
@@ -504,8 +501,8 @@ struct AccountsView: View {
                 Button("Show menu", action: showMenu)
                 Text(AppUpdater.versionLabel).foregroundStyle(.tertiary)
                 Button { NSApplication.shared.terminate(nil) } label: { Image(systemName: "power").frame(width: 26, height: 26) }.buttonStyle(QuietButtonStyle()).help("Quit Ai-llowance")
-            }.font(.system(size: 10)).padding(.horizontal, 22).padding(.vertical, 12)
-        }.frame(minWidth: 900, minHeight: 660).controlSize(.large).background(WorkspaceBackground()).preferredColorScheme(store.menuPreferences.theme.colorScheme)
+            }.font(.system(size: 10)).padding(.horizontal, 14).padding(.vertical, 6)
+        }.frame(minWidth: 760, minHeight: 480).controlSize(.regular).background(WorkspaceBackground()).preferredColorScheme(store.menuPreferences.theme.colorScheme)
         .background(Color(nsColor: .windowBackgroundColor).opacity(0.001))
         .alert("Remove \(removing?.name ?? "account")?", isPresented: Binding(get: { removing != nil }, set: { if !$0 { removing = nil } })) {
             Button("Cancel", role: .cancel) { removing = nil }
@@ -535,23 +532,20 @@ struct AccountsView: View {
             }.padding(24).frame(width: 420)
         }
     }
-    private var dashboardSidebar: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("WORKSPACE").font(.system(size: 9, weight: .semibold)).tracking(1).foregroundStyle(.tertiary).padding(.horizontal, 12).padding(.bottom, 8)
+    private var dashboardNavigation: some View {
+        HStack(spacing: 6) {
             ForEach([DashboardSection.history, .overview, .accounts, .settings]) { item in
                 Button { section = item } label: {
-                    Label(item == .history ? "Dashboard" : item == .overview ? "Ready to work" : item.rawValue,
+                    Label(item == .history ? "Usage" : item == .overview ? "Ready to work" : item.rawValue,
                           systemImage: item == .history ? "chart.xyaxis.line" : item == .overview ? "bolt" : item == .accounts ? "person.2" : "gearshape")
-                        .font(.system(size: 13, weight: section == item ? .semibold : .medium))
-                        .frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 12).frame(height: 44)
-                        .foregroundStyle(section == item ? Color.accentColor : .secondary)
-                        .background(section == item ? Color.accentColor.opacity(0.12) : .clear, in: RoundedRectangle(cornerRadius: 10))
+                        .font(.system(size: 11, weight: section == item ? .semibold : .medium))
+                        .padding(.horizontal, 12).frame(height: 30)
+                        .foregroundStyle(section == item ? Color.primary : .secondary)
+                        .background(section == item ? Brand.violet.opacity(0.22) : .clear, in: RoundedRectangle(cornerRadius: 8))
                 }.buttonStyle(.plain)
             }
-            Spacer()
-            Label("Local & private", systemImage: "lock.shield").font(.system(size: 10)).foregroundStyle(.tertiary).padding(.horizontal, 12)
-        }.padding(16).frame(width: 174).frame(maxHeight: .infinity)
-            .background(Color.primary.opacity(0.018))
+            Spacer(minLength: 0)
+        }.padding(.horizontal, 12).padding(.vertical, 6)
     }
     private func scrollToSelected(_ proxy: ScrollViewProxy) {
         guard section == .accounts, let id = store.selectedAccountID else { return }
@@ -654,19 +648,16 @@ struct AccountsView: View {
     }
     @ViewState private var historyWidth: CGFloat = 800
     private var historyContent: some View {
-        VStack(alignment: .leading, spacing: 16) {
+        VStack(alignment: .leading, spacing: 12) {
             HStack {
-                Text("Your usage").font(.system(size: 28, weight: .semibold))
+                Picker("Account", selection: $historyAccountID) {
+                    Text("All accounts").tag(nil as UUID?)
+                    ForEach(store.accounts) { Text($0.name).tag(Optional($0.id)) }
+                }.labelsHidden().frame(maxWidth: 200)
                 Spacer()
                 Picker("Time range", selection: $historyHours) {
                     Text("24 hours").tag(24); Text("7 days").tag(168)
-                }.pickerStyle(.segmented).labelsHidden().frame(width: 180)
-            }
-            Text("Allowance and balances, across your accounts.")
-                .font(.system(size: 11)).foregroundStyle(.secondary)
-            Picker("Account", selection: $historyAccountID) {
-                Text("All accounts").tag(nil as UUID?)
-                ForEach(store.accounts) { Text($0.name).tag(Optional($0.id)) }
+                }.pickerStyle(.segmented).labelsHidden().frame(width: 160)
             }
             if store.accounts.isEmpty { Text("Connect an account to start collecting history.").foregroundStyle(.secondary) }
             LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 16), count: min(4, max(1, Int((historyWidth + 16) / 280)))), spacing: 16) {
@@ -675,7 +666,7 @@ struct AccountsView: View {
                 HistoryCard(account: account, points: points)
             }
             }
-            Text("Local history · up to 96 recent readings per account, retained for up to seven days. Lines connect observed readings; gaps and resets stay separate.")
+            Text("On this Mac · up to 96 readings per account · 7-day retention")
                 .font(.system(size: 10)).foregroundStyle(.tertiary).padding(.top, 4)
         }.background(GeometryReader { geometry in
             Color.clear.onAppear { historyWidth = geometry.size.width }
@@ -1197,7 +1188,7 @@ private struct HistoryCard: View {
                             AxisValueLabel()
                         }
                     }
-                    .frame(height: 170).padding(.top, 8)
+                    .frame(height: 138).padding(.top, 4)
                     if let last = plotted.last {
                         HStack {
                             Label("Latest reading", systemImage: "clock")
