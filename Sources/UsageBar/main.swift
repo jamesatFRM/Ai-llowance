@@ -11,6 +11,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
     private var window: NSWindow?
     private var previewWindow: NSWindow?
     private var subscriptions: Set<AnyCancellable> = []
+    private var popoverResizeObserver: NSObjectProtocol?
     private var outsideClickMonitor: Any?
     private var localClickMonitor: Any?
     private var notificationDelegate: AllowanceNotificationDelegate?
@@ -18,7 +19,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
     private var renderedPreferences: MenuPreferences?
     private let store = AppStore(demo: CommandLine.arguments.contains("--demo") || CommandLine.arguments.contains("--preview") || CommandLine.arguments.contains("--export-preview"))
     func applicationDidFinishLaunching(_ notification: Notification) {
-        NSApp.setActivationPolicy(.accessory)
+        NSApp.setActivationPolicy((UserDefaults.standard.object(forKey: "hideFromDock") as? Bool ?? true) ? .accessory : .regular)
         if let index = CommandLine.arguments.firstIndex(of: "--export-preview"), CommandLine.arguments.count > index + 1 {
             do { try SharePreview.export(store: store, directory: URL(fileURLWithPath: CommandLine.arguments[index + 1])) }
             catch { fputs("Could not render the sample preview.\n", stderr); exit(1) }
@@ -91,13 +92,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
             }
             let value = menuValue(entry)
             let name = store.menuPreferences.showAccountNames && (store.menuPreferences.display == .byAccount || entry.isBalance) ? " \(String(entry.label.prefix(12)))" : ""
-            title.append(NSAttributedString(string: "\(name) \(value)"))
+            let color: NSColor
+            if store.menuPreferences.colorByAllowance, !entry.isBalance, let percent = entry.remainingPercent { color = .allowance(percent) }
+            else { color = NSColor.accountHex(entry.colorHex) ?? .labelColor }
+            title.append(NSAttributedString(string: "\(name) \(value)", attributes: [.foregroundColor: color]))
             descriptions.append(entry.isBalance ? "\(entry.label): \(entry.balanceUSD?.formatted(.currency(code: "USD")) ?? "balance unavailable")"
                 : entry.isUnlimited ? "\(entry.label): unlimited allowance" : entry.remainingPercent == nil
                 ? "\(entry.label): allowance unavailable"
                 : "\(entry.label): \(value) allowance remaining")
         }
-        title.addAttributes([.font: NSFont.monospacedDigitSystemFont(ofSize: 12, weight: .medium), .foregroundColor: NSColor.labelColor], range: NSRange(location: 0, length: title.length))
+        title.addAttributes([.font: NSFont.monospacedDigitSystemFont(ofSize: 12, weight: .medium)], range: NSRange(location: 0, length: title.length))
         button.attributedTitle = title
         button.toolTip = descriptions.joined(separator: "\n") + "\n\(store.menuPreferences.aggregation.title); each account has its own allowance."
         button.setAccessibilityLabel("Ai-llowance. " + descriptions.joined(separator: ". "))
@@ -111,11 +115,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
         else if let button = statusItem.button {
             store.setInterfaceVisible(true)
             NSApp.activate(ignoringOtherApps: true)
+            if let controller = popover.contentViewController as? NSHostingController<Dashboard> {
+                controller.rootView = Dashboard(store: store, maximumHeight: (button.window?.screen?.visibleFrame.height ?? 700) - 24) { [weak self] in self?.showAccounts() }
+            }
             popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
             applyWindowAppearance()
             popover.contentViewController?.view.window?.makeKey()
+            constrainPopoverToScreen()
             monitorOutsideClicks()
         }
+    }
+    func popoverDidShow(_ notification: Notification) {
+        constrainPopoverToScreen()
+        if let popoverWindow = popover.contentViewController?.view.window {
+            popoverResizeObserver = NotificationCenter.default.addObserver(forName: NSWindow.didResizeNotification, object: popoverWindow, queue: .main) { [weak self] _ in
+                Task { @MainActor in self?.constrainPopoverToScreen() }
+            }
+        }
+    }
+    private func constrainPopoverToScreen() {
+        guard popover.isShown, let panel = popover.contentViewController?.view.window,
+              let screen = statusItem.button?.window?.screen ?? panel.screen else { return }
+        let available = screen.visibleFrame.insetBy(dx: 6, dy: 6)
+        let origin = PopoverPlacement.origin(for: panel.frame, inside: available)
+        if panel.frame.origin != origin { panel.setFrameOrigin(origin) }
     }
     private func closePopover() { popover.performClose(nil); removeClickMonitors(); store.setInterfaceVisible(hasVisibleSettings) }
     private func monitorOutsideClicks() {
@@ -141,7 +164,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
         if let outsideClickMonitor { NSEvent.removeMonitor(outsideClickMonitor); self.outsideClickMonitor = nil }
         if let localClickMonitor { NSEvent.removeMonitor(localClickMonitor); self.localClickMonitor = nil }
     }
-    func popoverDidClose(_ notification: Notification) { removeClickMonitors(); store.setInterfaceVisible(hasVisibleSettings) }
+    func popoverDidClose(_ notification: Notification) {
+        if let popoverResizeObserver { NotificationCenter.default.removeObserver(popoverResizeObserver); self.popoverResizeObserver = nil }
+        removeClickMonitors(); store.setInterfaceVisible(hasVisibleSettings) }
     private var hasVisibleSettings: Bool {
         window?.isVisible == true && window?.isMiniaturized != true && !NSApp.isHidden
     }
@@ -162,7 +187,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
             })
             let created = NSWindow(contentViewController: controller)
             created.title = "Ai-llowance · Dashboard"; created.styleMask = [.titled, .closable, .miniaturizable, .resizable]
-            created.setContentSize(NSSize(width: 680, height: 750)); created.center()
+            created.setContentSize(NSSize(width: 980, height: 536)); created.center()
             created.isReleasedWhenClosed = false; created.delegate = self; window = created
         }
         applyWindowAppearance()

@@ -7,6 +7,19 @@ import UserNotifications
 
 @MainActor
 final class AppStore: ObservableObject {
+    @Published private(set) var refreshMinutes = UserDefaults.standard.integer(forKey: "refreshMinutes")
+    func refreshInterval(for kind: ConnectionKind, visible: Bool, lowPower: Bool) -> TimeInterval {
+        max(kind.refreshInterval(visible: visible, lowPower: lowPower), [5, 15, 30].contains(refreshMinutes) ? Double(refreshMinutes * 60) : 0)
+    }
+    func setRefreshMinutes(_ minutes: Int) {
+        guard !demo, !readOnly, [0, 5, 15, 30].contains(minutes) else { return }
+        refreshMinutes = minutes
+        UserDefaults.standard.set(minutes, forKey: "refreshMinutes")
+        for account in accounts {
+            schedules[account.id]?.adjustHealthyInterval(refreshInterval(for: account.kind, visible: interfaceVisible, lowPower: ProcessInfo.processInfo.isLowPowerModeEnabled))
+        }
+        scheduleHeartbeat()
+    }
     @Published var accounts: [Account] = []
     @Published var snapshots: [UUID: Snapshot] = [:]
     @Published var errors: [UUID: String] = [:]
@@ -164,6 +177,7 @@ final class AppStore: ObservableObject {
     }
     func setTheme(_ value: AppTheme) { updateMenu { $0.theme = value } }
     func setDetailedQuotaLabels(_ value: Bool) { updateMenu { $0.detailedQuotaLabels = value } }
+    func setColorByAllowance(_ value: Bool) { updateMenu { $0.colorByAllowance = value } }
     func setShowAccountNames(_ value: Bool) { updateMenu { $0.showAccountNames = value } }
     func setMenuDisplay(_ value: MenuDisplay) { updateMenu { $0.display = value } }
     func setMenuAggregation(_ value: MenuAggregation) { updateMenu { $0.aggregation = value } }
@@ -392,6 +406,17 @@ final class AppStore: ObservableObject {
         guard let identity = snapshots[account.id]?.identity?.lowercased(), !identity.isEmpty else { return nil }
         return accounts.first { $0.id != account.id && $0.kind == account.kind && snapshots[$0.id]?.identity?.lowercased() == identity }?.name
     }
+    func setAccountAppearance(_ account: Account, name: String, menu: String?, dashboard: String?, graph: String?) -> Bool {
+        let name = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !demo, !readOnly, !name.isEmpty, name.utf8.count <= 4096,
+              [menu, dashboard, graph].compactMap({ $0 }).allSatisfy({ $0.range(of: "^[0-9A-Fa-f]{6}$", options: .regularExpression) != nil }),
+              let index = accounts.firstIndex(where: { $0.id == account.id }) else { return false }
+        let old = accounts[index]
+        accounts[index].name = name
+        accounts[index].menuColorHex = menu; accounts[index].dashboardColorHex = dashboard; accounts[index].graphColorHex = graph
+        do { try persist(); return true }
+        catch { accounts[index] = old; notice = "Could not save account appearance."; return false }
+    }
     func rename(_ account: Account, to name: String) {
         guard name.utf8.count <= 4096, let index = accounts.firstIndex(where: { $0.id == account.id }), !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
         let old = accounts[index].name
@@ -490,7 +515,7 @@ final class AppStore: ObservableObject {
                     snapshots[account.id] = snapshot; errors[account.id] = nil; authenticationRequired.remove(account.id)
                     cachedAccounts.remove(account.id)
                     if let currentAccount = accounts.first(where: { $0.id == account.id }) { saveCachedReading(snapshot, account: currentAccount) }
-                    schedule.succeeded(at: Date(), interval: account.kind.refreshInterval(visible: interfaceVisible, lowPower: ProcessInfo.processInfo.isLowPowerModeEnabled))
+                    schedule.succeeded(at: Date(), interval: refreshInterval(for: account.kind, visible: interfaceVisible, lowPower: ProcessInfo.processInfo.isLowPowerModeEnabled))
                     if account.kind == .claudeCode {
                         claudeSignedIn[account.id] = true
                         if notice?.hasPrefix("Finish Claude’s browser sign-in once.") == true { notice = nil }
@@ -632,7 +657,7 @@ final class AppStore: ObservableObject {
         if changed {
             let lowPower = ProcessInfo.processInfo.isLowPowerModeEnabled
             for account in accounts {
-                schedules[account.id]?.adjustHealthyInterval(account.kind.refreshInterval(visible: value, lowPower: lowPower))
+                schedules[account.id]?.adjustHealthyInterval(refreshInterval(for: account.kind, visible: value, lowPower: lowPower))
             }
         }
         if becameVisible { rediscoverTools(); refresh(force: true) }
