@@ -16,7 +16,8 @@ private func weeklyReading(_ remaining: Double, kind: ConnectionKind, sessionRem
     let claude2 = Account(name: "Claude 2", kind: .claudeCode)
     let openAI = Account(name: "OpenAI", kind: .codex)
     let snapshots = [claude1.id: try weeklyReading(4, kind: .claudeCode, sessionRemaining: 2), claude2.id: try weeklyReading(100, kind: .claudeCode), openAI.id: try weeklyReading(80, kind: .codex)]
-    let entries = MenuSummary.entries(accounts: [claude1, claude2, openAI], snapshots: snapshots, unavailable: [], preferences: MenuPreferences(), now: menuTime)
+    var preferences = MenuPreferences(); preferences.display = .byProvider
+    let entries = MenuSummary.entries(accounts: [claude1, claude2, openAI], snapshots: snapshots, unavailable: [], preferences: preferences, now: menuTime)
     #expect(entries.map(\.provider) == [.claude, .openAI])
     #expect(entries.map(\.remainingPercent) == [51, 80])
     #expect(entries.map(\.accountCount) == [2, 1])
@@ -60,7 +61,7 @@ private func weeklyReading(_ remaining: Double, kind: ConnectionKind, sessionRem
     let a = Account(name: "A", kind: .claudeCode)
     let b = Account(name: "B", kind: .claudeCode)
     let reading = try weeklyReading(100, kind: .claudeCode)
-    let prefs = MenuPreferences()
+    var prefs = MenuPreferences(); prefs.display = .byProvider
     let missing = MenuSummary.entries(accounts: [a,b], snapshots: [a.id: reading], unavailable: [], preferences: prefs, now: menuTime)
     #expect(missing.first?.remainingPercent == nil)
     let failed = MenuSummary.entries(accounts: [a,b], snapshots: [a.id: reading,b.id: reading], unavailable: [b.id], preferences: prefs, now: menuTime)
