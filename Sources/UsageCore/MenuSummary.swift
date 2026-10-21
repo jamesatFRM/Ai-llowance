@@ -19,7 +19,7 @@ public enum AppTheme: String, Codable, CaseIterable, Identifiable, Sendable {
 }
 public struct MenuPreferences: Codable, Equatable, Sendable {
     public var theme: AppTheme = .automatic
-    public var display: MenuDisplay = .byProvider
+    public var display: MenuDisplay = .byAccount
     public var aggregation: MenuAggregation = .average
     public var showAccountNames = true
     public var detailedQuotaLabels = false
@@ -31,7 +31,7 @@ public struct MenuPreferences: Codable, Equatable, Sendable {
     public init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
         theme = try values.decodeIfPresent(AppTheme.self, forKey: .theme) ?? .automatic
-        display = try values.decodeIfPresent(MenuDisplay.self, forKey: .display) ?? .byProvider
+        display = try values.decodeIfPresent(MenuDisplay.self, forKey: .display) ?? .byAccount
         aggregation = try values.decodeIfPresent(MenuAggregation.self, forKey: .aggregation) ?? .average
         showAccountNames = try values.decodeIfPresent(Bool.self, forKey: .showAccountNames) ?? true
         detailedQuotaLabels = try values.decodeIfPresent(Bool.self, forKey: .detailedQuotaLabels) ?? false

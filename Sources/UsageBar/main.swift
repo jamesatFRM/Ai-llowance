@@ -90,12 +90,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
                 attachment.attachmentCell = NSTextAttachmentCell(imageCell: image)
                 title.append(NSAttributedString(attachment: attachment))
             }
-            let value = menuValue(entry)
-            let name = store.menuPreferences.showAccountNames && (store.menuPreferences.display == .byAccount || entry.isBalance) ? " \(String(entry.label.prefix(12)))" : ""
+            let value = MenuEntryPresentation.value(entry, preferences: store.menuPreferences)
             let color: NSColor
             if store.menuPreferences.colorByAllowance, !entry.isBalance, let percent = entry.remainingPercent { color = .allowance(percent) }
             else { color = NSColor.accountHex(entry.colorHex) ?? .labelColor }
-            title.append(NSAttributedString(string: "\(name) \(value)", attributes: [.foregroundColor: color]))
+            title.append(NSAttributedString(string: " " + MenuEntryPresentation.title(entry, preferences: store.menuPreferences), attributes: [.foregroundColor: color]))
             descriptions.append(entry.isBalance ? "\(entry.label): \(entry.balanceUSD?.formatted(.currency(code: "USD")) ?? "balance unavailable")"
                 : entry.isUnlimited ? "\(entry.label): unlimited allowance" : entry.remainingPercent == nil
                 ? "\(entry.label): allowance unavailable"
@@ -105,10 +104,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
         button.attributedTitle = title
         button.toolTip = descriptions.joined(separator: "\n") + "\n\(store.menuPreferences.aggregation.title); each account has its own allowance."
         button.setAccessibilityLabel("Ai-llowance. " + descriptions.joined(separator: ". "))
-    }
-    private func menuValue(_ entry: MenuEntry) -> String {
-        if entry.isBalance { return entry.balanceUSD?.formatted(.currency(code: "USD").precision(.fractionLength(0...2))) ?? "—" }
-        return entry.isUnlimited ? "∞" : (entry.remainingPercent.map { "\(Int($0))%" } ?? "—")
     }
     @objc private func togglePopover() {
         if popover.isShown { closePopover() }

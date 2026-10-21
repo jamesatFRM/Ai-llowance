@@ -29,3 +29,27 @@ import UsageCore
     #expect(NSColor.accountHex("not hex") == nil)
     #expect(NSColor.accountHex("33AAFF") != nil)
 }
+
+@MainActor @Test func switchingThemesPreservesAccountsAndMenuChoicesAcrossRestart() async throws {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent("Theme-\(UUID().uuidString)")
+    try Paths.prepare(root)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let store = AppStore(root: root, monitor: false)
+    let account = Account(name: "Work", kind: .codex)
+    store.accounts = [account]
+    store.setMenuDisplay(.byProvider)
+    store.setMenuAggregation(.lowest)
+    store.setAllMenuAccounts(false)
+    store.setMenuAccount(account, included: true)
+    for theme in [AppTheme.light, .dark, .automatic, .dark, .automatic] {
+        store.setTheme(theme)
+        let reloaded = AppStore(root: root, monitor: false)
+        #expect(reloaded.menuPreferences.theme == theme)
+        #expect(reloaded.menuPreferences.display == .byProvider)
+        #expect(reloaded.menuPreferences.aggregation == .lowest)
+        #expect(reloaded.menuPreferences.selectedAccountIDs == [account.id])
+        #expect(reloaded.accounts.first?.id == account.id)
+        await reloaded.shutdown()
+    }
+    await store.shutdown()
+}

@@ -237,7 +237,7 @@ private struct CompactAccountRow: View {
                         Text(account.name).font(.system(size: 12, weight: .semibold)).lineLimit(1)
                         Spacer(minLength: 5)
                         Text(readingValue(snapshot, window: window)).font(.system(size: 13, weight: .semibold, design: .rounded)).monospacedDigit()
-                            .foregroundStyle(error != nil || cached || status.state == .stale || !account.enabled ? Color.secondary : (colorByAllowance && window != nil ? Color(nsColor: .allowance(window!.remainingPercent)) : NSColor.accountHex(account.menuColorHex).map { Color(nsColor: $0) } ?? Color.primary))
+                            .foregroundStyle(error != nil || cached || status.state == .stale || status.state == .restricted || !account.enabled ? Color.secondary : (colorByAllowance && window != nil ? Color(nsColor: .allowance(window!.remainingPercent)) : NSColor.accountHex(account.menuColorHex).map { Color(nsColor: $0) } ?? Color.primary))
                         Image(systemName: expanded ? "chevron.up" : "chevron.down").font(.system(size: 8, weight: .semibold))
                             .foregroundStyle(.secondary).frame(width: 12)
                     }
@@ -245,7 +245,7 @@ private struct CompactAccountRow: View {
                         Text(detail).font(.system(size: 9)).foregroundStyle(error != nil || status.state == .restricted ? Color.orange : Color.secondary).lineLimit(1)
                         Spacer(minLength: 2)
                         if let window {
-                            AllowanceBar(remaining: window.remainingPercent, unavailable: error != nil || cached || status.state == .stale || !account.enabled || status.state == .restricted)
+                            AllowanceBar(remaining: window.remainingPercent, unavailable: error != nil || cached || status.state == .stale || status.state == .restricted || !account.enabled)
                                 .frame(width: 54, height: 3)
                         }
                     }.padding(.leading, 21)
@@ -392,13 +392,7 @@ private enum DashboardSection: String, CaseIterable, Identifiable {
     var id: String { rawValue }
 }
 
-private enum SettingsTab: String, CaseIterable, Identifiable {
-    case accounts, menuBar, behavior, updates, advanced
-    var id: String { rawValue }
-    var title: String { switch self { case .accounts: "Accounts"; case .menuBar: "Menu bar"; case .behavior: "General"; case .updates: "Updates"; case .advanced: "Advanced" } }
-    var symbol: String { switch self { case .accounts: "person.2"; case .menuBar: "menubar.rectangle"; case .behavior: "bell.badge"; case .updates: "arrow.down.circle"; case .advanced: "slider.horizontal.3" } }
-    var subtitle: String { switch self { case .accounts: "Connections, limits, and account access"; case .menuBar: "Choose what appears beside the clock"; case .behavior: "Alerts and startup preferences"; case .updates: "Keep Ai-llowance current"; case .advanced: "Provider links and local diagnostics" } }
-}
+
 private struct AccountReading: View {
     let account: Account
     let snapshot: Snapshot?
@@ -435,6 +429,7 @@ struct AccountsView: View {
     var showMenu: () -> Void
     @ViewState private var selectedKind: ConnectionKind = .claudeCode
     @ViewState private var setupStarted = false
+    @ViewState private var setupExistingIDs: Set<UUID> = []
     @ViewState private var manualConnection = false
     @ViewState private var name = ""
     @ViewState private var secret = ""
@@ -448,7 +443,6 @@ struct AccountsView: View {
     @ViewState private var section: DashboardSection = .history
     @ViewState private var historyHours = 24
     @ViewState private var historyAccountID: UUID?
-    @ViewState private var selectedTab: SettingsTab = .behavior
     @AppStorage("hideFromDock") private var hideFromDock = true
     @ViewState private var handledAccountNavigationVersion: UInt64 = 0
 
@@ -458,7 +452,6 @@ struct AccountsView: View {
             Divider().opacity(0.35)
             VStack(spacing: 0) {
                 VStack(spacing: 0) {
-                    if section == .settings { settingsTabs.padding(12) }
                     if let notice = store.notice {
                         HStack(alignment: .top, spacing: 8) {
                             Label(notice, systemImage: "info.circle")
@@ -486,12 +479,12 @@ struct AccountsView: View {
                                 handledAccountNavigationVersion = store.accountNavigationVersion
                                 section = .accounts
                             }
-                            if store.accounts.isEmpty { section = .accounts }
+                            if store.accounts.isEmpty { section = .overview }
                             store.rediscoverTools(); scrollToSelected(proxy)
                         }
                         .onChange(of: store.accountNavigationVersion) { _, _ in
                             handledAccountNavigationVersion = store.accountNavigationVersion
-                            section = .accounts
+                            if section != .connection { section = .accounts }
                             scrollToSelected(proxy)
                         }
                     }
@@ -569,34 +562,18 @@ struct AccountsView: View {
         guard section == .accounts, let id = store.selectedAccountID else { return }
         DispatchQueue.main.async { proxy.scrollTo(id, anchor: .top) }
     }
-    private var settingsTabs: some View {
-        Picker("Settings", selection: $selectedTab) {
-            ForEach([SettingsTab.behavior, .menuBar, .updates, .advanced]) { tab in Text(tab.title).tag(tab) }
-        }.pickerStyle(.segmented).labelsHidden().frame(maxWidth: 480)
-    }
-    @ViewBuilder private var selectedTabContent: some View {
-        if store.demo { Text("Sample accounts · sign-in is disabled").font(.caption).foregroundStyle(.orange) }
-        switch selectedTab {
-        case .accounts: accountsContent
-        case .menuBar: menuBarSettings
-        case .behavior: behaviorSettings
-        case .updates: UpdateSettings(updater: store.updater)
-        case .advanced:
-            VStack(alignment: .leading, spacing: 12) {
-                SettingsCard {
-                    VStack(alignment: .leading, spacing: 11) {
-                        Label("Advanced connections", systemImage: "slider.horizontal.3").font(.system(size: 13, weight: .semibold))
-                        Text("For API keys, additional providers, or a custom CLI location.").font(.system(size: 10)).foregroundStyle(.secondary)
-                        connectionForm
-                    }
-                }
-                moreConnections
-            }
+    private var selectedTabContent: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            Text("Settings").font(.system(size: 20, weight: .semibold))
+            menuBarSettings
+            behaviorSettings
+            UpdateSettings(updater: store.updater)
+            moreConnections
         }
     }
     @ViewBuilder private var accountsContent: some View {
             HStack {
-                Button { section = .history } label: { Label("All accounts", systemImage: "chevron.left") }.buttonStyle(QuietButtonStyle())
+                Button { section = .overview } label: { Label("Back to Accounts", systemImage: "chevron.left") }.buttonStyle(QuietButtonStyle())
                 Spacer()
             }
             if store.accounts.isEmpty { connectionSetup }
@@ -647,24 +624,34 @@ struct AccountsView: View {
                     }
                     Spacer(minLength: 0)
                 }
-                HStack(spacing: 6) {
-                    Text(accounts.isEmpty ? "Not connected" : "\(accounts.count) account\(accounts.count == 1 ? "" : "s") added")
-                        .font(.system(size: 10)).foregroundStyle(.secondary)
+                if accounts.isEmpty {
+                    Text("No accounts yet").font(.system(size: 10)).foregroundStyle(.secondary)
+                } else {
+                    ForEach(accounts) { account in
+                        Button { store.selectedAccountID = account.id; section = .accounts } label: {
+                            HStack(spacing: 5) {
+                                Image(systemName: "person.crop.circle")
+                                Text(account.expectedIdentity ?? store.snapshots[account.id]?.identity ?? account.name)
+                                    .lineLimit(1).truncationMode(.middle)
+                                Spacer(minLength: 0)
+                                Image(systemName: "chevron.right").font(.system(size: 8))
+                            }.font(.system(size: 11)).padding(.vertical, 3).contentShape(Rectangle())
+                        }.buttonStyle(.plain).help(account.expectedIdentity ?? account.name)
+                    }
+                }
+                HStack {
+                    if let recommended {
+                        Button("Open") { store.useAccount(recommended) }.controlSize(.small).disabled(store.demo)
+                    }
                     Spacer(minLength: 0)
-                    if !accounts.isEmpty {
-                        Button(recommended != nil && !kind.isAPI ? "Open" : "Manage") {
-                            if let recommended, !kind.isAPI { store.useAccount(recommended) }
-                            else { section = .accounts }
-                        }.controlSize(.small).disabled(store.demo)
-                        Button { connectService(kind) } label: { Image(systemName: "plus") }
-                            .controlSize(.small).help("Add another \(title) account")
-                            .accessibilityLabel("Add another \(title) account")
-                            .disabled(busyConnecting || store.demo)
+                    if kind == .copilot && !accounts.isEmpty {
+                        Text("Uses the current CLI account").font(.system(size: 10)).foregroundStyle(.secondary)
                     } else {
-                        Button("Connect") { connectService(kind) }
+                        Button(accounts.isEmpty ? "Connect" : "Add another account") { connectService(kind) }
                             .controlSize(.small).disabled(busyConnecting || store.demo)
                     }
                 }
+
             }
         }
     }
@@ -692,10 +679,14 @@ struct AccountsView: View {
                     if selectedKind == .claudeCode || selectedKind == .codex {
                         guard executable(for: selectedKind) != nil else { NSWorkspace.shared.open(installationURL(selectedKind)); return }
                         let existing = store.accounts.contains { $0.kind == selectedKind && (selectedKind == .claudeCode ? $0.usesExistingClaude == true : $0.usesExistingCodex) }
-                        setupStarted = true
+                        setupExistingIDs = Set(store.accounts.map(\.id)); setupStarted = true
                         if selectedKind == .claudeCode { store.connectClaude(existing: !existing) }
                         else { store.connectOpenAI(existing: !existing) }
-                    } else if selectedKind == .copilot { store.connectCopilot() }
+                    } else if selectedKind == .copilot {
+                        guard executable(for: .copilot) != nil else { NSWorkspace.shared.open(installationURL(.copilot)); return }
+                        setupExistingIDs = []; setupStarted = true
+                        store.connectCopilot()
+                    }
                     else {
                         NSWorkspace.shared.open(selectedKind == .xai ? URL(string: "https://console.x.ai")! : selectedKind.documentation)
                         manualConnection = true
@@ -710,18 +701,24 @@ struct AccountsView: View {
                 }
             }.frame(maxWidth: .infinity).padding(.vertical, 12)
             setupProgress
+            if selectedKind == .claudeCode || selectedKind == .codex {
+                Text("Adding another account? Use a separate browser profile or private window and check the email before signing in.")
+                    .font(.system(size: 11)).foregroundStyle(.secondary)
+            }
             DisclosureGroup("Manual setup & advanced options", isExpanded: $manualConnection) {
                 connectionForm.padding(.top, 12)
             }.font(.system(size: 12)).padding(16)
                 .background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 12))
         }.frame(maxWidth: 520).frame(maxWidth: .infinity).padding(.top, 8)
     }
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @ViewState private var historyWidth: CGFloat = 800
+    private var visibleHistoryAccounts: [Account] { store.accounts.filter { historyAccountID == nil || $0.id == historyAccountID } }
     private var historyContent: some View {
         VStack(alignment: .leading, spacing: 12) {
             if store.accounts.isEmpty { Text("Connect an account to start collecting history.").foregroundStyle(.secondary) }
-            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 12), count: min(4, max(1, Int((historyWidth + 16) / 280)))), spacing: 12) {
-            ForEach(store.accounts.filter { historyAccountID == nil || $0.id == historyAccountID }) { account in
+            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 12), count: max(1, min(4, visibleHistoryAccounts.count, max(1, Int((historyWidth + 12) / 240))))), spacing: 12) {
+            ForEach(visibleHistoryAccounts) { account in
                 let points = store.history(for: account).filter { $0.timestamp >= store.now.addingTimeInterval(-Double(historyHours) * 3600) }
                 HistoryCard(account: account, points: points, snapshot: store.snapshots[account.id],
                             error: store.errors[account.id] != nil, cached: store.isCached(account), now: store.now,
@@ -730,7 +727,9 @@ struct AccountsView: View {
             }
             ActivityHeatmap(accounts: store.accounts.filter { historyAccountID == nil || $0.id == historyAccountID },
                             histories: Dictionary(uniqueKeysWithValues: store.accounts.map { ($0.id, store.history(for: $0)) }), now: store.now)
-        }.background(GeometryReader { geometry in
+        }.animation(reduceMotion ? nil : .easeInOut(duration: 0.25), value: historyAccountID)
+        .animation(reduceMotion ? nil : .easeInOut(duration: 0.25), value: visibleHistoryAccounts.map(\.id))
+        .background(GeometryReader { geometry in
             Color.clear.onAppear { historyWidth = geometry.size.width }
                 .onChange(of: geometry.size.width) { _, width in historyWidth = width }
         }).onChange(of: store.accounts.map(\.id)) { _, ids in
@@ -738,7 +737,7 @@ struct AccountsView: View {
         }
     }
     private var busyConnecting: Bool { store.connectingClaude || store.signingIn != nil || !store.waitingForClaude.isEmpty }
-    private var setupAccount: Account? { store.accounts.last { $0.kind == selectedKind } }
+    private var setupAccount: Account? { store.accounts.last { $0.kind == selectedKind && (!setupStarted || !setupExistingIDs.contains($0.id)) } }
     private var connectionSetup: some View {
         SettingsCard {
             VStack(alignment: .leading, spacing: 12) {
@@ -748,7 +747,7 @@ struct AccountsView: View {
                 simpleProviderButton(.codex)
                 setupProgress
                 agentHelpMenu
-                Button("Other providers, API keys, or CLI setup…") { section = .settings; selectedTab = .advanced }
+                Button("Other providers, API keys, or CLI setup…") { section = .overview }
                     .buttonStyle(.plain).font(.system(size: 10, weight: .medium)).foregroundStyle(Color.accentColor)
             }
         }
@@ -761,7 +760,7 @@ struct AccountsView: View {
                 simpleProviderButton(.codex)
                 setupProgress
                 agentHelpMenu
-                Button("More providers and API keys…") { section = .settings; selectedTab = .advanced }
+                Button("More providers and API keys…") { section = .overview }
                     .buttonStyle(.plain).font(.system(size: 10, weight: .medium)).foregroundStyle(Color.accentColor)
             }
         }
@@ -800,12 +799,7 @@ struct AccountsView: View {
         let installed = executable(for: kind) != nil
         let existing = store.accounts.contains { $0.kind == kind && (kind == .claudeCode ? $0.usesExistingClaude == true : $0.usesExistingCodex) }
         Button {
-            guard installed else { NSWorkspace.shared.open(installationURL(kind)); return }
-            section = .accounts
-            selectedKind = kind
-            setupStarted = true
-            if kind == .claudeCode { store.connectClaude(existing: !existing) }
-            else { store.connectOpenAI(existing: !existing) }
+            connectService(kind)
         } label: {
             HStack(spacing: 10) {
                 ProviderMark(provider: kind.provider, size: 26)
@@ -1128,17 +1122,36 @@ struct AccountsView: View {
                         }.pickerStyle(.segmented).labelsHidden().frame(width: 240)
                     }
                     Divider()
-                    Toggle("Show detailed quota labels", isOn: Binding(get: { store.menuPreferences.detailedQuotaLabels }, set: { store.setDetailedQuotaLabels($0) }))
+                    VStack(alignment: .leading, spacing: 6) {
+                        Toggle("Show all quota windows in the dropdown", isOn: Binding(get: { store.menuPreferences.detailedQuotaLabels }, set: { store.setDetailedQuotaLabels($0) }))
+                        Text("Show each subscription limit below the account name, such as “5h session 80% · Week 60%”. When off, show the limiting window and its reset time.")
+                            .font(.system(size: 11)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                    }
                 }.padding(10)
             }
             GroupBox("Menu bar") {
                 VStack(alignment: .leading, spacing: 12) {
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 14) {
+                            if store.menuEntries.isEmpty { Label("Usage", systemImage: "chart.bar") }
+                            ForEach(Array(store.menuEntries.enumerated()), id: \.offset) { _, entry in
+                                HStack(spacing: 4) {
+                                    ProviderMark(provider: entry.provider, size: 13)
+                                    Text(MenuEntryPresentation.title(entry, preferences: store.menuPreferences))
+                                        .foregroundStyle(store.menuPreferences.colorByAllowance && !entry.isBalance && entry.remainingPercent != nil ? Color(nsColor: .allowance(entry.remainingPercent!)) : NSColor.accountHex(entry.colorHex).map { Color(nsColor: $0) } ?? Color.primary)
+                                }
+                            }
+                        }.font(.system(size: 12, weight: .medium)).monospacedDigit().padding(12)
+                    }.background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 9))
+                    Text("Live menu-bar preview").font(.system(size: 10)).foregroundStyle(.secondary)
+                    Divider()
+
                     HStack {
                         Text("Display")
                         Spacer()
                         Picker("Display", selection: Binding(get: { store.menuPreferences.display }, set: { store.setMenuDisplay($0) })) {
                             ForEach(MenuDisplay.allCases) { mode in Text(mode.title).tag(mode) }
-                        }.labelsHidden().frame(width: 190)
+                        }.pickerStyle(.segmented).labelsHidden().frame(width: 300)
                     }
                     if store.menuPreferences.display == .byAccount {
                         Toggle("Show account names", isOn: Binding(get: { store.menuPreferences.showAccountNames }, set: { store.setShowAccountNames($0) }))
@@ -1162,7 +1175,7 @@ struct AccountsView: View {
                             Toggle(account.name, isOn: Binding(get: { store.menuPreferences.selectedAccountIDs.contains(account.id) }, set: { store.setMenuAccount(account, included: $0) })).toggleStyle(.checkbox)
                         }
                     }
-                    Text("API credit balances appear as dollar amounts.").font(.callout).foregroundStyle(.secondary)
+                    Text("Grouped percentages combine accounts; API credit balances stay separate.").font(.callout).foregroundStyle(.secondary)
                 }.padding(10)
             }
         }.font(.system(size: 13)).toggleStyle(.switch).controlSize(.regular).disabled(store.demo)
