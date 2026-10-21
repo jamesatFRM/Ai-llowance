@@ -1310,20 +1310,20 @@ private struct CombinedHistoryChart: View {
                                 .lineStyle(StrokeStyle(lineWidth: 1, dash: [3, 3]))
                         }
                         ForEach(shownAccounts) { account in
-                            let readings = samples(account)
+                            let readings = HistorySeries.smoothTrend(samples(account))
                             let counts = Dictionary(grouping: readings, by: \.segment).mapValues(\.count)
                             ForEach(readings) { sample in
                                 let group = account.id.uuidString + ":" + String(sample.segment)
                                 AreaMark(x: .value("Time", sample.timestamp), yStart: .value("Baseline", 0), yEnd: .value(chartTitle, sample.value), series: .value("Account period", group))
-                                    .foregroundStyle(LinearGradient(colors: [tint(account).opacity(0.18), tint(account).opacity(0.01)], startPoint: .top, endPoint: .bottom))
+                                    .foregroundStyle(LinearGradient(colors: [tint(account).opacity(0.08), tint(account).opacity(0)], startPoint: .top, endPoint: .bottom))
                                     .interpolationMethod(.monotone)
                                 LineMark(x: .value("Time", sample.timestamp), y: .value(chartTitle, sample.value), series: .value("Account period", group))
-                                    .foregroundStyle(tint(account).opacity(0.12))
-                                    .lineStyle(StrokeStyle(lineWidth: 8, lineCap: .round, lineJoin: .round))
+                                    .foregroundStyle(tint(account).opacity(0.055))
+                                    .lineStyle(StrokeStyle(lineWidth: 5, lineCap: .round, lineJoin: .round))
                                     .interpolationMethod(.monotone)
                                 LineMark(x: .value("Time", sample.timestamp), y: .value(chartTitle, sample.value), series: .value("Account period", group + ":line"))
                                     .foregroundStyle(tint(account))
-                                    .lineStyle(StrokeStyle(lineWidth: 2.5, lineCap: .round, lineJoin: .round))
+                                    .lineStyle(StrokeStyle(lineWidth: 2.2, lineCap: .round, lineJoin: .round))
                                     .interpolationMethod(.monotone)
                                 if sample.id == readings.last?.id || counts[sample.segment] == 1 {
                                     PointMark(x: .value("Time", sample.timestamp), y: .value(chartTitle, sample.value))
@@ -1386,7 +1386,7 @@ private struct CombinedHistoryChart: View {
                             .background(tint(account).opacity(0.07), in: RoundedRectangle(cornerRadius: 7))
                     }
                 }
-                Text(inspectedTime.map { "Readings near " + $0.formatted(date: .abbreviated, time: .shortened) } ?? (consumptionMode ? "Observed use only · Resets and unmeasured gaps excluded · Hover or click to inspect" : "Recorded time shown · Gaps mark pauses or resets · Hover or click to inspect"))
+                Text(inspectedTime.map { "Readings near " + $0.formatted(date: .abbreviated, time: .shortened) } ?? (consumptionMode ? "Smoothed trend · Gaps excluded · Hover or click for exact readings" : "Smoothed trend · Gaps mark pauses or resets · Hover or click for exact readings"))
                     .font(.system(size: 10)).foregroundStyle(.secondary)
             }
         }
@@ -1422,7 +1422,7 @@ private struct HistoryCard: View {
     private var plotted: [UsageHistoryPoint] { points.filter { value($0) != nil } }
     private var samples: [HistorySample] { HistorySeries.samples(points, kind: account.kind) }
     var body: some View {
-        let series = samples
+        let series = HistorySeries.smoothTrend(samples)
         let segmentCounts = Dictionary(grouping: series, by: \.segment).mapValues(\.count)
         SettingsCard(inset: 10) {
             VStack(alignment: .leading, spacing: 6) {
@@ -1452,11 +1452,11 @@ private struct HistoryCard: View {
                     Chart {
                         ForEach(series) { sample in
                             AreaMark(x: .value("Time", sample.timestamp), yStart: .value("Baseline", 0), yEnd: .value(metric, sample.value), series: .value("Period", sample.segment))
-                                .foregroundStyle(LinearGradient(colors: [graphTint.opacity(0.12), graphTint.opacity(0)], startPoint: .top, endPoint: .bottom))
+                                .foregroundStyle(LinearGradient(colors: [graphTint.opacity(0.07), graphTint.opacity(0)], startPoint: .top, endPoint: .bottom))
                                 .interpolationMethod(.monotone)
                             LineMark(x: .value("Time", sample.timestamp), y: .value(metric, sample.value), series: .value("Period", sample.segment))
                                 .foregroundStyle(LinearGradient(colors: [graphTint.opacity(0.75), graphTint], startPoint: .leading, endPoint: .trailing))
-                                .lineStyle(StrokeStyle(lineWidth: 2.8, lineCap: .round, lineJoin: .round))
+                                .lineStyle(StrokeStyle(lineWidth: 2.2, lineCap: .round, lineJoin: .round))
                                 .interpolationMethod(.monotone)
                             if sample.id == series.last?.id || segmentCounts[sample.segment] == 1 {
                                 PointMark(x: .value("Time", sample.timestamp), y: .value(metric, sample.value))
@@ -1480,7 +1480,7 @@ private struct HistoryCard: View {
                     .frame(height: 66).padding(.top, 2)
                     if let last = plotted.last {
                         HStack {
-                            Text("History")
+                            Text("Smoothed history")
                             Spacer()
                             Text(last.timestamp, format: .dateTime.month(.abbreviated).day().hour().minute())
                         }.font(.system(size: 10)).foregroundStyle(.secondary)

@@ -43,3 +43,20 @@ import Testing
     #expect(result.map(\.timestamp) == samples.map(\.timestamp))
     #expect(HistorySeries.consumption([]).isEmpty)
 }
+
+@Test func smoothedHistoryPreservesBoundariesAndStaysWithinObservedRange() {
+    let start = Date()
+    let values: [(Double, Int)] = [(0, 0), (0, 0), (0, 0), (10, 0), (10, 0), (10, 0), (100, 1), (100, 1)]
+    let raw = values.enumerated().map { index, item in
+        HistorySample(timestamp: start.addingTimeInterval(Double(index) * 300), value: item.0, segment: item.1)
+    }
+    let smooth = HistorySeries.smoothTrend(raw)
+    #expect(smooth[2].value > 0 && smooth[2].value < 10)
+    #expect(smooth[3].value > 0 && smooth[3].value < 10)
+    #expect(smooth[0].value == 0 && smooth[5].value == 10)
+    #expect(smooth[6].value == 100 && smooth[7].value == 100)
+    #expect(smooth.map(\.segment) == raw.map(\.segment))
+    #expect(smooth.map(\.timestamp) == raw.map(\.timestamp))
+    #expect(smooth.prefix(6).allSatisfy { (0...10).contains($0.value) })
+    #expect(HistorySeries.smoothTrend([]).isEmpty)
+}
