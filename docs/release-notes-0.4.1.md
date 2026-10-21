@@ -1,20 +1,15 @@
-# Ai-llowance 0.4.1 — A more refined workspace
+# Ai-llowance 0.4.1 (build 223)
 
-- History is now the dashboard home, with compact top navigation, a chart-first responsive grid of up to four cards per row, and a slim header with full-width content.
-- Charts use a clean stroke, subtle fill, and latest-reading marker. Missing data, changed quota windows, restored allowance, and billing rollovers stay separate instead of being joined into misleading lines.
-- Connected Claude and Codex accounts hide their setup prompt; sign-in help remains available when needed.
-- The menu popover is kept within the active screen’s usable bounds when it opens or resizes. Its height adapts to the screen and routine launch notices no longer crowd it.
-- The 24-hour / seven-day history filter is a larger segmented control.
+A compact dashboard and simpler account setup, with more control over how your allowance appears.
 
-History stays local and bounded. No new polling, background service, or dependency was added.
+- **Usage dashboard:** account tiles combine status, allowance, reset timing, and history. A responsive grid fits up to four tiles across.
+- **Seven-day heatmap:** see when recorded subscription allowance consumption is heaviest. Missing intervals remain distinct from measured quiet periods; this is not a measure of coding hours.
+- **Simpler connections:** a compact provider catalog, a dedicated setup page, a clear back button, and manual options tucked into a disclosure. API providers still require their supported keys; xAI setup opens its console rather than claiming one-click authorization.
+- **Personalization:** rename accounts and apply custom colors to the menu, dashboard, graphs, or all three. Optional menu colors shift from white at full allowance to red at zero.
+- **Native settings:** launch at login, Dock visibility, refresh intervals, notifications, and feedback, with clearer grouped controls.
+- **Refined appearance:** neutral glass surfaces, provider accents, compact navigation, and cleaner charts. History gaps and quota resets are not joined into misleading lines.
+- **Menu fixes:** screen-aware placement and sizing keep the popover within usable screen bounds. Verified connections no longer show setup prompts.
+
+History stays local and bounded. No new background service or dependency was added.
 
 Release artwork is an illustration, not an application screenshot.
-
-The dashboard and menu share navy surfaces, mint OpenAI accents, warm Claude accents, and amber attention states.
-
-- Account tiles now combine current status, identity, allowance, reset timing, history, and direct actions.
-- A rolling seven-day hourly heatmap shows relative recorded subscription allowance consumption, with missing intervals distinguished from measured quiet periods. This is not a measure of coding hours; API dollars are excluded.
-
-- Native grouped settings add Dock visibility, refresh interval choices, and a feedback link alongside launch-at-login and notifications.
-- Rename accounts and choose a custom accent for the menu, dashboard, and/or graph.
-- Optional menu allowance colors progress from white at 100% through cool and warm colors to red at 0%. Unavailable readings stay neutral.

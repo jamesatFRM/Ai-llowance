@@ -1332,15 +1332,7 @@ private struct ActivityHeatmap: View {
                         GridRow {
                             Text(day, format: .dateTime.weekday(.abbreviated).day()).font(.system(size: 10)).foregroundStyle(.secondary).frame(width: 62, alignment: .leading)
                             ForEach(0..<24) { hour in
-                                let matching = buckets.filter { calendar.isDate($0.key, inSameDayAs: day) && calendar.component(.hour, from: $0.key) == hour }
-                                let value: Double? = matching.isEmpty ? nil : matching.values.reduce(0, +)
-                                let strength = value.map { peak > 0 ? sqrt($0 / peak) : 0 } ?? 0
-                                RoundedRectangle(cornerRadius: 3)
-                                    .fill(value == nil ? Color.primary.opacity(0.025) : Brand.cyan.opacity(0.12 + strength * 0.88))
-                                    .overlay(RoundedRectangle(cornerRadius: 3).strokeBorder(Color.primary.opacity(value == nil ? 0.08 : 0), lineWidth: 0.5))
-                                    .frame(maxWidth: .infinity).frame(height: 12)
-                                    .help("\(day.formatted(date: .abbreviated, time: .omitted)) · \(hour):00 · " + (value.map { String(format: "%.1f allowance percentage points consumed", $0) } ?? "No measured interval"))
-                                    .accessibilityLabel("\(day.formatted(date: .abbreviated, time: .omitted)), hour \(hour), " + (value.map { String(format: "%.1f allowance points consumed", $0) } ?? "Not measured"))
+                                heatmapCell(day: day, hour: hour, buckets: buckets, peak: peak)
                             }
                         }
                     }
@@ -1355,6 +1347,18 @@ private struct ActivityHeatmap: View {
             }
         }
     }
+    private func heatmapCell(day: Date, hour: Int, buckets: [Date: Double], peak: Double) -> some View {
+                                let matching = buckets.filter { calendar.isDate($0.key, inSameDayAs: day) && calendar.component(.hour, from: $0.key) == hour }
+                                let value: Double? = matching.isEmpty ? nil : matching.values.reduce(0, +)
+                                let strength = value.map { peak > 0 ? sqrt($0 / peak) : 0 } ?? 0
+                                return RoundedRectangle(cornerRadius: 3)
+                                    .fill(value == nil ? Color.primary.opacity(0.025) : Brand.cyan.opacity(0.12 + strength * 0.88))
+                                    .overlay(RoundedRectangle(cornerRadius: 3).strokeBorder(Color.primary.opacity(value == nil ? 0.08 : 0), lineWidth: 0.5))
+                                    .frame(maxWidth: .infinity).frame(height: 12)
+                                    .help("\(day.formatted(date: .abbreviated, time: .omitted)) · \(hour):00 · " + (value.map { String(format: "%.1f allowance percentage points consumed", $0) } ?? "No measured interval"))
+                                    .accessibilityLabel("\(day.formatted(date: .abbreviated, time: .omitted)), hour \(hour), " + (value.map { String(format: "%.1f allowance points consumed", $0) } ?? "Not measured"))
+    }
+
 }
 
 
