@@ -442,6 +442,7 @@ struct AccountsView: View {
     @ViewState private var replacement = ""
     @ViewState private var section: DashboardSection = .history
     @ViewState private var historyHours = 24
+    @AppStorage("combinedUsageChart") private var combinedUsageChart = true
     @ViewState private var historyAccountID: UUID?
     @AppStorage("hideFromDock") private var hideFromDock = true
     @ViewState private var handledAccountNavigationVersion: UInt64 = 0
@@ -716,13 +717,27 @@ struct AccountsView: View {
     private var visibleHistoryAccounts: [Account] { store.accounts.filter { historyAccountID == nil || $0.id == historyAccountID } }
     private var historyContent: some View {
         VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Text(combinedUsageChart ? "Account comparison" : "Account history").font(.system(size: 13, weight: .semibold))
+                Spacer()
+                Picker("Chart layout", selection: $combinedUsageChart) {
+                    Text("Together").tag(true)
+                    Text("Separate").tag(false)
+                }.pickerStyle(.segmented).labelsHidden().frame(width: 180)
+            }
             if store.accounts.isEmpty { Text("Connect an account to start collecting history.").foregroundStyle(.secondary) }
+            if combinedUsageChart {
+                CombinedHistoryChart(accounts: visibleHistoryAccounts, accountOrder: store.accounts.map(\.id),
+                    histories: Dictionary(uniqueKeysWithValues: visibleHistoryAccounts.map { ($0.id, store.history(for: $0)) }),
+                    now: store.now, hours: historyHours)
+            } else {
             LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 12), count: max(1, min(4, visibleHistoryAccounts.count, max(1, Int((historyWidth + 12) / 240))))), spacing: 12) {
             ForEach(visibleHistoryAccounts) { account in
                 let points = store.history(for: account).filter { $0.timestamp >= store.now.addingTimeInterval(-Double(historyHours) * 3600) }
                 HistoryCard(account: account, points: points, snapshot: store.snapshots[account.id],
                             error: store.errors[account.id] != nil, cached: store.isCached(account), now: store.now,
                             openUsage: { store.openUsage(account) }, manage: { renaming = account })
+            }
             }
             }
             ActivityHeatmap(accounts: store.accounts.filter { historyAccountID == nil || $0.id == historyAccountID },
@@ -1205,6 +1220,125 @@ private struct UpdateSettings: View {
                     .toggleStyle(.switch).controlSize(.regular).font(.system(size: 13)).disabled(!updater.canCheck)
                 Text("Updates install when you choose. Your accounts stay on this Mac.").font(.system(size: 12)).foregroundStyle(.secondary)
             }.padding(10)
+        }
+    }
+}
+
+private enum ComparisonMetric: String, CaseIterable, Identifiable {
+    case allowance = "Allowance", balance = "Credits", spending = "Spending"
+    var id: String { rawValue }
+    var title: String {
+        switch self {
+        case .allowance: "Allowance remaining (%)"
+        case .balance: "Credit balance (USD)"
+        case .spending: "Month-to-date spending (USD)"
+        }
+    }
+    func includes(_ account: Account) -> Bool {
+        switch self {
+        case .allowance: !account.kind.isAPI
+        case .balance: account.kind.isBalance
+        case .spending: account.kind.isAPI && !account.kind.isBalance
+        }
+    }
+}
+
+private struct CombinedHistoryChart: View {
+    let accounts: [Account]
+    let accountOrder: [UUID]
+    let histories: [UUID: [UsageHistoryPoint]]
+    let now: Date
+    let hours: Int
+    @ViewState private var selectedMetric: ComparisonMetric = .allowance
+    private var availableMetrics: [ComparisonMetric] { ComparisonMetric.allCases.filter { metric in accounts.contains(where: metric.includes) } }
+    private var metric: ComparisonMetric { availableMetrics.contains(selectedMetric) ? selectedMetric : availableMetrics.first ?? .allowance }
+    private var shownAccounts: [Account] { accounts.filter(metric.includes) }
+    private var start: Date { now.addingTimeInterval(-Double(hours) * 3600) }
+    private let palette: [Color] = [.cyan, Color(red: 1, green: 0.54, blue: 0.38), .purple, .mint, .pink, .yellow]
+    private func tint(_ account: Account) -> Color {
+        NSColor.accountHex(account.graphColorHex).map { Color(nsColor: $0) } ?? palette[(accountOrder.firstIndex(of: account.id) ?? 0) % palette.count]
+    }
+    private func samples(_ account: Account) -> [HistorySample] {
+        HistorySeries.samples((histories[account.id] ?? []).filter { $0.timestamp >= start && $0.timestamp <= now }, kind: account.kind)
+    }
+    var body: some View {
+        let series = shownAccounts.map { (account: $0, samples: samples($0)) }
+        let maximum = series.flatMap { $0.samples.map(\.value) }.max() ?? 1
+        SettingsCard(inset: 12) {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack {
+                    Text(metric.title).font(.system(size: 12, weight: .medium)).foregroundStyle(.secondary)
+                    Spacer()
+                    if availableMetrics.count > 1 {
+                        Picker("Compare", selection: $selectedMetric) {
+                            ForEach(availableMetrics) { Text($0.rawValue).tag($0) }
+                        }.pickerStyle(.segmented).labelsHidden().frame(width: 260)
+                    }
+                }
+                if series.allSatisfy({ $0.samples.isEmpty }) {
+                    ContentUnavailableView("No readings yet", systemImage: "chart.xyaxis.line", description: Text("History appears as this Mac refreshes your accounts."))
+                        .frame(height: 104)
+                } else {
+                    Chart {
+                        ForEach(shownAccounts) { account in
+                            let readings = samples(account)
+                            let counts = Dictionary(grouping: readings, by: \.segment).mapValues(\.count)
+                            ForEach(readings) { sample in
+                                let group = account.id.uuidString + ":" + String(sample.segment)
+                                AreaMark(x: .value("Time", sample.timestamp), yStart: .value("Baseline", 0), yEnd: .value(metric.title, sample.value), series: .value("Account period", group))
+                                    .foregroundStyle(LinearGradient(colors: [tint(account).opacity(0.18), tint(account).opacity(0.01)], startPoint: .top, endPoint: .bottom))
+                                    .interpolationMethod(.monotone)
+                                LineMark(x: .value("Time", sample.timestamp), y: .value(metric.title, sample.value), series: .value("Account period", group))
+                                    .foregroundStyle(tint(account).opacity(0.12))
+                                    .lineStyle(StrokeStyle(lineWidth: 8, lineCap: .round, lineJoin: .round))
+                                    .interpolationMethod(.monotone)
+                                LineMark(x: .value("Time", sample.timestamp), y: .value(metric.title, sample.value), series: .value("Account period", group + ":line"))
+                                    .foregroundStyle(tint(account))
+                                    .lineStyle(StrokeStyle(lineWidth: 2.5, lineCap: .round, lineJoin: .round))
+                                    .interpolationMethod(.monotone)
+                                if sample.id == readings.last?.id || counts[sample.segment] == 1 {
+                                    PointMark(x: .value("Time", sample.timestamp), y: .value(metric.title, sample.value))
+                                        .foregroundStyle(tint(account)).symbolSize(24)
+                                }
+                            }
+                        }
+                    }
+                    .chartXScale(domain: start...now)
+                    .chartYScale(domain: 0...(metric == .allowance ? 100 : max(1, maximum * 1.08)))
+                    .chartXAxis {
+                        AxisMarks(values: .automatic(desiredCount: 6)) {
+                            AxisValueLabel(format: .dateTime.day().hour(.defaultDigits(amPM: .abbreviated)))
+                        }
+                    }
+                    .chartYAxis {
+                        AxisMarks(position: .leading, values: .automatic(desiredCount: 4)) {
+                            AxisGridLine(stroke: StrokeStyle(lineWidth: 0.5, dash: [3, 5])).foregroundStyle(Color.primary.opacity(0.10))
+                            AxisValueLabel()
+                        }
+                    }
+                    .chartPlotStyle { plot in
+                        plot.background(LinearGradient(colors: [Color.primary.opacity(0.025), .clear], startPoint: .top, endPoint: .bottom))
+                    }
+                    .frame(height: 104)
+                }
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 170), alignment: .leading)], alignment: .leading, spacing: 10) {
+                    ForEach(shownAccounts) { account in
+                        HStack(spacing: 7) {
+                            Circle().fill(tint(account)).frame(width: 7, height: 7)
+                            Text(account.name).lineLimit(1)
+                            Spacer(minLength: 3)
+                            if let last = samples(account).last {
+                                Text(metric == .allowance ? String(format: "%.0f%%", last.value) : String(format: "$%.2f", last.value))
+                                    .monospacedDigit().foregroundStyle(tint(account))
+                                    .help("Last recorded: " + last.timestamp.formatted())
+                            } else { Text("—").foregroundStyle(.secondary) }
+                        }.font(.system(size: 11, weight: .medium)).padding(8)
+                            .background(tint(account).opacity(0.07), in: RoundedRectangle(cornerRadius: 7))
+                    }
+                }
+                Text("Last recorded values · Gaps mark pauses or resets" + (availableMetrics.count > 1 ? " · Percentages and dollars are compared separately" : ""))
+                    .font(.system(size: 10)).foregroundStyle(.secondary)
+            }
         }
     }
 }
