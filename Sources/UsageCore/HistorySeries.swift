@@ -9,6 +9,19 @@ public struct HistorySample: Identifiable, Sendable {
 
 /// Lines connect only nearby observations from the same known reporting period.
 public enum HistorySeries {
+    /// Cumulative observed drops within comparable quota windows. Resets and unmeasured gaps add nothing.
+    public static func consumption(_ samples: [HistorySample]) -> [HistorySample] {
+        var total = 0.0
+        var previous: HistorySample?
+        return samples.map { sample in
+            if let previous, previous.segment == sample.segment {
+                total += max(0, previous.value - sample.value)
+            }
+            previous = sample
+            return HistorySample(timestamp: sample.timestamp, value: total, segment: sample.segment)
+        }
+    }
+
     public static func samples(_ points: [UsageHistoryPoint], kind: ConnectionKind) -> [HistorySample] {
         var result: [HistorySample] = []
         var previous: UsageHistoryPoint?

@@ -1249,6 +1249,8 @@ private struct CombinedHistoryChart: View {
     let histories: [UUID: [UsageHistoryPoint]]
     let now: Date
     let hours: Int
+    @ViewState private var showConsumption = true
+    @ViewState private var inspectedTime: Date?
     @ViewState private var selectedMetric: ComparisonMetric = .allowance
     private var availableMetrics: [ComparisonMetric] { ComparisonMetric.allCases.filter { metric in accounts.contains(where: metric.includes) } }
     private var metric: ComparisonMetric { availableMetrics.contains(selectedMetric) ? selectedMetric : availableMetrics.first ?? .allowance }
@@ -1258,17 +1260,39 @@ private struct CombinedHistoryChart: View {
     private func tint(_ account: Account) -> Color {
         NSColor.accountHex(account.graphColorHex).map { Color(nsColor: $0) } ?? palette[(accountOrder.firstIndex(of: account.id) ?? 0) % palette.count]
     }
-    private func samples(_ account: Account) -> [HistorySample] {
+    private func rawSamples(_ account: Account) -> [HistorySample] {
         HistorySeries.samples((histories[account.id] ?? []).filter { $0.timestamp >= start && $0.timestamp <= now }, kind: account.kind)
+    }
+    private var consumptionMode: Bool { metric == .allowance && showConsumption }
+    private var chartTitle: String { consumptionMode ? "Recorded allowance used (points)" : metric.title }
+    private func samples(_ account: Account) -> [HistorySample] {
+        let raw = rawSamples(account)
+        return consumptionMode ? HistorySeries.consumption(raw) : raw
+    }
+    private func inspectedSample(_ account: Account) -> HistorySample? {
+        let readings = samples(account)
+        guard let inspectedTime else { return readings.last }
+        guard let nearest = readings.min(by: { abs($0.timestamp.timeIntervalSince(inspectedTime)) < abs($1.timestamp.timeIntervalSince(inspectedTime)) }),
+              abs(nearest.timestamp.timeIntervalSince(inspectedTime)) <= 900 else { return nil }
+        return nearest
     }
     var body: some View {
         let series = shownAccounts.map { (account: $0, samples: samples($0)) }
         let maximum = series.flatMap { $0.samples.map(\.value) }.max() ?? 1
+        let firstReading = series.compactMap { $0.samples.first?.timestamp }.min() ?? start
+        let plotStart = min(firstReading, now.addingTimeInterval(-300))
         SettingsCard(inset: 12) {
             VStack(alignment: .leading, spacing: 8) {
                 HStack {
-                    Text(metric.title).font(.system(size: 12, weight: .medium)).foregroundStyle(.secondary)
+                    Text(chartTitle).font(.system(size: 12, weight: .medium)).foregroundStyle(.secondary)
+                        .help("One point is one percentage point of the tracked quota window. Only observed drops within the same window are counted; this is not token usage or coding time.")
                     Spacer()
+                    if metric == .allowance {
+                        Picker("Allowance view", selection: $showConsumption) {
+                            Text("Used").tag(true)
+                            Text("Remaining").tag(false)
+                        }.pickerStyle(.segmented).labelsHidden().frame(width: 170)
+                    }
                     if availableMetrics.count > 1 {
                         Picker("Compare", selection: $selectedMetric) {
                             ForEach(availableMetrics) { Text($0.rawValue).tag($0) }
@@ -1280,31 +1304,57 @@ private struct CombinedHistoryChart: View {
                         .frame(height: 104)
                 } else {
                     Chart {
+                        if let inspectedTime {
+                            RuleMark(x: .value("Reading time", inspectedTime))
+                                .foregroundStyle(Color.primary.opacity(0.35))
+                                .lineStyle(StrokeStyle(lineWidth: 1, dash: [3, 3]))
+                        }
                         ForEach(shownAccounts) { account in
                             let readings = samples(account)
                             let counts = Dictionary(grouping: readings, by: \.segment).mapValues(\.count)
                             ForEach(readings) { sample in
                                 let group = account.id.uuidString + ":" + String(sample.segment)
-                                AreaMark(x: .value("Time", sample.timestamp), yStart: .value("Baseline", 0), yEnd: .value(metric.title, sample.value), series: .value("Account period", group))
+                                AreaMark(x: .value("Time", sample.timestamp), yStart: .value("Baseline", 0), yEnd: .value(chartTitle, sample.value), series: .value("Account period", group))
                                     .foregroundStyle(LinearGradient(colors: [tint(account).opacity(0.18), tint(account).opacity(0.01)], startPoint: .top, endPoint: .bottom))
                                     .interpolationMethod(.monotone)
-                                LineMark(x: .value("Time", sample.timestamp), y: .value(metric.title, sample.value), series: .value("Account period", group))
+                                LineMark(x: .value("Time", sample.timestamp), y: .value(chartTitle, sample.value), series: .value("Account period", group))
                                     .foregroundStyle(tint(account).opacity(0.12))
                                     .lineStyle(StrokeStyle(lineWidth: 8, lineCap: .round, lineJoin: .round))
                                     .interpolationMethod(.monotone)
-                                LineMark(x: .value("Time", sample.timestamp), y: .value(metric.title, sample.value), series: .value("Account period", group + ":line"))
+                                LineMark(x: .value("Time", sample.timestamp), y: .value(chartTitle, sample.value), series: .value("Account period", group + ":line"))
                                     .foregroundStyle(tint(account))
                                     .lineStyle(StrokeStyle(lineWidth: 2.5, lineCap: .round, lineJoin: .round))
                                     .interpolationMethod(.monotone)
                                 if sample.id == readings.last?.id || counts[sample.segment] == 1 {
-                                    PointMark(x: .value("Time", sample.timestamp), y: .value(metric.title, sample.value))
+                                    PointMark(x: .value("Time", sample.timestamp), y: .value(chartTitle, sample.value))
                                         .foregroundStyle(tint(account)).symbolSize(24)
                                 }
                             }
                         }
                     }
-                    .chartXScale(domain: start...now)
-                    .chartYScale(domain: 0...(metric == .allowance ? 100 : max(1, maximum * 1.08)))
+                    .chartXScale(domain: plotStart...now)
+                    .chartOverlay { proxy in
+                        GeometryReader { geometry in
+                            Rectangle().fill(.clear).contentShape(Rectangle())
+                                .gesture(SpatialTapGesture().onEnded { event in
+                                    if let frame = proxy.plotFrame {
+                                        let plot = geometry[frame]
+                                        inspectedTime = plot.contains(event.location) ? proxy.value(atX: event.location.x - plot.minX, as: Date.self) : nil
+                                    }
+                                })
+                                .onContinuousHover { phase in
+                                    switch phase {
+                                    case .active(let location):
+                                        if let frame = proxy.plotFrame {
+                                            let plot = geometry[frame]
+                                            inspectedTime = plot.contains(location) ? proxy.value(atX: location.x - plot.minX, as: Date.self) : nil
+                                        }
+                                    case .ended: inspectedTime = nil
+                                    }
+                                }
+                        }
+                    }
+                    .chartYScale(domain: 0...(metric == .allowance && !consumptionMode ? 100 : max(1, maximum * 1.08)))
                     .chartXAxis {
                         AxisMarks(values: .automatic(desiredCount: 6)) {
                             AxisValueLabel(format: .dateTime.day().hour(.defaultDigits(amPM: .abbreviated)))
@@ -1327,8 +1377,8 @@ private struct CombinedHistoryChart: View {
                             Circle().fill(tint(account)).frame(width: 7, height: 7)
                             Text(account.name).lineLimit(1)
                             Spacer(minLength: 3)
-                            if let last = samples(account).last {
-                                Text(metric == .allowance ? String(format: "%.0f%%", last.value) : String(format: "$%.2f", last.value))
+                            if let last = inspectedSample(account) {
+                                Text(metric == .allowance ? String(format: consumptionMode ? "%.1f pts" : "%.0f%%", last.value) : String(format: "$%.2f", last.value))
                                     .monospacedDigit().foregroundStyle(tint(account))
                                     .help("Last recorded: " + last.timestamp.formatted())
                             } else { Text("—").foregroundStyle(.secondary) }
@@ -1336,7 +1386,7 @@ private struct CombinedHistoryChart: View {
                             .background(tint(account).opacity(0.07), in: RoundedRectangle(cornerRadius: 7))
                     }
                 }
-                Text("Last recorded values · Gaps mark pauses or resets" + (availableMetrics.count > 1 ? " · Percentages and dollars are compared separately" : ""))
+                Text(inspectedTime.map { "Readings near " + $0.formatted(date: .abbreviated, time: .shortened) } ?? (consumptionMode ? "Observed use only · Resets and unmeasured gaps excluded · Hover or click to inspect" : "Recorded time shown · Gaps mark pauses or resets · Hover or click to inspect"))
                     .font(.system(size: 10)).foregroundStyle(.secondary)
             }
         }
