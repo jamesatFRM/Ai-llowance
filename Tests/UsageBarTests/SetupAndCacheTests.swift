@@ -124,3 +124,49 @@ func removedClaudeCLIStillAllowsAccountRemovalWithoutLosingStatusLine(userEdited
     #expect(SnapshotCache(root: root).load(accounts: [account]).isEmpty)
     await reloaded.shutdown()
 }
+
+@Test @MainActor func verifiedHistorySurvivesIdentityErrorAndRestartWithoutRestoringCurrentReading() async throws {
+    let root = try setupRoot(); defer { try? FileManager.default.removeItem(at: root) }
+    let store = AppStore(root: root, monitor: false, fetch: { _, date in try setupSnapshot("personal@example.com", at: date) })
+    let account = try store.add(name: "Personal", kind: .claudeCode, secret: "", existing: true)
+    try await finishSetupRead(store)
+    let bound = try #require(store.accounts.first)
+    await store.shutdown()
+    let changed = AppStore(root: root, monitor: false, fetch: { _, date in try setupSnapshot("different@example.com", at: date) })
+    let original = changed.history(for: bound)
+    #expect(original.count == 1)
+    changed.refresh(force: true); try await finishSetupRead(changed)
+    #expect(changed.snapshots[account.id] == nil)
+    #expect(changed.history(for: bound) == original)
+    await changed.shutdown()
+    let restarted = AppStore(root: root, monitor: false)
+    #expect(restarted.snapshots[account.id] == nil)
+    #expect(restarted.history(for: bound) == original)
+    await restarted.shutdown()
+}
+
+@Test func historyKeepsSevenDaysAcrossCacheInstancesAndReconnect() throws {
+    let root = try setupRoot(); defer { try? FileManager.default.removeItem(at: root) }
+    var account = Account(name: "Personal", kind: .codex)
+    account.expectedIdentity = "personal@example.com"
+    let start = Date().addingTimeInterval(-7 * 86400)
+    for index in 0...2016 {
+        let date = start.addingTimeInterval(Double(index * 300))
+        try SnapshotCache(root: root).save(setupSnapshot("personal@example.com", at: date), for: account)
+    }
+    let now = start.addingTimeInterval(7 * 86400)
+    let cache = SnapshotCache(root: root)
+    let original = try #require(cache.loadHistory(accounts: [account], now: now)[account.id])
+    #expect(original.count == 2017)
+    try cache.invalidateSnapshot(account, now: now)
+    #expect(SnapshotCache(root: root).load(accounts: [account], now: now).isEmpty)
+    #expect(SnapshotCache(root: root).loadHistory(accounts: [account], now: now)[account.id] == original)
+    let next = now.addingTimeInterval(300)
+    try cache.save(setupSnapshot("personal@example.com", at: next), for: account)
+    let continued = try #require(cache.loadHistory(accounts: [account], now: next)[account.id])
+    #expect(continued.count == 2017)
+    #expect(continued.first == original[1])
+    #expect(continued.last?.timestamp == next)
+    var other = account; other.expectedIdentity = "other@example.com"
+    #expect(cache.loadHistory(accounts: [other], now: next).isEmpty)
+}
