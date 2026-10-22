@@ -93,13 +93,13 @@ public struct SnapshotCache: Sendable {
         history.removeAll { snapshot.observedAt.timeIntervalSince($0.timestamp) > 7 * 86400 }
         let status = AllowanceStatus.evaluate(snapshot: snapshot, kind: account.kind, now: snapshot.observedAt)
         if ![.unavailable, .stale, .restricted].contains(status.state) {
-            let point = UsageHistoryPoint(timestamp: snapshot.observedAt, remainingPercent: status.remainingPercent,
+            let point = UsageHistoryPoint(timestamp: snapshot.observedAt, remainingPercent: snapshot.displayWindow(for: account.kind)?.remainingPercent,
                                           balanceUSD: snapshot.balanceUSD, costUSD: snapshot.costUSD,
-                                          windowID: snapshot.limitingWindow(for: account.kind)?.id,
-                                          resetsAt: snapshot.limitingWindow(for: account.kind)?.resetsAt)
+                                          windowID: snapshot.displayWindow(for: account.kind)?.id,
+                                          resetsAt: snapshot.displayWindow(for: account.kind)?.resetsAt)
             // Preserve the sample timestamp. Replacing it every minute would move
             // the five-minute boundary forever and leave the chart with one point.
-            if history.last.map({ point.timestamp.timeIntervalSince($0.timestamp) >= 300 }) ?? true { history.append(point) }
+            if history.last.map({ point.windowID != $0.windowID || point.timestamp.timeIntervalSince($0.timestamp) >= 300 }) ?? true { history.append(point) }
             history = Array(history.suffix(Self.maximumPoints))
         }
         try Paths.write(Record(accountID: account.id, kind: account.kind, scopeID: account.scopeID, credentialRevision: account.credentialRevision,

@@ -211,7 +211,7 @@ private struct CompactAccountRow: View {
     let manage: () -> Void
     let openUsage: () -> Void
     private var status: AllowanceStatus { AllowanceStatus.evaluate(snapshot: snapshot, kind: account.kind, now: now, hasError: error != nil) }
-    private var window: QuotaWindow? { snapshot?.limitingWindow(for: account.kind) }
+    private var window: QuotaWindow? { snapshot?.displayWindow(for: account.kind) }
     private var detail: String {
         if !account.enabled { return "Paused" }
         if error != nil { return "Check connection" }
@@ -224,6 +224,9 @@ private struct CompactAccountRow: View {
         if snapshot?.costUSD != nil { return "Spent this month · UTC" }
         if detailedLabels, let snapshot, !snapshot.applicableWindows(for: account.kind).isEmpty {
             return snapshot.applicableWindows(for: account.kind).map { "\(shortWindowLabel($0)) \(Int($0.remainingPercent))%" }.joined(separator: " · ")
+        }
+        if let snapshot, let week = snapshot.primaryWeeklyWindow(for: account.kind), let session = snapshot.sessionWindow(for: account.kind) {
+            return "Week \(Int(week.remainingPercent))% · 5h \(Int(session.remainingPercent))% left"
         }
         if let window { return "\(shortWindowLabel(window)) · \(resetText(window.resetsAt, at: now))" }
         return snapshot == nil ? "Waiting for first reading" : "Quota unavailable"
@@ -400,7 +403,7 @@ private struct AccountReading: View {
     let now: Date
     let cached: Bool
     var body: some View {
-        let window = snapshot?.limitingWindow(for: account.kind)
+        let window = snapshot?.displayWindow(for: account.kind)
         VStack(alignment: .leading, spacing: 9) {
             HStack {
                 ProviderMark(provider: account.kind.provider)
@@ -1264,7 +1267,7 @@ private struct HistoryCard: View {
     }
     private var graphTint: Color { NSColor.accountHex(account.graphColorHex).map { Color(nsColor: $0) } ?? providerAccent(account.kind.provider) }
     private var dashboardTint: Color { NSColor.accountHex(account.dashboardColorHex).map { Color(nsColor: $0) } ?? providerAccent(account.kind.provider) }
-    private var metric: String { account.kind.isBalance ? "Balance (USD)" : account.kind.isAPI ? "Month-to-date spending (USD)" : "Limiting allowance remaining (%)" }
+    private var metric: String { account.kind.isBalance ? "Balance (USD)" : account.kind.isAPI ? "Month-to-date spending (USD)" : "Recorded allowance remaining (%)" }
     private func value(_ point: UsageHistoryPoint) -> Double? {
         if account.kind.isBalance { return point.balanceUSD.map { NSDecimalNumber(decimal: $0).doubleValue } }
         if account.kind.isAPI { return point.costUSD.map { NSDecimalNumber(decimal: $0).doubleValue } }
@@ -1287,14 +1290,27 @@ private struct HistoryCard: View {
                 Text(account.expectedIdentity ?? account.kind.title)
                     .font(.system(size: 11)).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
                 HStack(alignment: .firstTextBaseline) {
-                    Text(readingValue(snapshot, window: snapshot?.limitingWindow(for: account.kind)))
+                    Text(readingValue(snapshot, window: snapshot?.displayWindow(for: account.kind)))
                         .font(.system(size: 24, weight: .semibold, design: .rounded)).monospacedDigit()
                         .foregroundStyle(error || cached || status.state == .stale || status.state == .restricted || !account.enabled ? Color.secondary : Color.primary)
+                    if !account.kind.isAPI, let period = snapshot?.displayWindow(for: account.kind)?.periodLabel {
+                        Text(period).font(.system(size: 11, weight: .semibold)).foregroundStyle(.secondary)
+                    }
                     Spacer(minLength: 4)
                     Text(needsReconnect ? "Reconnect required" : !account.enabled ? "Paused" : cached ? "Saved reading" : status.title)
                         .font(.system(size: 9, weight: .medium)).foregroundStyle(statusColor).lineLimit(1)
                 }
-                Text(status.resetText(at: now) ?? (account.kind.isAPI ? metric : "Current allowance"))
+                if !account.kind.isAPI, let snapshot {
+                    HStack(spacing: 10) {
+                        if let week = snapshot.primaryWeeklyWindow(for: account.kind) {
+                            Text("\(week.periodLabel) \(Int(week.remainingPercent))% left")
+                        }
+                        if let session = snapshot.sessionWindow(for: account.kind) {
+                            Text("5h \(Int(session.remainingPercent))% left")
+                        }
+                    }.font(.system(size: 11, weight: .semibold)).monospacedDigit()
+                }
+                Text(snapshot?.displayWindow(for: account.kind).map { "\($0.periodLabel) · \(resetText($0.resetsAt, at: now))" } ?? (account.kind.isAPI ? metric : "Current allowance"))
                     .font(.system(size: 10)).foregroundStyle(.secondary).lineLimit(1)
                 if plotted.isEmpty {
                     Text("No readings in this range yet. History grows as this Mac refreshes your accounts.")

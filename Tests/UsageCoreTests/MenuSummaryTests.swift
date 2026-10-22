@@ -11,7 +11,7 @@ private func weeklyReading(_ remaining: Double, kind: ConnectionKind, sessionRem
     ], source: "Fixture")
 }
 
-@Test func providerAveragesCountLimitingAllowanceOnceAndIgnoreModelSpecificLimits() throws {
+@Test func providerAveragesWeeklyAndSessionSeparatelyAndIgnoreModelSpecificLimits() throws {
     let claude1 = Account(name: "Claude", kind: .claudeCode)
     let claude2 = Account(name: "Claude 2", kind: .claudeCode)
     let openAI = Account(name: "OpenAI", kind: .codex)
@@ -19,7 +19,7 @@ private func weeklyReading(_ remaining: Double, kind: ConnectionKind, sessionRem
     var preferences = MenuPreferences(); preferences.display = .byProvider
     let entries = MenuSummary.entries(accounts: [claude1, claude2, openAI], snapshots: snapshots, unavailable: [], preferences: preferences, now: menuTime)
     #expect(entries.map(\.provider) == [.claude, .openAI])
-    #expect(entries.map(\.remainingPercent) == [51, 80])
+    #expect(entries.map(\.remainingPercent) == [52, 80])
     #expect(entries.map(\.accountCount) == [2, 1])
     #expect(snapshots[claude1.id]?.sessionWindow(for: .claudeCode)?.remainingPercent == 2)
 }
@@ -94,4 +94,35 @@ private func weeklyReading(_ remaining: Double, kind: ConnectionKind, sessionRem
     #expect(AllowanceBand.remaining(20.01) == .warning)
     #expect(AllowanceBand.remaining(20) == .critical)
     #expect(AllowanceBand.remaining(0) == .critical)
+}
+
+
+@Test func weeklyIsPrimaryAndFiveHourAllowanceIsExplicitForClaudeAndCodex() throws {
+    for kind in [ConnectionKind.claudeCode, .codex] {
+        let account = Account(name: "Work", kind: kind)
+        let reading = try weeklyReading(97, kind: kind, sessionRemaining: 93)
+        let preferences = MenuPreferences()
+        let entry = try #require(MenuSummary.entries(accounts: [account], snapshots: [account.id: reading], unavailable: [], preferences: preferences, now: menuTime).first)
+        #expect(entry.remainingPercent == 97)
+        #expect(entry.sessionRemainingPercent == 93)
+        #expect(MenuEntryPresentation.value(entry, preferences: preferences) == "Week 97% · 5h 93%")
+        #expect(reading.displayWindow(for: kind)?.remainingPercent == 97)
+        #expect(AllowanceStatus.evaluate(snapshot: try weeklyReading(97, kind: kind, sessionRemaining: 0), kind: kind, now: menuTime).state == .exhausted)
+    }
+}
+
+@Test func weeklyHistoryStartsANewSegmentWithoutDeletingEarlierSessionSamples() throws {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: root) }
+    var account = Account(name: "Work", kind: .claudeCode); account.expectedIdentity = "work@example.com"
+    let cache = SnapshotCache(root: root)
+    var first = try weeklyReading(97, kind: .claudeCode, sessionRemaining: 93)
+    first.identity = account.expectedIdentity
+    first.windows.removeAll { $0.durationMinutes != 300 }
+    try cache.save(first, for: account)
+    var next = try weeklyReading(97, kind: .claudeCode, sessionRemaining: 93)
+    next.identity = account.expectedIdentity; next.observedAt = menuTime.addingTimeInterval(1)
+    let history = try cache.save(next, for: account)
+    #expect(history.map(\.remainingPercent) == [93, 97])
+    #expect(history.map(\.windowID) == ["session", "week.all models"])
 }
