@@ -33,6 +33,7 @@ public struct SnapshotCache: Sendable {
         var accountID: UUID
         var kind: ConnectionKind
         var scopeID: String?
+        var credentialRevision: UUID?
         var identity: String?
         var claudeProfileIsolated: Bool?
         var snapshot: Snapshot
@@ -44,6 +45,7 @@ public struct SnapshotCache: Sendable {
         guard let data = try? Paths.readData(file(account), limit: 131_072),
               var record = try? JSONDecoder().decode(Record.self, from: data),
               record.accountID == account.id, record.kind == account.kind, record.scopeID == account.scopeID,
+              record.credentialRevision == account.credentialRevision,
               record.history.count <= Self.maximumPoints, record.snapshot.observedAt <= now.addingTimeInterval(60),
               now.timeIntervalSince(record.snapshot.observedAt) <= 7 * 86400,
               (try? record.snapshot.validated()) != nil else { return nil }
@@ -99,7 +101,7 @@ public struct SnapshotCache: Sendable {
             if history.last.map({ point.timestamp.timeIntervalSince($0.timestamp) >= 300 }) ?? true { history.append(point) }
             history = Array(history.suffix(Self.maximumPoints))
         }
-        try Paths.write(Record(accountID: account.id, kind: account.kind, scopeID: account.scopeID,
+        try Paths.write(Record(accountID: account.id, kind: account.kind, scopeID: account.scopeID, credentialRevision: account.credentialRevision,
                                identity: identity, claudeProfileIsolated: account.kind == .claudeCode ? account.usesExistingClaude != true : nil, snapshot: snapshot, history: history), to: file(account))
         return history
     }

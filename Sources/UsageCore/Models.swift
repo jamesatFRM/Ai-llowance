@@ -84,6 +84,8 @@ public struct Account: Codable, Identifiable, Equatable, Sendable {
     // Non-secret identity binding; old settings decode without a binding.
     public var expectedIdentity: String?
     public var scopeID: String?
+    // Non-secret generation; old API readings cannot survive a key replacement.
+    public var credentialRevision: UUID?
     public var menuColorHex: String?
     public var dashboardColorHex: String?
     public var graphColorHex: String?

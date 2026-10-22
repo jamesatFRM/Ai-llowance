@@ -45,6 +45,8 @@ private struct IdentityRaceFixture {
                 elif method == "account/rateLimits/read":
                     open(marker, "w").close()
                     after = True
+                    if mode == "notification":
+                        print(json.dumps({"method": "account/updated", "params": {"authMode": "chatgpt"}}), flush=True)
                     result = {"rateLimits": {"primary": {"usedPercent": 25, "windowDurationMins": 300}}}
                 else: raise RuntimeError("Unexpected operation")
                 print(json.dumps({"id": request["id"], "result": result}), flush=True)
@@ -112,4 +114,12 @@ private struct IdentityRaceFixture {
     rpc.process.waitUntilExit()
     #expect(fcntl(rpc.input.fileHandleForWriting.fileDescriptor, F_GETNOSIGPIPE) == 1)
     #expect(throws: (any Error).self) { try rpc.send(["id": 1, "method": "initialize"]) }
+}
+
+@Test func codexRejectsAccountChangeNotificationEvenIfEmailReturnsToOriginal() async throws {
+    let fixture = try IdentityRaceFixture(provider: "codex", mode: "notification")
+    defer { fixture.clean() }
+    await #expect(throws: UsageError.accountChanged("first@example.com")) {
+        try await fixture.fetch(provider: "codex", expected: "first@example.com")
+    }
 }

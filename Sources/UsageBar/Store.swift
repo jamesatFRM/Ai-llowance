@@ -437,6 +437,13 @@ final class AppStore: ObservableObject {
     func replaceKey(_ account: Account, secret: String) throws {
         guard !demo, !readOnly, account.kind.isAPI, accounts.contains(where: { $0.id == account.id }) else { throw UsageError.storage }
         guard !refreshing, !removing else { throw UsageError.unavailable("Wait for the current refresh to finish, then save the key.") }
+        guard let index = accounts.firstIndex(where: { $0.id == account.id }) else { throw UsageError.storage }
+        let oldRevision = accounts[index].credentialRevision
+        accounts[index].credentialRevision = UUID()
+        // Persist the generation before changing Keychain. A crash or a delayed cache
+        // write must never restore readings made with the previous key.
+        do { try persist() }
+        catch { accounts[index].credentialRevision = oldRevision; throw error }
         try keychain.save(secret.trimmingCharacters(in: .whitespacesAndNewlines), for: account.id)
         connectionVersions[account.id] = UUID()
         clearCachedReading(account)
