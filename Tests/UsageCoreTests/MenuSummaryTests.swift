@@ -110,3 +110,19 @@ private func weeklyReading(_ remaining: Double, kind: ConnectionKind, sessionRem
         #expect(AllowanceStatus.evaluate(snapshot: try weeklyReading(97, kind: kind, sessionRemaining: 0), kind: kind, now: menuTime).state == .exhausted)
     }
 }
+
+@Test func weeklyHistoryStartsANewSegmentWithoutDeletingEarlierSessionSamples() throws {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: root) }
+    var account = Account(name: "Work", kind: .claudeCode); account.expectedIdentity = "work@example.com"
+    let cache = SnapshotCache(root: root)
+    var first = try weeklyReading(97, kind: .claudeCode, sessionRemaining: 93)
+    first.identity = account.expectedIdentity
+    first.windows.removeAll { $0.durationMinutes != 300 }
+    try cache.save(first, for: account)
+    var next = try weeklyReading(97, kind: .claudeCode, sessionRemaining: 93)
+    next.identity = account.expectedIdentity; next.observedAt = menuTime.addingTimeInterval(1)
+    let history = try cache.save(next, for: account)
+    #expect(history.map(\.remainingPercent) == [93, 97])
+    #expect(history.map(\.windowID) == ["session", "week.all models"])
+}
