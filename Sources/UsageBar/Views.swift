@@ -660,6 +660,7 @@ struct AccountsView: View {
         secret = ""; scopeID = ""; name = ""; connectionError = nil
         manualConnection = false
         setupStarted = false
+        setupExistingIDs = Set(store.accounts.map(\.id))
         section = .connection
         store.rediscoverTools()
     }
@@ -714,16 +715,25 @@ struct AccountsView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @ViewState private var historyWidth: CGFloat = 800
     private var visibleHistoryAccounts: [Account] { store.accounts.filter { historyAccountID == nil || $0.id == historyAccountID } }
+    private var historyRows: [[Account]] {
+        let columns = max(1, min(4, visibleHistoryAccounts.count, Int((historyWidth + 12) / 232)))
+        return stride(from: 0, to: visibleHistoryAccounts.count, by: columns).map {
+            Array(visibleHistoryAccounts[$0..<min($0 + columns, visibleHistoryAccounts.count)])
+        }
+    }
     private var historyContent: some View {
         VStack(alignment: .leading, spacing: 12) {
             if store.accounts.isEmpty { Text("Connect an account to start collecting history.").foregroundStyle(.secondary) }
-            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 12), count: max(1, min(4, visibleHistoryAccounts.count, max(1, Int((historyWidth + 12) / 240))))), spacing: 12) {
-            ForEach(visibleHistoryAccounts) { account in
-                let points = store.history(for: account).filter { $0.timestamp >= store.now.addingTimeInterval(-Double(historyHours) * 3600) }
-                HistoryCard(account: account, points: points, snapshot: store.snapshots[account.id],
-                            error: store.errors[account.id] != nil, cached: store.isCached(account), now: store.now,
-                            openUsage: { store.openUsage(account) }, manage: { renaming = account })
-            }
+            ForEach(historyRows, id: \.first?.id) { row in
+                HStack(alignment: .top, spacing: 12) {
+                    ForEach(row) { account in
+                        let points = store.history(for: account).filter { $0.timestamp >= store.now.addingTimeInterval(-Double(historyHours) * 3600) && $0.timestamp <= store.now }
+                        HistoryCard(account: account, points: points, snapshot: store.snapshots[account.id],
+                                    error: store.errors[account.id] != nil, cached: store.isCached(account), now: store.now,
+                                    openUsage: { store.openUsage(account) }, manage: { renaming = account })
+                            .frame(maxWidth: .infinity)
+                    }
+                }
             }
             ActivityHeatmap(accounts: store.accounts.filter { historyAccountID == nil || $0.id == historyAccountID },
                             histories: Dictionary(uniqueKeysWithValues: store.accounts.map { ($0.id, store.history(for: $0)) }), now: store.now)
@@ -737,7 +747,7 @@ struct AccountsView: View {
         }
     }
     private var busyConnecting: Bool { store.connectingClaude || store.signingIn != nil || !store.waitingForClaude.isEmpty }
-    private var setupAccount: Account? { store.accounts.last { $0.kind == selectedKind && (!setupStarted || !setupExistingIDs.contains($0.id)) } }
+    private var setupAccount: Account? { store.accounts.last { $0.kind == selectedKind && !setupExistingIDs.contains($0.id) } }
     private var connectionSetup: some View {
         SettingsCard {
             VStack(alignment: .leading, spacing: 12) {
@@ -806,7 +816,7 @@ struct AccountsView: View {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(installed ? (existing ? "Add another \(kind.provider.title) account" : "Connect \(kind.provider.title)") : "Install \(cliName(kind))")
                         .font(.system(size: 12, weight: .semibold))
-                    Text(installed ? "Use your existing subscription sign-in · no API key" : "One-time setup · then return here")
+                    Text(installed ? (kind == .claudeCode ? "Sign in once per email · independent of Claude Desktop" : "Use your existing subscription sign-in · no API key") : "One-time setup · then return here")
                         .font(.system(size: 10)).foregroundStyle(.secondary)
                 }
                 Spacer()
@@ -837,15 +847,25 @@ struct AccountsView: View {
                 Label("Reading your allowance…", systemImage: "arrow.clockwise").font(.system(size: 11)).foregroundStyle(.secondary)
             }
             if let connectionError { Text(connectionError).font(.system(size: 11)).foregroundStyle(.orange).fixedSize(horizontal: false, vertical: true) }
-            if let account = store.accounts.last(where: { $0.kind == selectedKind }), store.errors[account.id] == nil, !store.isCached(account), let snapshot = store.snapshots[account.id], !snapshot.isStale(at: store.now), snapshot.providerRestricted != true {
+            if let account = setupAccount, store.errors[account.id] == nil, !store.isCached(account), let snapshot = store.snapshots[account.id], !snapshot.isStale(at: store.now), snapshot.providerRestricted != true {
                 HStack {
                     Label("First reading received · \(account.expectedIdentity ?? snapshot.identity ?? account.name)", systemImage: "checkmark.circle.fill")
                         .font(.system(size: 11)).foregroundStyle(.green).lineLimit(2)
                     Spacer()
-                    Button("View account") { store.selectedAccountID = account.id }.controlSize(.small)
+                    Button("View account") { store.selectedAccountID = account.id; section = .accounts }.controlSize(.small)
                 }
             }
         }.disabled(store.demo)
+    }
+    private func startManualConnection(existing: Bool) {
+        setupExistingIDs = Set(store.accounts.map(\.id))
+        setupStarted = true
+        switch selectedKind {
+        case .claudeCode: store.connectClaude(existing: existing)
+        case .codex: store.connectOpenAI(existing: existing)
+        case .copilot: store.connectCopilot()
+        default: break
+        }
     }
     private var cliConnectionForm: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -865,18 +885,18 @@ struct AccountsView: View {
             } else {
                 if selectedKind == .claudeCode {
                     HStack {
-                        Button("Use existing Claude sign-in") { store.connectClaude(existing: true) }
-                            .disabled(store.accounts.contains { $0.kind == .claudeCode && $0.usesExistingClaude == true })
-                        Button("Add another account") { store.connectClaude(existing: false) }
+                        Button("Connect a Claude account") { startManualConnection(existing: false) }
+                        Text("Separate sign-in for each email. Desktop account switching stays independent.")
+                            .foregroundStyle(.secondary)
                     }.controlSize(.small).disabled(busyConnecting)
                 } else if selectedKind == .codex {
                     HStack {
-                        Button("Use existing Codex sign-in") { store.connectOpenAI(existing: true) }.disabled(store.accounts.contains { $0.usesExistingCodex })
-                        Button("Add another account") { store.connectOpenAI() }
+                        Button("Use existing Codex sign-in") { startManualConnection(existing: true) }.disabled(store.accounts.contains { $0.usesExistingCodex })
+                        Button("Add another account") { startManualConnection(existing: false) }
                     }.controlSize(.small).disabled(busyConnecting)
                 } else if selectedKind == .copilot {
                     HStack {
-                        Button("Connect Copilot (preview)") { store.connectCopilot() }.disabled(busyConnecting || store.accounts.contains { $0.kind == .copilot })
+                        Button("Connect Copilot (preview)") { startManualConnection(existing: true) }.disabled(busyConnecting || store.accounts.contains { $0.kind == .copilot })
                         Button("Sign in to Copilot…") { store.openCopilotSignIn() }
                     }.controlSize(.small)
                     Text("Uses your Copilot CLI sign-in. Quota support depends on your installed CLI.").font(.system(size: 10)).foregroundStyle(.secondary)
@@ -911,6 +931,7 @@ struct AccountsView: View {
             HStack {
                 Button("Connect securely") {
                     do {
+                        setupExistingIDs = Set(store.accounts.map(\.id))
                         let account = try store.add(name: name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? suggestedAccountName : name, kind: selectedKind, secret: secret, existing: false,
                             scopeID: scopeID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : scopeID.trimmingCharacters(in: .whitespacesAndNewlines))
                         store.selectedAccountID = account.id
@@ -1238,7 +1259,7 @@ private struct HistoryCard: View {
     private var plotted: [UsageHistoryPoint] { points.filter { value($0) != nil } }
     private var samples: [HistorySample] { HistorySeries.samples(points, kind: account.kind) }
     var body: some View {
-        let series = samples
+        let series = HistorySeries.smoothTrend(samples)
         let segmentCounts = Dictionary(grouping: series, by: \.segment).mapValues(\.count)
         SettingsCard(inset: 10) {
             VStack(alignment: .leading, spacing: 6) {
@@ -1254,7 +1275,7 @@ private struct HistoryCard: View {
                 HStack(alignment: .firstTextBaseline) {
                     Text(readingValue(snapshot, window: snapshot?.limitingWindow(for: account.kind)))
                         .font(.system(size: 24, weight: .semibold, design: .rounded)).monospacedDigit()
-                        .foregroundStyle(error || cached || status.state == .stale || !account.enabled ? Color.secondary : Color.primary)
+                        .foregroundStyle(error || cached || status.state == .stale || status.state == .restricted || !account.enabled ? Color.secondary : Color.primary)
                     Spacer(minLength: 4)
                     Text(!account.enabled ? "Paused" : cached ? "Saved reading" : status.title)
                         .font(.system(size: 9, weight: .medium)).foregroundStyle(statusColor).lineLimit(1)
@@ -1267,12 +1288,20 @@ private struct HistoryCard: View {
                 } else {
                     Chart {
                         ForEach(series) { sample in
-                            AreaMark(x: .value("Time", sample.timestamp), yStart: .value("Baseline", 0), yEnd: .value(metric, sample.value), series: .value("Period", sample.segment))
-                                .foregroundStyle(LinearGradient(colors: [graphTint.opacity(0.12), graphTint.opacity(0)], startPoint: .top, endPoint: .bottom))
+                            AreaMark(x: .value("Time", sample.timestamp), yStart: .value("Baseline", 0), yEnd: .value(metric, sample.value), series: .value("Period", "core-" + String(sample.segment)))
+                                .foregroundStyle(LinearGradient(colors: [graphTint.opacity(0.07), graphTint.opacity(0)], startPoint: .top, endPoint: .bottom))
                                 .interpolationMethod(.monotone)
-                            LineMark(x: .value("Time", sample.timestamp), y: .value(metric, sample.value), series: .value("Period", sample.segment))
+                            LineMark(x: .value("Time", sample.timestamp), y: .value(metric, sample.value), series: .value("Period", "outer-" + String(sample.segment)))
+                                .foregroundStyle(graphTint.opacity(0.08))
+                                .lineStyle(StrokeStyle(lineWidth: 12, lineCap: .round, lineJoin: .round))
+                                .interpolationMethod(.monotone)
+                            LineMark(x: .value("Time", sample.timestamp), y: .value(metric, sample.value), series: .value("Period", "halo-" + String(sample.segment)))
+                                .foregroundStyle(graphTint.opacity(0.18))
+                                .lineStyle(StrokeStyle(lineWidth: 6, lineCap: .round, lineJoin: .round))
+                                .interpolationMethod(.monotone)
+                            LineMark(x: .value("Time", sample.timestamp), y: .value(metric, sample.value), series: .value("Period", "core-" + String(sample.segment)))
                                 .foregroundStyle(LinearGradient(colors: [graphTint.opacity(0.75), graphTint], startPoint: .leading, endPoint: .trailing))
-                                .lineStyle(StrokeStyle(lineWidth: 2.8, lineCap: .round, lineJoin: .round))
+                                .lineStyle(StrokeStyle(lineWidth: 2.2, lineCap: .round, lineJoin: .round))
                                 .interpolationMethod(.monotone)
                             if sample.id == series.last?.id || segmentCounts[sample.segment] == 1 {
                                 PointMark(x: .value("Time", sample.timestamp), y: .value(metric, sample.value))
@@ -1280,7 +1309,7 @@ private struct HistoryCard: View {
                             }
                         }
                     }
-                    .chartYScale(domain: account.kind.isAPI ? .automatic : .automatic(includesZero: true))
+                    .chartYScale(domain: account.kind.isAPI ? min(0, (series.map(\.value).min() ?? 0) * 1.08)...max(1, (series.map(\.value).max() ?? 1) * 1.08) : 0...100)
                     .chartXAxis {
                         AxisMarks(values: .automatic(desiredCount: 3)) {
                             AxisGridLine().foregroundStyle(Color.primary.opacity(0.035))
@@ -1296,7 +1325,7 @@ private struct HistoryCard: View {
                     .frame(height: 66).padding(.top, 2)
                     if let last = plotted.last {
                         HStack {
-                            Text("History")
+                            Text("Smoothed history")
                             Spacer()
                             Text(last.timestamp, format: .dateTime.month(.abbreviated).day().hour().minute())
                         }.font(.system(size: 10)).foregroundStyle(.secondary)

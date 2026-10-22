@@ -95,3 +95,90 @@ private func envelope(_ text: String, turns: Int = 0, cost: Double = 0) throws -
         #expect(try ClaudeAuthIdentity.parse(Data(json.utf8)).email == nil)
     }
 }
+
+@Test func sharedClaudeProfileCannotSupplyAUsageReading() async throws {
+    let account = Account(name: "Shared", kind: .claudeCode, usesExistingClaude: true)
+    await #expect(throws: UsageError.claudeDedicatedSignInRequired) {
+        try await ClaudeUsageAdapter(executable: URL(fileURLWithPath: "/does-not-exist")).fetch(account: account, now: checkTime)
+    }
+}
+
+@Test func desktopAccountSwitchDoesNotChangeDedicatedClaudeUsage() async throws {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent("ClaudeSwitch-\(UUID().uuidString)")
+    try Paths.prepare(root); defer { try? FileManager.default.removeItem(at: root) }
+    let cli = root.appendingPathComponent("claude")
+    var personal = Account(name: "Personal", kind: .claudeCode)
+    personal.expectedIdentity = "personal@example.com"
+    var work = Account(name: "Work", kind: .claudeCode)
+    work.expectedIdentity = "work@example.com"
+    let personalProfile = Paths.claudeProfile(personal.id, root: root).path
+    let workProfile = Paths.claudeProfile(work.id, root: root).path
+    let personalReport = String(data: try envelope(planText), encoding: .utf8)!
+    let workReport = String(data: try envelope(planText.replacingOccurrences(of: "38%", with: "92%")), encoding: .utf8)!
+    // Simulate a desktop/global account changing while the two dedicated profiles stay fixed.
+    let global = root.appendingPathComponent("desktop-account")
+    let script = """
+    #!/bin/sh
+    [ -z "${CLAUDE_SECURESTORAGE_CONFIG_DIR+x}" ] || exit 90
+    case "$CLAUDE_CONFIG_DIR" in
+      \(ShellQuote.argument(personalProfile))) email=personal@example.com; payload=\(ShellQuote.argument(personalReport));;
+      \(ShellQuote.argument(workProfile))) email=work@example.com; payload=\(ShellQuote.argument(workReport));;
+      *) email=$(/bin/cat \(ShellQuote.argument(global.path))); payload=\(ShellQuote.argument(workReport));;
+    esac
+    if [ "$1" = auth ]; then
+      printf '{"loggedIn":true,"authMethod":"claude.ai","email":"%s"}' "$email"
+    else
+      printf '%s' "$payload"
+    fi
+    """
+    try Paths.writePrivate(Data(script.utf8), to: cli, executable: true)
+    let adapter = ClaudeUsageAdapter(executable: cli, root: root)
+    for desktopEmail in ["personal@example.com", "work@example.com", "personal@example.com"] {
+        try desktopEmail.write(to: global, atomically: true, encoding: .utf8)
+        for (account, used) in [(personal, 38.0), (work, 92.0)] {
+            let snapshot = try await adapter.fetch(account: account, now: checkTime)
+            #expect(snapshot.identity == account.expectedIdentity)
+            #expect(snapshot.windows.first?.usedPercent == used)
+        }
+    }
+}
+
+@Test func claudeOrganizationSwitchDuringUsageDiscardsTheReading() async throws {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent("ClaudeOrgSwitch-\(UUID().uuidString)")
+    try Paths.prepare(root); defer { try? FileManager.default.removeItem(at: root) }
+    let cli = root.appendingPathComponent("claude"), switched = root.appendingPathComponent("switched")
+    let payload = String(data: try envelope(planText), encoding: .utf8)!
+    let script = """
+    #!/bin/sh
+    if [ "$1" = auth ]; then
+      org=original
+      [ ! -f \(ShellQuote.argument(switched.path)) ] || org=other
+      printf '{"loggedIn":true,"authMethod":"claude.ai","email":"person@example.com","orgId":"%s"}' "$org"
+    else
+      /usr/bin/touch \(ShellQuote.argument(switched.path))
+      printf '%s' \(ShellQuote.argument(payload))
+    fi
+    """
+    try Paths.writePrivate(Data(script.utf8), to: cli, executable: true)
+    var account = Account(name: "Personal", kind: .claudeCode)
+    account.expectedIdentity = "person@example.com"
+    await #expect(throws: UsageError.accountChanged("person@example.com")) {
+        try await ClaudeUsageAdapter(executable: cli, root: root).fetch(account: account, now: checkTime)
+    }
+}
+
+@Test func claudeReportedProfileMustMatchTheRequestedAccount() async throws {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent("ClaudeWrongProfile-\(UUID().uuidString)")
+    try Paths.prepare(root); defer { try? FileManager.default.removeItem(at: root) }
+    let cli = root.appendingPathComponent("claude")
+    let script = """
+    #!/bin/sh
+    printf '%s' '{"loggedIn":true,"authMethod":"claude.ai","email":"person@example.com","configDirectory":"/another/profile"}'
+    """
+    try Paths.writePrivate(Data(script.utf8), to: cli, executable: true)
+    var account = Account(name: "Personal", kind: .claudeCode)
+    account.expectedIdentity = "person@example.com"
+    await #expect(throws: UsageError.accountChanged("person@example.com")) {
+        try await ClaudeUsageAdapter(executable: cli, root: root).fetch(account: account, now: checkTime)
+    }
+}

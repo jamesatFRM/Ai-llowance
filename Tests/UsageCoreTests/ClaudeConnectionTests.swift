@@ -81,6 +81,7 @@ private struct SetupFixture {
     let log = fixture.root.appendingPathComponent("calls.txt")
     let fakeCLI = """
     #!/bin/sh
+    [ -z "${CLAUDE_SECURESTORAGE_CONFIG_DIR+x}" ] || exit 92
     printf '%s|%s\\n' "$CLAUDE_CONFIG_DIR" "$*" >> \(ShellQuote.argument(log.path))
     """
     try fakeCLI.write(to: fixture.cli, atomically: true, encoding: .utf8)
@@ -92,6 +93,8 @@ private struct SetupFixture {
     let process = Process()
     process.executableURL = URL(fileURLWithPath: "/bin/zsh"); process.arguments = ["-f", launcher.path]
     process.standardOutput = FileHandle.nullDevice
+    process.environment = ProcessInfo.processInfo.environment
+    process.environment?["CLAUDE_SECURESTORAGE_CONFIG_DIR"] = "/another/account"
     try process.run(); process.waitUntilExit()
     #expect(process.terminationStatus == 0)
     let calls = try String(contentsOf: log, encoding: .utf8).split(separator: "\n").map(String.init)

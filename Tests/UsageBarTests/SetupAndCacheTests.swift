@@ -105,3 +105,22 @@ func removedClaudeCLIStillAllowsAccountRemovalWithoutLosingStatusLine(userEdited
     #expect(!FileManager.default.fileExists(atPath: root.appendingPathComponent("ClaudeConnections/\(account.id.uuidString)/setup.json").path))
     await store.shutdown()
 }
+
+@Test @MainActor func sharedClaudeCacheCannotAppearAfterRestartOrReconnect() async throws {
+    let root = try setupRoot(); defer { try? FileManager.default.removeItem(at: root) }
+    var account = Account(name: "Personal", kind: .claudeCode, usesExistingClaude: true)
+    account.expectedIdentity = "personal@example.com"
+    try SnapshotCache(root: root).save(setupSnapshot("personal@example.com", at: Date()), for: account)
+    let store = AppStore(root: root, monitor: false)
+    store.accounts = [account]
+    store.setMenuDisplay(.byAccount) // Persists the fixture settings.
+    await store.shutdown()
+    let reloaded = AppStore(root: root, monitor: false)
+    #expect(reloaded.snapshots[account.id] == nil)
+    #expect(reloaded.history(for: account).isEmpty)
+    #expect(reloaded.needsSignIn(account))
+    #expect(reloaded.errors[account.id]?.contains("Reconnect") == true)
+    account.usesExistingClaude = false
+    #expect(SnapshotCache(root: root).load(accounts: [account]).isEmpty)
+    await reloaded.shutdown()
+}

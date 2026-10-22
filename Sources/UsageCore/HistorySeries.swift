@@ -9,6 +9,23 @@ public struct HistorySample: Identifiable, Sendable {
 
 /// Lines connect only nearby observations from the same known reporting period.
 public enum HistorySeries {
+    /// A bounded visual trend. Never blends across missing intervals or quota resets.
+    /// Exact observations remain the source for values and inspection.
+    public static func smoothTrend(_ samples: [HistorySample]) -> [HistorySample] {
+        var result = samples
+        for _ in 0..<2 {
+            let source = result
+            result = source.indices.map { index in
+                guard index > 0, index + 1 < source.count,
+                      source[index - 1].segment == source[index].segment,
+                      source[index + 1].segment == source[index].segment else { return source[index] }
+                let value = (source[index - 1].value + 2 * source[index].value + source[index + 1].value) / 4
+                return HistorySample(timestamp: source[index].timestamp, value: value, segment: source[index].segment)
+            }
+        }
+        return result
+    }
+
     public static func samples(_ points: [UsageHistoryPoint], kind: ConnectionKind) -> [HistorySample] {
         var result: [HistorySample] = []
         var previous: UsageHistoryPoint?

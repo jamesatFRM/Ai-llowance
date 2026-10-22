@@ -89,6 +89,7 @@ private func integrityReading(at date: Date, remaining: Double = 80) throws -> S
     struct Record: Encodable {
         let accountID: UUID
         let kind: ConnectionKind
+        let claudeProfileIsolated = true
         let identity: String
         let snapshot: Snapshot
         let history: [UsageHistoryPoint]

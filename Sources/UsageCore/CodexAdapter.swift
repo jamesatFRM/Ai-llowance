@@ -9,6 +9,7 @@ final class CodexRPC {
     let output = Pipe()
     var buffer = Data()
     var sequence = 0
+    private(set) var accountRevision = 0
     var stopped = false
     var queuedNotifications: [[String: Any]] = []
     let deadline: Date
@@ -83,6 +84,7 @@ final class CodexRPC {
                 guard let result = message["result"] as? [String: Any] else { throw UsageError.invalidData }
                 return result
             }
+            if message["method"] as? String == "account/updated" { accountRevision += 1 }
             if message["method"] as? String == "account/login/completed" {
                 guard queuedNotifications.count < 32 else { throw UsageError.invalidData }
                 queuedNotifications.append(message)
@@ -124,11 +126,12 @@ public struct CodexAdapter: UsageAdapter {
             if let expected = CodexIdentity.normalized(account.expectedIdentity), expected != before {
                 throw UsageError.accountChanged(expected)
             }
+            let accountRevision = rpc.accountRevision
             let response = try rpc.call("account/rateLimits/read")
             // An existing CLI profile can be signed into another account while the
             // request is running. Do not label its new quota with the old identity.
             let after = try rpc.call("account/read", params: ["refreshToken": false])["account"] as? [String: Any]
-            guard after?["type"] as? String == "chatgpt",
+            guard rpc.accountRevision == accountRevision, after?["type"] as? String == "chatgpt",
                   CodexIdentity.normalized(after?["email"] as? String) == before else {
                 throw UsageError.accountChanged(account.expectedIdentity ?? before)
             }
