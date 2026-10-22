@@ -15,7 +15,7 @@ func setupHelpKeepsTheSelectedSubscriptionRatherThanInheritedAPIBilling(kind: Co
     let fake = root.appendingPathComponent("fake-cli")
     let variables = kind == .codex
         ? ["OPENAI_API_KEY", "CODEX_API_KEY", "OPENAI_BASE_URL"]
-        : ["ANTHROPIC_API_KEY", "CLAUDE_CODE_USE_BEDROCK", "CLAUDE_CODE_USE_VERTEX", "CLAUDE_CODE_USE_FOUNDRY", "ANTHROPIC_PROFILE"]
+        : ["ANTHROPIC_API_KEY", "CLAUDE_CODE_USE_BEDROCK", "CLAUDE_CODE_USE_VERTEX", "CLAUDE_CODE_USE_FOUNDRY", "ANTHROPIC_PROFILE", "CLAUDE_SECURESTORAGE_CONFIG_DIR"]
     let lines = variables.map { "printf '%s\\n' \"${\($0)-<unset>}\"" }.joined(separator: "\n")
     try Paths.writePrivate(Data(("#!/bin/sh\n{\n" + lines + "\nprintf '%s\\n' \"$@\"\n} > " + ShellQuote.argument(report.path) + "\n").utf8), to: fake, executable: true)
     var launcher: URL?

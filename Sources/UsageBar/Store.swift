@@ -273,6 +273,7 @@ final class AppStore: ObservableObject {
             set -eu
             unset ANTHROPIC_API_KEY ANTHROPIC_AUTH_TOKEN CLAUDE_CODE_OAUTH_TOKEN ANTHROPIC_BASE_URL
             unset CLAUDE_CODE_USE_BEDROCK CLAUDE_CODE_USE_VERTEX CLAUDE_CODE_USE_FOUNDRY ANTHROPIC_PROFILE
+            unset CLAUDE_SECURESTORAGE_CONFIG_DIR
             export CLAUDE_CONFIG_DIR=\(ShellQuote.argument(profile.path))
             export DISABLE_TELEMETRY=1 DISABLE_ERROR_REPORTING=1
             cd "$HOME"
