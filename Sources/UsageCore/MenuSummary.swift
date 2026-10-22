@@ -57,14 +57,18 @@ public struct MenuEntry: Sendable, Equatable {
     public let provider: MenuProvider?
     public let label: String
     public let remainingPercent: Double?
+    public let primaryPeriod: String?
+    public let sessionRemainingPercent: Double?
+    public let showsSession: Bool
     public let accountCount: Int
     public let isUnlimited: Bool
     public let balanceUSD: Decimal?
     public let isBalance: Bool
     public let colorHex: String?
     public init(provider: MenuProvider?, label: String, remainingPercent: Double?, accountCount: Int, isUnlimited: Bool = false,
-                balanceUSD: Decimal? = nil, isBalance: Bool = false, colorHex: String? = nil) {
+                balanceUSD: Decimal? = nil, isBalance: Bool = false, colorHex: String? = nil, primaryPeriod: String? = nil, sessionRemainingPercent: Double? = nil, showsSession: Bool = false) {
         self.provider = provider; self.label = label; self.remainingPercent = remainingPercent
+        self.primaryPeriod = primaryPeriod; self.sessionRemainingPercent = sessionRemainingPercent; self.showsSession = showsSession
         self.accountCount = accountCount; self.isUnlimited = isUnlimited
         self.balanceUSD = balanceUSD; self.isBalance = isBalance; self.colorHex = colorHex
     }
@@ -111,7 +115,7 @@ public enum MenuSummary {
                       identityMatches(snapshot, account: account), snapshot.providerRestricted != true,
                       (try? snapshot.validated()) != nil else { return nil }
                 let applicable = snapshot.applicableWindows(for: account.kind)
-                guard let window = snapshot.limitingWindow(for: account.kind),
+                guard let window = snapshot.displayWindow(for: account.kind),
                       !snapshot.isStale(at: now, windows: applicable) else { return nil }
                 return window.remainingPercent
             }
@@ -120,7 +124,19 @@ public enum MenuSummary {
             if values.count != group.count || values.isEmpty { value = nil }
             else if preferences.aggregation == .lowest { value = values.min() }
             else { value = values.reduce(0, +) / Double(values.count) }
-            return MenuEntry(provider: icon, label: label, remainingPercent: value, accountCount: group.count, isUnlimited: allUnlimited, colorHex: Set(group.compactMap(\.menuColorHex)).count == 1 && group.allSatisfy { $0.menuColorHex != nil } ? group.first?.menuColorHex : nil)
+            let sessions = group.compactMap { account -> Double? in
+                guard !unavailable.contains(account.id), let snapshot = snapshots[account.id],
+                      identityMatches(snapshot, account: account), snapshot.providerRestricted != true,
+                      (try? snapshot.validated()) != nil,
+                      !snapshot.isStale(at: now, windows: snapshot.applicableWindows(for: account.kind)) else { return nil }
+                return snapshot.sessionWindow(for: account.kind)?.remainingPercent
+            }
+            let sessionValue = sessions.count == group.count && !sessions.isEmpty
+                ? (preferences.aggregation == .lowest ? sessions.min() : sessions.reduce(0, +) / Double(sessions.count)) : nil
+            let periods = Set(group.compactMap { snapshots[$0.id]?.displayWindow(for: $0.kind)?.periodLabel })
+            let period = periods.count == 1 ? periods.first : "Quota"
+            let showSession = group.allSatisfy { $0.kind == .claudeCode || $0.kind == .codex } && period != "5h"
+            return MenuEntry(provider: icon, label: label, remainingPercent: value, accountCount: group.count, isUnlimited: allUnlimited, colorHex: Set(group.compactMap(\.menuColorHex)).count == 1 && group.allSatisfy { $0.menuColorHex != nil } ? group.first?.menuColorHex : nil, primaryPeriod: period, sessionRemainingPercent: sessionValue, showsSession: showSession)
         }
         func balanceEntry(_ account: Account) -> MenuEntry {
             let balance: Decimal?
@@ -178,5 +194,20 @@ public enum AllowanceBand: Sendable {
         if percent <= 20 { return .critical }
         if percent < 30 { return .warning }
         return .normal
+    }
+}
+
+
+extension QuotaWindow {
+    public var periodLabel: String {
+        if durationMinutes == 300 || id == "session" || id == "5-hour" { return "5h" }
+        if durationMinutes == 10080 || id.hasPrefix("week.") || id == "7-day" { return "Week" }
+        return label
+    }
+}
+extension Snapshot {
+    /// Display weekly allowance first; readiness/alerts still respect all limits.
+    public func displayWindow(for kind: ConnectionKind) -> QuotaWindow? {
+        primaryWeeklyWindow(for: kind) ?? limitingWindow(for: kind)
     }
 }

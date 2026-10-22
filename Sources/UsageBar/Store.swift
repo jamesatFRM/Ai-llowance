@@ -733,10 +733,10 @@ final class AppStore: ObservableObject {
     private func saveCachedReading(_ snapshot: Snapshot, account: Account) {
         guard !demo, !readOnly else { return }
         var points = usageHistory[account.id] ?? []
-        let point = UsageHistoryPoint(timestamp: snapshot.observedAt, remainingPercent: AllowanceStatus.evaluate(snapshot: snapshot, kind: account.kind, now: now).remainingPercent, balanceUSD: snapshot.balanceUSD, costUSD: snapshot.costUSD)
+        let point = UsageHistoryPoint(timestamp: snapshot.observedAt, remainingPercent: snapshot.displayWindow(for: account.kind)?.remainingPercent, balanceUSD: snapshot.balanceUSD, costUSD: snapshot.costUSD, windowID: snapshot.displayWindow(for: account.kind)?.id, resetsAt: snapshot.displayWindow(for: account.kind)?.resetsAt)
         let status = AllowanceStatus.evaluate(snapshot: snapshot, kind: account.kind, now: now)
         if ![.unavailable, .stale, .restricted].contains(status.state),
-           points.last.map({ point.timestamp.timeIntervalSince($0.timestamp) >= 300 }) ?? true { points.append(point) }
+           points.last.map({ point.windowID != $0.windowID || point.timestamp.timeIntervalSince($0.timestamp) >= 300 }) ?? true { points.append(point) }
         usageHistory[account.id] = Array(points.filter { snapshot.observedAt.timeIntervalSince($0.timestamp) <= 604800 }.suffix(SnapshotCache.maximumPoints))
         let previous = cacheTask, root = root
         cacheTask = Task.detached(priority: .utility) {

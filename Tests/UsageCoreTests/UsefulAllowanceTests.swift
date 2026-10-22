@@ -28,14 +28,15 @@ private func usefulReading(_ remaining: Double, at date: Date = usefulNow, reset
     #expect(mixed.first?.isUnlimited == false && mixed.first?.remainingPercent == nil)
 }
 
-@Test func menuMatchesTheActionableLimitingWindowAndExpiresAfterItsReset() throws {
+@Test func menuShowsWeeklyAndExhaustedSessionAndExpiresAfterReset() throws {
     let account = usefulAccount()
     var report = try usefulReading(0)
     report.windows.append(try QuotaWindow(id: "week.all models", label: "Week", usedPercent: 20,
                                          resetsAt: usefulNow.addingTimeInterval(86400), durationMinutes: 10080))
     let entries = MenuSummary.entries(accounts: [account], snapshots: [account.id: report], unavailable: [], preferences: MenuPreferences(), now: usefulNow)
-    #expect(entries.first?.remainingPercent == 0)
-    #expect(entries.first?.remainingPercent == AllowanceStatus.evaluate(snapshot: report, kind: .claudeCode, now: usefulNow).remainingPercent)
+    #expect(entries.first?.remainingPercent == 80)
+    #expect(entries.first?.sessionRemainingPercent == 0)
+    #expect(AllowanceStatus.evaluate(snapshot: report, kind: .claudeCode, now: usefulNow).state == .exhausted)
     report.windows[0].resetsAt = usefulNow
     #expect(MenuSummary.entries(accounts: [account], snapshots: [account.id: report], unavailable: [], preferences: MenuPreferences(), now: usefulNow).first?.remainingPercent == nil)
 }
