@@ -442,7 +442,6 @@ struct AccountsView: View {
     @ViewState private var replacement = ""
     @ViewState private var section: DashboardSection = .history
     @ViewState private var historyHours = 24
-    @AppStorage("combinedUsageChart") private var combinedUsageChart = true
     @ViewState private var historyAccountID: UUID?
     @AppStorage("hideFromDock") private var hideFromDock = true
     @ViewState private var handledAccountNavigationVersion: UInt64 = 0
@@ -661,6 +660,7 @@ struct AccountsView: View {
         secret = ""; scopeID = ""; name = ""; connectionError = nil
         manualConnection = false
         setupStarted = false
+        setupExistingIDs = Set(store.accounts.map(\.id))
         section = .connection
         store.rediscoverTools()
     }
@@ -715,30 +715,25 @@ struct AccountsView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @ViewState private var historyWidth: CGFloat = 800
     private var visibleHistoryAccounts: [Account] { store.accounts.filter { historyAccountID == nil || $0.id == historyAccountID } }
+    private var historyRows: [[Account]] {
+        let columns = max(1, min(4, visibleHistoryAccounts.count, Int((historyWidth + 12) / 232)))
+        return stride(from: 0, to: visibleHistoryAccounts.count, by: columns).map {
+            Array(visibleHistoryAccounts[$0..<min($0 + columns, visibleHistoryAccounts.count)])
+        }
+    }
     private var historyContent: some View {
         VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                Text(combinedUsageChart ? "Account comparison" : "Account history").font(.system(size: 13, weight: .semibold))
-                Spacer()
-                Picker("Chart layout", selection: $combinedUsageChart) {
-                    Text("Together").tag(true)
-                    Text("Separate").tag(false)
-                }.pickerStyle(.segmented).labelsHidden().frame(width: 180)
-            }
             if store.accounts.isEmpty { Text("Connect an account to start collecting history.").foregroundStyle(.secondary) }
-            if combinedUsageChart {
-                CombinedHistoryChart(accounts: visibleHistoryAccounts, accountOrder: store.accounts.map(\.id),
-                    histories: Dictionary(uniqueKeysWithValues: visibleHistoryAccounts.map { ($0.id, store.history(for: $0)) }),
-                    now: store.now, hours: historyHours)
-            } else {
-            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 12), count: max(1, min(4, visibleHistoryAccounts.count, max(1, Int((historyWidth + 12) / 240))))), spacing: 12) {
-            ForEach(visibleHistoryAccounts) { account in
-                let points = store.history(for: account).filter { $0.timestamp >= store.now.addingTimeInterval(-Double(historyHours) * 3600) }
-                HistoryCard(account: account, points: points, snapshot: store.snapshots[account.id],
-                            error: store.errors[account.id] != nil, cached: store.isCached(account), now: store.now,
-                            openUsage: { store.openUsage(account) }, manage: { renaming = account })
-            }
-            }
+            ForEach(historyRows, id: \.first?.id) { row in
+                HStack(alignment: .top, spacing: 12) {
+                    ForEach(row) { account in
+                        let points = store.history(for: account).filter { $0.timestamp >= store.now.addingTimeInterval(-Double(historyHours) * 3600) && $0.timestamp <= store.now }
+                        HistoryCard(account: account, points: points, snapshot: store.snapshots[account.id],
+                                    error: store.errors[account.id] != nil, cached: store.isCached(account), now: store.now,
+                                    openUsage: { store.openUsage(account) }, manage: { renaming = account })
+                            .frame(maxWidth: .infinity)
+                    }
+                }
             }
             ActivityHeatmap(accounts: store.accounts.filter { historyAccountID == nil || $0.id == historyAccountID },
                             histories: Dictionary(uniqueKeysWithValues: store.accounts.map { ($0.id, store.history(for: $0)) }), now: store.now)
@@ -752,7 +747,7 @@ struct AccountsView: View {
         }
     }
     private var busyConnecting: Bool { store.connectingClaude || store.signingIn != nil || !store.waitingForClaude.isEmpty }
-    private var setupAccount: Account? { store.accounts.last { $0.kind == selectedKind && (!setupStarted || !setupExistingIDs.contains($0.id)) } }
+    private var setupAccount: Account? { store.accounts.last { $0.kind == selectedKind && !setupExistingIDs.contains($0.id) } }
     private var connectionSetup: some View {
         SettingsCard {
             VStack(alignment: .leading, spacing: 12) {
@@ -852,15 +847,25 @@ struct AccountsView: View {
                 Label("Reading your allowance…", systemImage: "arrow.clockwise").font(.system(size: 11)).foregroundStyle(.secondary)
             }
             if let connectionError { Text(connectionError).font(.system(size: 11)).foregroundStyle(.orange).fixedSize(horizontal: false, vertical: true) }
-            if let account = store.accounts.last(where: { $0.kind == selectedKind }), store.errors[account.id] == nil, !store.isCached(account), let snapshot = store.snapshots[account.id], !snapshot.isStale(at: store.now), snapshot.providerRestricted != true {
+            if let account = setupAccount, store.errors[account.id] == nil, !store.isCached(account), let snapshot = store.snapshots[account.id], !snapshot.isStale(at: store.now), snapshot.providerRestricted != true {
                 HStack {
                     Label("First reading received · \(account.expectedIdentity ?? snapshot.identity ?? account.name)", systemImage: "checkmark.circle.fill")
                         .font(.system(size: 11)).foregroundStyle(.green).lineLimit(2)
                     Spacer()
-                    Button("View account") { store.selectedAccountID = account.id }.controlSize(.small)
+                    Button("View account") { store.selectedAccountID = account.id; section = .accounts }.controlSize(.small)
                 }
             }
         }.disabled(store.demo)
+    }
+    private func startManualConnection(existing: Bool) {
+        setupExistingIDs = Set(store.accounts.map(\.id))
+        setupStarted = true
+        switch selectedKind {
+        case .claudeCode: store.connectClaude(existing: existing)
+        case .codex: store.connectOpenAI(existing: existing)
+        case .copilot: store.connectCopilot()
+        default: break
+        }
     }
     private var cliConnectionForm: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -880,18 +885,18 @@ struct AccountsView: View {
             } else {
                 if selectedKind == .claudeCode {
                     HStack {
-                        Button("Use existing Claude sign-in") { store.connectClaude(existing: true) }
+                        Button("Use existing Claude sign-in") { startManualConnection(existing: true) }
                             .disabled(store.accounts.contains { $0.kind == .claudeCode && $0.usesExistingClaude == true })
-                        Button("Add another account") { store.connectClaude(existing: false) }
+                        Button("Add another account") { startManualConnection(existing: false) }
                     }.controlSize(.small).disabled(busyConnecting)
                 } else if selectedKind == .codex {
                     HStack {
-                        Button("Use existing Codex sign-in") { store.connectOpenAI(existing: true) }.disabled(store.accounts.contains { $0.usesExistingCodex })
-                        Button("Add another account") { store.connectOpenAI() }
+                        Button("Use existing Codex sign-in") { startManualConnection(existing: true) }.disabled(store.accounts.contains { $0.usesExistingCodex })
+                        Button("Add another account") { startManualConnection(existing: false) }
                     }.controlSize(.small).disabled(busyConnecting)
                 } else if selectedKind == .copilot {
                     HStack {
-                        Button("Connect Copilot (preview)") { store.connectCopilot() }.disabled(busyConnecting || store.accounts.contains { $0.kind == .copilot })
+                        Button("Connect Copilot (preview)") { startManualConnection(existing: true) }.disabled(busyConnecting || store.accounts.contains { $0.kind == .copilot })
                         Button("Sign in to Copilot…") { store.openCopilotSignIn() }
                     }.controlSize(.small)
                     Text("Uses your Copilot CLI sign-in. Quota support depends on your installed CLI.").font(.system(size: 10)).foregroundStyle(.secondary)
@@ -926,6 +931,7 @@ struct AccountsView: View {
             HStack {
                 Button("Connect securely") {
                     do {
+                        setupExistingIDs = Set(store.accounts.map(\.id))
                         let account = try store.add(name: name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? suggestedAccountName : name, kind: selectedKind, secret: secret, existing: false,
                             scopeID: scopeID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : scopeID.trimmingCharacters(in: .whitespacesAndNewlines))
                         store.selectedAccountID = account.id
@@ -1224,179 +1230,6 @@ private struct UpdateSettings: View {
     }
 }
 
-private enum ComparisonMetric: String, CaseIterable, Identifiable {
-    case allowance = "Allowance", balance = "Credits", spending = "Spending"
-    var id: String { rawValue }
-    var title: String {
-        switch self {
-        case .allowance: "Allowance remaining (%)"
-        case .balance: "Credit balance (USD)"
-        case .spending: "Month-to-date spending (USD)"
-        }
-    }
-    func includes(_ account: Account) -> Bool {
-        switch self {
-        case .allowance: !account.kind.isAPI
-        case .balance: account.kind.isBalance
-        case .spending: account.kind.isAPI && !account.kind.isBalance
-        }
-    }
-}
-
-private struct CombinedHistoryChart: View {
-    let accounts: [Account]
-    let accountOrder: [UUID]
-    let histories: [UUID: [UsageHistoryPoint]]
-    let now: Date
-    let hours: Int
-    @ViewState private var showConsumption = true
-    @ViewState private var inspectedTime: Date?
-    @ViewState private var selectedMetric: ComparisonMetric = .allowance
-    private var availableMetrics: [ComparisonMetric] { ComparisonMetric.allCases.filter { metric in accounts.contains(where: metric.includes) } }
-    private var metric: ComparisonMetric { availableMetrics.contains(selectedMetric) ? selectedMetric : availableMetrics.first ?? .allowance }
-    private var shownAccounts: [Account] { accounts.filter(metric.includes) }
-    private var start: Date { now.addingTimeInterval(-Double(hours) * 3600) }
-    private let palette: [Color] = [.cyan, Color(red: 1, green: 0.54, blue: 0.38), .purple, .mint, .pink, .yellow]
-    private func tint(_ account: Account) -> Color {
-        NSColor.accountHex(account.graphColorHex).map { Color(nsColor: $0) } ?? palette[(accountOrder.firstIndex(of: account.id) ?? 0) % palette.count]
-    }
-    private func rawSamples(_ account: Account) -> [HistorySample] {
-        HistorySeries.samples((histories[account.id] ?? []).filter { $0.timestamp >= start && $0.timestamp <= now }, kind: account.kind)
-    }
-    private var consumptionMode: Bool { metric == .allowance && showConsumption }
-    private var chartTitle: String { consumptionMode ? "Recorded allowance used (points)" : metric.title }
-    private func samples(_ account: Account) -> [HistorySample] {
-        let raw = rawSamples(account)
-        return consumptionMode ? HistorySeries.consumption(raw) : raw
-    }
-    private func inspectedSample(_ account: Account) -> HistorySample? {
-        let readings = samples(account)
-        guard let inspectedTime else { return readings.last }
-        guard let nearest = readings.min(by: { abs($0.timestamp.timeIntervalSince(inspectedTime)) < abs($1.timestamp.timeIntervalSince(inspectedTime)) }),
-              abs(nearest.timestamp.timeIntervalSince(inspectedTime)) <= 900 else { return nil }
-        return nearest
-    }
-    var body: some View {
-        let series = shownAccounts.map { (account: $0, samples: samples($0)) }
-        let maximum = series.flatMap { $0.samples.map(\.value) }.max() ?? 1
-        let firstReading = series.compactMap { $0.samples.first?.timestamp }.min() ?? start
-        let plotStart = min(firstReading, now.addingTimeInterval(-300))
-        SettingsCard(inset: 12) {
-            VStack(alignment: .leading, spacing: 8) {
-                HStack {
-                    Text(chartTitle).font(.system(size: 12, weight: .medium)).foregroundStyle(.secondary)
-                        .help("One point is one percentage point of the tracked quota window. Only observed drops within the same window are counted; this is not token usage or coding time.")
-                    Spacer()
-                    if metric == .allowance {
-                        Picker("Allowance view", selection: $showConsumption) {
-                            Text("Used").tag(true)
-                            Text("Remaining").tag(false)
-                        }.pickerStyle(.segmented).labelsHidden().frame(width: 170)
-                    }
-                    if availableMetrics.count > 1 {
-                        Picker("Compare", selection: $selectedMetric) {
-                            ForEach(availableMetrics) { Text($0.rawValue).tag($0) }
-                        }.pickerStyle(.segmented).labelsHidden().frame(width: 260)
-                    }
-                }
-                if series.allSatisfy({ $0.samples.isEmpty }) {
-                    ContentUnavailableView("No readings yet", systemImage: "chart.xyaxis.line", description: Text("History appears as this Mac refreshes your accounts."))
-                        .frame(height: 104)
-                } else {
-                    Chart {
-                        if let inspectedTime {
-                            RuleMark(x: .value("Reading time", inspectedTime))
-                                .foregroundStyle(Color.primary.opacity(0.35))
-                                .lineStyle(StrokeStyle(lineWidth: 1, dash: [3, 3]))
-                        }
-                        ForEach(shownAccounts) { account in
-                            let readings = HistorySeries.smoothTrend(samples(account))
-                            let counts = Dictionary(grouping: readings, by: \.segment).mapValues(\.count)
-                            ForEach(readings) { sample in
-                                let group = account.id.uuidString + ":" + String(sample.segment)
-                                AreaMark(x: .value("Time", sample.timestamp), yStart: .value("Baseline", 0), yEnd: .value(chartTitle, sample.value), series: .value("Account period", group))
-                                    .foregroundStyle(LinearGradient(colors: [tint(account).opacity(0.08), tint(account).opacity(0)], startPoint: .top, endPoint: .bottom))
-                                    .interpolationMethod(.monotone)
-                                LineMark(x: .value("Time", sample.timestamp), y: .value(chartTitle, sample.value), series: .value("Account period", group))
-                                    .foregroundStyle(tint(account).opacity(0.08))
-                                    .lineStyle(StrokeStyle(lineWidth: 12, lineCap: .round, lineJoin: .round))
-                                    .interpolationMethod(.monotone)
-                                LineMark(x: .value("Time", sample.timestamp), y: .value(chartTitle, sample.value), series: .value("Account period", group + ":halo"))
-                                    .foregroundStyle(tint(account).opacity(0.18))
-                                    .lineStyle(StrokeStyle(lineWidth: 6, lineCap: .round, lineJoin: .round))
-                                    .interpolationMethod(.monotone)
-                                LineMark(x: .value("Time", sample.timestamp), y: .value(chartTitle, sample.value), series: .value("Account period", group + ":line"))
-                                    .foregroundStyle(tint(account))
-                                    .lineStyle(StrokeStyle(lineWidth: 2.2, lineCap: .round, lineJoin: .round))
-                                    .interpolationMethod(.monotone)
-                                if sample.id == readings.last?.id || counts[sample.segment] == 1 {
-                                    PointMark(x: .value("Time", sample.timestamp), y: .value(chartTitle, sample.value))
-                                        .foregroundStyle(tint(account)).symbolSize(24)
-                                }
-                            }
-                        }
-                    }
-                    .chartXScale(domain: plotStart...now)
-                    .chartOverlay { proxy in
-                        GeometryReader { geometry in
-                            Rectangle().fill(.clear).contentShape(Rectangle())
-                                .gesture(SpatialTapGesture().onEnded { event in
-                                    if let frame = proxy.plotFrame {
-                                        let plot = geometry[frame]
-                                        inspectedTime = plot.contains(event.location) ? proxy.value(atX: event.location.x - plot.minX, as: Date.self) : nil
-                                    }
-                                })
-                                .onContinuousHover { phase in
-                                    switch phase {
-                                    case .active(let location):
-                                        if let frame = proxy.plotFrame {
-                                            let plot = geometry[frame]
-                                            inspectedTime = plot.contains(location) ? proxy.value(atX: location.x - plot.minX, as: Date.self) : nil
-                                        }
-                                    case .ended: inspectedTime = nil
-                                    }
-                                }
-                        }
-                    }
-                    .chartYScale(domain: 0...(metric == .allowance && !consumptionMode ? 100 : max(1, maximum * 1.08)))
-                    .chartXAxis {
-                        AxisMarks(values: .automatic(desiredCount: 6)) {
-                            AxisValueLabel(format: .dateTime.day().hour(.defaultDigits(amPM: .abbreviated)))
-                        }
-                    }
-                    .chartYAxis {
-                        AxisMarks(position: .leading, values: .automatic(desiredCount: 4)) {
-                            AxisGridLine(stroke: StrokeStyle(lineWidth: 0.5, dash: [3, 5])).foregroundStyle(Color.primary.opacity(0.10))
-                            AxisValueLabel()
-                        }
-                    }
-                    .chartPlotStyle { plot in
-                        plot.background(LinearGradient(colors: [Color.primary.opacity(0.025), .clear], startPoint: .top, endPoint: .bottom))
-                    }
-                    .frame(height: 104)
-                }
-                LazyVGrid(columns: [GridItem(.adaptive(minimum: 170), alignment: .leading)], alignment: .leading, spacing: 10) {
-                    ForEach(shownAccounts) { account in
-                        HStack(spacing: 7) {
-                            Circle().fill(tint(account)).frame(width: 7, height: 7)
-                            Text(account.name).lineLimit(1)
-                            Spacer(minLength: 3)
-                            if let last = inspectedSample(account) {
-                                Text(metric == .allowance ? String(format: consumptionMode ? "%.1f pts" : "%.0f%%", last.value) : String(format: "$%.2f", last.value))
-                                    .monospacedDigit().foregroundStyle(tint(account))
-                                    .help("Last recorded: " + last.timestamp.formatted())
-                            } else { Text("—").foregroundStyle(.secondary) }
-                        }.font(.system(size: 11, weight: .medium)).padding(8)
-                            .background(tint(account).opacity(0.07), in: RoundedRectangle(cornerRadius: 7))
-                    }
-                }
-                Text(inspectedTime.map { "Readings near " + $0.formatted(date: .abbreviated, time: .shortened) } ?? (consumptionMode ? "Smoothed trend · Gaps excluded · Hover or click for exact readings" : "Smoothed trend · Gaps mark pauses or resets · Hover or click for exact readings"))
-                    .font(.system(size: 10)).foregroundStyle(.secondary)
-            }
-        }
-    }
-}
-
 private struct HistoryCard: View {
     let account: Account
     let points: [UsageHistoryPoint]
@@ -1442,7 +1275,7 @@ private struct HistoryCard: View {
                 HStack(alignment: .firstTextBaseline) {
                     Text(readingValue(snapshot, window: snapshot?.limitingWindow(for: account.kind)))
                         .font(.system(size: 24, weight: .semibold, design: .rounded)).monospacedDigit()
-                        .foregroundStyle(error || cached || status.state == .stale || !account.enabled ? Color.secondary : Color.primary)
+                        .foregroundStyle(error || cached || status.state == .stale || status.state == .restricted || !account.enabled ? Color.secondary : Color.primary)
                     Spacer(minLength: 4)
                     Text(!account.enabled ? "Paused" : cached ? "Saved reading" : status.title)
                         .font(.system(size: 9, weight: .medium)).foregroundStyle(statusColor).lineLimit(1)
@@ -1455,7 +1288,7 @@ private struct HistoryCard: View {
                 } else {
                     Chart {
                         ForEach(series) { sample in
-                            AreaMark(x: .value("Time", sample.timestamp), yStart: .value("Baseline", 0), yEnd: .value(metric, sample.value), series: .value("Period", sample.segment))
+                            AreaMark(x: .value("Time", sample.timestamp), yStart: .value("Baseline", 0), yEnd: .value(metric, sample.value), series: .value("Period", "core-" + String(sample.segment)))
                                 .foregroundStyle(LinearGradient(colors: [graphTint.opacity(0.07), graphTint.opacity(0)], startPoint: .top, endPoint: .bottom))
                                 .interpolationMethod(.monotone)
                             LineMark(x: .value("Time", sample.timestamp), y: .value(metric, sample.value), series: .value("Period", "outer-" + String(sample.segment)))
@@ -1466,7 +1299,7 @@ private struct HistoryCard: View {
                                 .foregroundStyle(graphTint.opacity(0.18))
                                 .lineStyle(StrokeStyle(lineWidth: 6, lineCap: .round, lineJoin: .round))
                                 .interpolationMethod(.monotone)
-                            LineMark(x: .value("Time", sample.timestamp), y: .value(metric, sample.value), series: .value("Period", sample.segment))
+                            LineMark(x: .value("Time", sample.timestamp), y: .value(metric, sample.value), series: .value("Period", "core-" + String(sample.segment)))
                                 .foregroundStyle(LinearGradient(colors: [graphTint.opacity(0.75), graphTint], startPoint: .leading, endPoint: .trailing))
                                 .lineStyle(StrokeStyle(lineWidth: 2.2, lineCap: .round, lineJoin: .round))
                                 .interpolationMethod(.monotone)
@@ -1476,7 +1309,7 @@ private struct HistoryCard: View {
                             }
                         }
                     }
-                    .chartYScale(domain: account.kind.isAPI ? .automatic : .automatic(includesZero: true))
+                    .chartYScale(domain: account.kind.isAPI ? min(0, (series.map(\.value).min() ?? 0) * 1.08)...max(1, (series.map(\.value).max() ?? 1) * 1.08) : 0...100)
                     .chartXAxis {
                         AxisMarks(values: .automatic(desiredCount: 3)) {
                             AxisGridLine().foregroundStyle(Color.primary.opacity(0.035))

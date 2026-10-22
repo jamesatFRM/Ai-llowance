@@ -31,19 +31,6 @@ import Testing
     #expect(HistorySeries.samples(points, kind: .claudeCode).map(\.segment) == [0, 0])
 }
 
-@Test func historyConsumptionCountsOnlyObservedComparableDrops() {
-    let start = Date()
-    let values: [(Double, Int)] = [(80, 0), (75, 0), (100, 1), (98, 1), (50, 2), (49, 2)]
-    let samples = values.enumerated().map { index, value in
-        HistorySample(timestamp: start.addingTimeInterval(Double(index) * 300), value: value.0, segment: value.1)
-    }
-    let result = HistorySeries.consumption(samples)
-    #expect(result.map(\.value) == [0, 5, 5, 7, 7, 8])
-    #expect(result.map(\.segment) == samples.map(\.segment))
-    #expect(result.map(\.timestamp) == samples.map(\.timestamp))
-    #expect(HistorySeries.consumption([]).isEmpty)
-}
-
 @Test func smoothedHistoryPreservesBoundariesAndStaysWithinObservedRange() {
     let start = Date()
     let values: [(Double, Int)] = [(0, 0), (0, 0), (0, 0), (10, 0), (10, 0), (10, 0), (100, 1), (100, 1)]
