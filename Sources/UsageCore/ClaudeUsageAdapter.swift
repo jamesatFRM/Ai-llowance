@@ -8,6 +8,7 @@ public struct ClaudeUsageAdapter: UsageAdapter, Sendable {
     public init(executable: URL, root: URL = Paths.root) { self.executable = executable; self.root = root }
 
     public func fetch(account: Account, now: Date) async throws -> Snapshot {
+        guard account.usesExistingClaude != true else { throw UsageError.claudeDedicatedSignInRequired }
         let connection = ClaudeConnection(root: root, executable: executable, bundledBridge: executable)
         let identity = try await connection.authIdentity(account: account)
         guard identity.signedIn, let before = CodexIdentity.normalized(identity.email) else { throw UsageError.authentication }
@@ -39,7 +40,7 @@ public struct ClaudeUsageAdapter: UsageAdapter, Sendable {
         // /usage runs separately from auth status. A sign-in change during that
         // interval must invalidate the reading rather than relabel another account.
         let after = try await connection.authIdentity(account: account)
-        guard after.signedIn, CodexIdentity.normalized(after.email) == before else {
+        guard after.signedIn, CodexIdentity.normalized(after.email) == before, after.orgID == identity.orgID else {
             throw UsageError.accountChanged(account.expectedIdentity ?? before)
         }
         snapshot.identity = before

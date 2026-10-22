@@ -31,7 +31,7 @@ private actor FetchGate {
     func finish(_ value: Snapshot) { continuation?.resume(returning: value); continuation = nil }
 }
 
-@Test @MainActor func temporaryClaudeAuthFailureDoesNotOpenLoginOrAddAnAccount() async throws {
+@Test @MainActor func newClaudeConnectionDoesNotReuseDesktopOrGlobalSignIn() async throws {
     let root = try fixtureRoot(); defer { try? FileManager.default.removeItem(at: root) }
     var opened = false
     let store = AppStore(root: root, monitor: false, openExternal: { _ in opened = true; return true })
@@ -39,9 +39,11 @@ private actor FetchGate {
     store.claudeExecutable = try cli(root, "printf 'not-json'; exit 1")
     store.connectClaude(existing: true)
     try await settle { !store.connectingClaude }
-    #expect(!opened)
-    #expect(store.accounts.isEmpty)
-    #expect(store.notice != nil)
+    #expect(opened)
+    let account = try #require(store.accounts.first)
+    #expect(account.usesExistingClaude == false)
+    #expect(store.waitingForClaude[account.id] != nil)
+    store.cancelClaudeSignIn(account)
 }
 
 @Test @MainActor func failedTerminalLaunchLeavesAnObviousRetryAndNoWaitingState() async throws {
@@ -286,13 +288,14 @@ private actor FetchGate {
     try await Task.sleep(for: .milliseconds(100))
     await store.shutdown()
     #expect(store.signingIn == nil)
-    let claude = AppStore(root: root.appendingPathComponent("separate"), monitor: false)
+    let claude = AppStore(root: root.appendingPathComponent("separate"), monitor: false, openExternal: { _ in true })
     claude.claudeExecutable = executable; claude.existingClaudeConfig = root.appendingPathComponent("existing")
     claude.connectClaude(existing: true)
     try await Task.sleep(for: .milliseconds(100))
     await claude.shutdown()
     #expect(!claude.connectingClaude)
-    #expect(claude.accounts.isEmpty)
+    #expect(claude.accounts.count == 1)
+    #expect(claude.accounts.first?.usesExistingClaude == false)
 }
 
 
@@ -309,4 +312,30 @@ private actor FetchGate {
     #expect(store.snapshots[account.id]?.identity == "fixture@example.com")
     #expect(!store.refreshing)
     await store.shutdown()
+}
+
+@Test @MainActor func sharedClaudeReconnectPreservesIdentityAndUsesDedicatedProfile() async throws {
+    let root = try fixtureRoot(); defer { try? FileManager.default.removeItem(at: root) }
+    var opened: URL?
+    let store = AppStore(root: root, monitor: false, openExternal: { opened = $0; return true })
+    store.paused = true
+    store.claudeExecutable = try cli(root, "exit 0")
+    var account = Account(name: "Personal", kind: .claudeCode, usesExistingClaude: true)
+    account.expectedIdentity = "personal@example.com"
+    account.graphColorHex = "abcdef"
+    store.accounts = [account]
+    store.openClaude(account, login: true)
+    let migrated = try #require(store.accounts.first)
+    #expect(migrated.id == account.id)
+    #expect(migrated.expectedIdentity == account.expectedIdentity)
+    #expect(migrated.graphColorHex == account.graphColorHex)
+    #expect(migrated.usesExistingClaude == false)
+    let script = try String(contentsOf: try #require(opened), encoding: .utf8)
+    #expect(script.contains(ShellQuote.argument(Paths.claudeProfile(account.id, root: root).path)))
+    #expect(!script.contains("auth logout" + "\n"))
+    store.cancelClaudeSignIn(migrated)
+    await store.shutdown()
+    let reloaded = AppStore(root: root, monitor: false)
+    #expect(reloaded.accounts.first == migrated)
+    await reloaded.shutdown()
 }

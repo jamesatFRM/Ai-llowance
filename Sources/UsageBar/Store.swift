@@ -124,9 +124,14 @@ final class AppStore: ObservableObject {
         }
         if !readOnly {
             let cache = SnapshotCache(root: root)
-            snapshots = cache.load(accounts: accounts, now: now)
+            let isolatedAccounts = accounts.filter { !($0.kind == .claudeCode && $0.usesExistingClaude == true) }
+            snapshots = cache.load(accounts: isolatedAccounts, now: now)
             cachedAccounts = Set(snapshots.keys)
-            usageHistory = cache.loadHistory(accounts: accounts, now: now)
+            usageHistory = cache.loadHistory(accounts: isolatedAccounts, now: now)
+            for account in accounts where account.kind == .claudeCode && account.usesExistingClaude == true {
+                authenticationRequired.insert(account.id)
+                errors[account.id] = UsageError.claudeDedicatedSignInRequired.localizedDescription
+            }
             if let data = try? Paths.readData(root.appendingPathComponent("alerts.json"), limit: 256_000),
                let savedAlerts = try? JSONDecoder().decode(AlertTracker.self, from: data) { alerts = savedAlerts }
             alerts.retain(accounts: accounts)
@@ -262,6 +267,9 @@ final class AppStore: ObservableObject {
             NSPasteboard.general.setString(prompt, forType: .string)
         }
         if kind == .claudeCode, let claudeExecutable {
+            if account?.usesExistingClaude == true {
+                notice = UsageError.claudeDedicatedSignInRequired.localizedDescription; return
+            }
             var profile = existingClaudeConfig
             if let account, account.usesExistingClaude != true {
                 do { profile = try claudeConnection().config(account) }
@@ -313,28 +321,20 @@ final class AppStore: ObservableObject {
     }
     func connectClaude(existing: Bool) {
         guard !shuttingDown, accounts.count < 1000, !demo, !connectingClaude, !readOnly, !removing, signingIn == nil, waitingForClaude.isEmpty else { return }
-        if existing && accounts.contains(where: { $0.kind == .claudeCode && $0.usesExistingClaude == true }) {
-            notice = "Your current Claude Code is already connected. Use Add another Claude account for a separate login."; return
-        }
         connectingClaude = true
         connectionTask = Task {
             defer { connectingClaude = false }
             do {
                 let connection = try claudeConnection()
-                var account = Account(name: automaticName("Claude", kind: .claudeCode), kind: .claudeCode, usesExistingClaude: existing)
-                let signedIn = existing ? (try await connection.authStatus(account: account)) : false
+                let account = Account(name: automaticName("Claude", kind: .claudeCode), kind: .claudeCode)
                 try Task.checkCancellation()
-                // Reuse only a signed-in subscription. An API-billed or logged-out CLI stays untouched.
-                if existing && !signedIn { account.usesExistingClaude = false }
                 try Paths.prepare(connection.config(account))
-                claudeSignedIn[account.id] = signedIn
+                claudeSignedIn[account.id] = false
                 accounts.append(account)
                 selectedAccountID = account.id
                 do { try persist() }
                 catch { accounts.removeAll { $0.id == account.id }; try? connection.uninstall(account: account); throw error }
-                if !signedIn {
-                    openClaude(account, login: true)
-                } else { notice = nil }
+                openClaude(account, login: true)
                 schedules[account.id] = PollState(); refresh(force: true)
             } catch { notice = safeMessage(error) }
         }
@@ -343,6 +343,16 @@ final class AppStore: ObservableObject {
         guard !demo, !removing, accounts.contains(where: { $0.id == account.id }) else { return }
         if login && (waitingForClaude[account.id] != nil || signingIn != nil) { return }
         do {
+            var account = account
+            if account.usesExistingClaude == true {
+                guard login, !logout else { throw UsageError.claudeDedicatedSignInRequired }
+                guard let index = accounts.firstIndex(where: { $0.id == account.id }) else { return }
+                let original = accounts[index]
+                account.usesExistingClaude = false
+                accounts[index] = account
+                do { try persist() }
+                catch { accounts[index] = original; throw error }
+            }
             let connection = try claudeConnection()
             if login || logout {
                 connectionVersions[account.id] = UUID()
@@ -531,7 +541,7 @@ final class AppStore: ObservableObject {
                     if [.authentication, .missingCredential, .forbidden].contains(error as? UsageError) { authenticationRequired.insert(account.id) }
                     if let identityError = error as? UsageError {
                         switch identityError {
-                        case .accountChanged, .duplicateAccount:
+                        case .accountChanged, .duplicateAccount, .claudeDedicatedSignInRequired:
                             snapshots[account.id] = nil
                             clearCachedReading(account)
                             authenticationRequired.insert(account.id)

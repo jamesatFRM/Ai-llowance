@@ -34,6 +34,7 @@ public struct SnapshotCache: Sendable {
         var kind: ConnectionKind
         var scopeID: String?
         var identity: String?
+        var claudeProfileIsolated: Bool?
         var snapshot: Snapshot
         var history: [UsageHistoryPoint]
     }
@@ -46,6 +47,9 @@ public struct SnapshotCache: Sendable {
               record.history.count <= Self.maximumPoints, record.snapshot.observedAt <= now.addingTimeInterval(60),
               now.timeIntervalSince(record.snapshot.observedAt) <= 7 * 86400,
               (try? record.snapshot.validated()) != nil else { return nil }
+        if account.kind == .claudeCode {
+            guard account.usesExistingClaude != true, record.claudeProfileIsolated == true else { return nil }
+        }
         let expected = CodexIdentity.normalized(account.expectedIdentity)
         let actual = CodexIdentity.normalized(record.snapshot.identity)
         guard record.identity == expected else { return nil }
@@ -96,7 +100,7 @@ public struct SnapshotCache: Sendable {
             history = Array(history.suffix(Self.maximumPoints))
         }
         try Paths.write(Record(accountID: account.id, kind: account.kind, scopeID: account.scopeID,
-                               identity: identity, snapshot: snapshot, history: history), to: file(account))
+                               identity: identity, claudeProfileIsolated: account.kind == .claudeCode ? account.usesExistingClaude != true : nil, snapshot: snapshot, history: history), to: file(account))
         return history
     }
     public func remove(_ account: Account) throws {

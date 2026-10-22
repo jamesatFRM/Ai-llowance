@@ -198,6 +198,10 @@ public struct ClaudeConnection: Sendable {
             try process.run()
             let result = try CommandOutput.read(process, output: output, timeout: 10, limit: 65_536)
             let identity = try ClaudeAuthIdentity.parse(result.data)
+            if let reportedProfile = identity.configDirectory,
+               URL(fileURLWithPath: reportedProfile).standardizedFileURL.resolvingSymlinksInPath() != profile.standardizedFileURL.resolvingSymlinksInPath() {
+                throw UsageError.accountChanged(account.expectedIdentity ?? "the saved account")
+            }
             // Claude returns a nonzero exit status for a valid logged-out report.
             guard result.exitCode == 0 || !identity.signedIn else { throw UsageError.server }
             return identity
@@ -210,12 +214,15 @@ public struct ClaudeConnection: Sendable {
 public struct ClaudeAuthIdentity: Sendable {
     public let signedIn: Bool
     public let email: String?
+    public let orgID: String?
+    public let configDirectory: String?
 
     public static func parse(_ data: Data) throws -> Self {
-        struct Status: Decodable { let loggedIn: Bool; let authMethod: String?; let email: String? }
+        struct Status: Decodable { let loggedIn: Bool; let authMethod: String?; let email: String?; let orgId: String?; let configDirectory: String? }
         let status = try JSONDecoder().decode(Status.self, from: data)
         let signedIn = status.loggedIn && status.authMethod == "claude.ai"
         let email = status.email?.trimmingCharacters(in: .whitespacesAndNewlines)
-        return Self(signedIn: signedIn, email: signedIn && email?.isEmpty == false ? email : nil)
+        return Self(signedIn: signedIn, email: signedIn && email?.isEmpty == false ? email : nil,
+                    orgID: status.orgId, configDirectory: status.configDirectory)
     }
 }

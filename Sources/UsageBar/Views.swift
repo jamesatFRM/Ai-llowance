@@ -816,7 +816,7 @@ struct AccountsView: View {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(installed ? (existing ? "Add another \(kind.provider.title) account" : "Connect \(kind.provider.title)") : "Install \(cliName(kind))")
                         .font(.system(size: 12, weight: .semibold))
-                    Text(installed ? "Use your existing subscription sign-in · no API key" : "One-time setup · then return here")
+                    Text(installed ? (kind == .claudeCode ? "Sign in once per email · independent of Claude Desktop" : "Use your existing subscription sign-in · no API key") : "One-time setup · then return here")
                         .font(.system(size: 10)).foregroundStyle(.secondary)
                 }
                 Spacer()
@@ -885,9 +885,9 @@ struct AccountsView: View {
             } else {
                 if selectedKind == .claudeCode {
                     HStack {
-                        Button("Use existing Claude sign-in") { startManualConnection(existing: true) }
-                            .disabled(store.accounts.contains { $0.kind == .claudeCode && $0.usesExistingClaude == true })
-                        Button("Add another account") { startManualConnection(existing: false) }
+                        Button("Connect a Claude account") { startManualConnection(existing: false) }
+                        Text("Separate sign-in for each email. Desktop account switching stays independent.")
+                            .foregroundStyle(.secondary)
                     }.controlSize(.small).disabled(busyConnecting)
                 } else if selectedKind == .codex {
                     HStack {
