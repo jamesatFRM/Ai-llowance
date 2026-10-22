@@ -132,7 +132,7 @@ private func usefulReading(_ remaining: Double, at date: Date = usefulNow, reset
         let date = usefulNow.addingTimeInterval(Double(index * 600))
         try cache.save(usefulReading(50, at: date, reset: date.addingTimeInterval(7200)), for: account)
     }
-    #expect(cache.loadHistory(accounts: [account], now: usefulNow.addingTimeInterval(72000))[account.id]?.count == SnapshotCache.maximumPoints)
+    #expect(cache.loadHistory(accounts: [account], now: usefulNow.addingTimeInterval(72000))[account.id]?.count == 122)
     try cache.remove(account)
     #expect(cache.load(accounts: [account], now: usefulNow).isEmpty)
 }

@@ -162,7 +162,7 @@ struct Dashboard: View {
                                     .frame(width: 14).foregroundStyle(.orange)
                                 Text(account.name).fontWeight(.medium).lineLimit(1)
                                 Spacer(minLength: 4)
-                                Text(store.needsSignIn(account) ? "Sign in" : (store.errors[account.id] != nil ? "Check" : status.title)).foregroundStyle(.secondary).lineLimit(1)
+                                Text(store.needsSignIn(account) ? "Reconnect" : (store.errors[account.id] != nil ? "Check" : status.title)).foregroundStyle(.secondary).lineLimit(1)
                                 Image(systemName: "chevron.right").font(.system(size: 8, weight: .semibold)).foregroundStyle(.tertiary)
                             }.font(.system(size: 11)).contentShape(Rectangle())
                         }.buttonStyle(.plain)
@@ -729,8 +729,8 @@ struct AccountsView: View {
                     ForEach(row) { account in
                         let points = store.history(for: account).filter { $0.timestamp >= store.now.addingTimeInterval(-Double(historyHours) * 3600) && $0.timestamp <= store.now }
                         HistoryCard(account: account, points: points, snapshot: store.snapshots[account.id],
-                                    error: store.errors[account.id] != nil, cached: store.isCached(account), now: store.now,
-                                    openUsage: { store.openUsage(account) }, manage: { renaming = account })
+                                    error: store.errors[account.id] != nil, cached: store.isCached(account), needsReconnect: store.needsSignIn(account), now: store.now,
+                                    openUsage: { if store.needsSignIn(account) { store.selectedAccountID = account.id; section = .accounts } else { store.openUsage(account) } }, manage: { renaming = account })
                             .frame(maxWidth: .infinity)
                     }
                 }
@@ -987,6 +987,19 @@ struct AccountsView: View {
                 SettingsCard {
                     VStack(alignment: .leading, spacing: 12) {
                         AccountReading(account: account, snapshot: store.snapshots[account.id], error: store.errors[account.id], now: store.now, cached: store.isCached(account))
+                        if store.needsSignIn(account), account.kind == .claudeCode {
+                            VStack(alignment: .leading, spacing: 6) {
+                                Label(account.usesExistingClaude == true ? "One-time reconnect required" : "Reconnect to resume readings", systemImage: "person.crop.circle.badge.exclamationmark")
+                                    .font(.headline)
+                                Text(account.usesExistingClaude == true
+                                     ? "This update separates your Claude accounts. Reconnect with \(account.expectedIdentity ?? "this account’s email") once so switching in Claude Desktop cannot change whose usage appears here."
+                                     : "Sign in with \(account.expectedIdentity ?? "this account’s email") to resume automatic background readings. Verified history is kept while you reconnect.")
+                                    .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                                Text("You can close Claude Desktop and Terminal after sign-in. No need to add the account again.")
+                                    .font(.caption).foregroundStyle(.secondary)
+                            }.padding(12).frame(maxWidth: .infinity, alignment: .leading)
+                                .background(Color.orange.opacity(0.09), in: RoundedRectangle(cornerRadius: 10))
+                        }
                         if (account.kind == .claudeCode || account.kind == .codex) && (store.needsSignIn(account) || account.expectedIdentity == nil) {
                             Button { store.openAgentHelp(for: account.kind, account: account) } label: {
                                 Label("Copy setup prompt & open \(account.kind == .claudeCode ? "Claude" : "Codex")", systemImage: "sparkles")
@@ -1034,7 +1047,7 @@ struct AccountsView: View {
             HStack(spacing: 12) {
                 if store.needsSignIn(account) && store.signingIn != account.id && store.waitingForClaude[account.id] == nil {
                     if account.kind.isAPI { Button("Replace key") { replacement = ""; keyAccount = account } }
-                    else if account.kind == .claudeCode { Button("Sign in") { store.openClaude(account, login: true) } }
+                    else if account.kind == .claudeCode { Button("Reconnect account") { store.openClaude(account, login: true) } }
                     else if account.kind == .codex && !account.usesExistingCodex { Button("Sign in with this account") { store.signIn(account, openBrowser: false) }.disabled(busyConnecting) }
                     else if account.kind == .copilot {
                         Button("Sign in to Copilot…") { store.openCopilotSignIn() }
@@ -1236,6 +1249,7 @@ private struct HistoryCard: View {
     let snapshot: Snapshot?
     let error: Bool
     let cached: Bool
+    let needsReconnect: Bool
     let now: Date
     var openUsage: () -> Void
     var manage: () -> Void
@@ -1277,7 +1291,7 @@ private struct HistoryCard: View {
                         .font(.system(size: 24, weight: .semibold, design: .rounded)).monospacedDigit()
                         .foregroundStyle(error || cached || status.state == .stale || status.state == .restricted || !account.enabled ? Color.secondary : Color.primary)
                     Spacer(minLength: 4)
-                    Text(!account.enabled ? "Paused" : cached ? "Saved reading" : status.title)
+                    Text(needsReconnect ? "Reconnect required" : !account.enabled ? "Paused" : cached ? "Saved reading" : status.title)
                         .font(.system(size: 9, weight: .medium)).foregroundStyle(statusColor).lineLimit(1)
                 }
                 Text(status.resetText(at: now) ?? (account.kind.isAPI ? metric : "Current allowance"))
@@ -1333,7 +1347,7 @@ private struct HistoryCard: View {
 
                 }
                 HStack(spacing: 8) {
-                    Button(action: openUsage) { Label("Open usage", systemImage: "arrow.up.right").frame(maxWidth: .infinity).frame(height: 24) }
+                    Button(action: openUsage) { Label(needsReconnect ? "Reconnect account" : "Open usage", systemImage: needsReconnect ? "person.crop.circle.badge.exclamationmark" : "arrow.up.right").frame(maxWidth: .infinity).frame(height: 24) }
                     Button(action: manage) { Image(systemName: "slider.horizontal.3").frame(width: 28, height: 24) }.help("Name & color").accessibilityLabel("Edit " + account.name)
                 }.font(.system(size: 11, weight: .medium)).buttonStyle(QuietButtonStyle())
             }

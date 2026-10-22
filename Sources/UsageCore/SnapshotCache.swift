@@ -27,7 +27,7 @@ public struct UsageHistoryPoint: Codable, Equatable, Identifiable, Sendable {
 
 /// Private, bounded readings, never credentials. Cached timestamps and reset dates are preserved.
 public struct SnapshotCache: Sendable {
-    public static let maximumPoints = 96
+    public static let maximumPoints = 2017
     private let directory: URL
     private struct Record: Codable {
         var accountID: UUID
@@ -36,13 +36,14 @@ public struct SnapshotCache: Sendable {
         var credentialRevision: UUID?
         var identity: String?
         var claudeProfileIsolated: Bool?
+        var snapshotUsable: Bool?
         var snapshot: Snapshot
         var history: [UsageHistoryPoint]
     }
     public init(root: URL = Paths.root) { directory = root.appendingPathComponent("Readings", isDirectory: true) }
     private func file(_ account: Account) -> URL { directory.appendingPathComponent("\(account.id.uuidString).json") }
     private func read(_ account: Account, now: Date) -> Record? {
-        guard let data = try? Paths.readData(file(account), limit: 131_072),
+        guard let data = try? Paths.readData(file(account), limit: 1_048_576),
               var record = try? JSONDecoder().decode(Record.self, from: data),
               record.accountID == account.id, record.kind == account.kind, record.scopeID == account.scopeID,
               record.credentialRevision == account.credentialRevision,
@@ -69,7 +70,7 @@ public struct SnapshotCache: Sendable {
     public func load(accounts: [Account], now: Date = Date()) -> [UUID: Snapshot] {
         let duplicates = duplicateSubscriptionAccountIDs(in: accounts)
         return accounts.prefix(1000).filter { !duplicates.contains($0.id) }.reduce(into: [:]) { result, account in
-            if let record = read(account, now: now) { result[account.id] = record.snapshot }
+            if let record = read(account, now: now), record.snapshotUsable != false { result[account.id] = record.snapshot }
         }
     }
     public func loadHistory(accounts: [Account], now: Date = Date()) -> [UUID: [UsageHistoryPoint]] {
@@ -104,6 +105,12 @@ public struct SnapshotCache: Sendable {
         try Paths.write(Record(accountID: account.id, kind: account.kind, scopeID: account.scopeID, credentialRevision: account.credentialRevision,
                                identity: identity, claudeProfileIsolated: account.kind == .claudeCode ? account.usesExistingClaude != true : nil, snapshot: snapshot, history: history), to: file(account))
         return history
+    }
+    /// Reauthentication invalidates the current reading, not verified historical samples.
+    public func invalidateSnapshot(_ account: Account, now: Date = Date()) throws {
+        guard var record = read(account, now: now) else { return }
+        record.snapshotUsable = false
+        try Paths.write(record, to: file(account))
     }
     public func remove(_ account: Account) throws {
         let url = file(account)

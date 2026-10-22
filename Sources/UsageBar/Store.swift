@@ -358,7 +358,7 @@ final class AppStore: ObservableObject {
                 connectionVersions[account.id] = UUID()
                 authenticationRequired.insert(account.id)
                 snapshots[account.id] = nil; errors[account.id] = nil; schedules[account.id] = PollState()
-                clearCachedReading(account)
+                clearCachedReading(account, preserveHistory: true)
                 claudeSignedIn[account.id] = false
                 try? FileManager.default.removeItem(at: Paths.feed(account.id, root: root))
             }
@@ -550,7 +550,7 @@ final class AppStore: ObservableObject {
                         switch identityError {
                         case .accountChanged, .duplicateAccount, .claudeDedicatedSignInRequired:
                             snapshots[account.id] = nil
-                            clearCachedReading(account)
+                            clearCachedReading(account, preserveHistory: true)
                             authenticationRequired.insert(account.id)
                         default: break
                         }
@@ -593,7 +593,7 @@ final class AppStore: ObservableObject {
         signingIn = account.id
         errors[account.id] = nil
         snapshots[account.id] = nil
-        clearCachedReading(account)
+        clearCachedReading(account, preserveHistory: true)
         loginTask = Task { [self] in
             do {
                 try await CodexAdapter(executable: executable, root: root).login(account: account) { [weak self] url in
@@ -737,22 +737,24 @@ final class AppStore: ObservableObject {
         let status = AllowanceStatus.evaluate(snapshot: snapshot, kind: account.kind, now: now)
         if ![.unavailable, .stale, .restricted].contains(status.state),
            points.last.map({ point.timestamp.timeIntervalSince($0.timestamp) >= 300 }) ?? true { points.append(point) }
-        usageHistory[account.id] = Array(points.filter { snapshot.observedAt.timeIntervalSince($0.timestamp) <= 604800 }.suffix(96))
+        usageHistory[account.id] = Array(points.filter { snapshot.observedAt.timeIntervalSince($0.timestamp) <= 604800 }.suffix(SnapshotCache.maximumPoints))
         let previous = cacheTask, root = root
         cacheTask = Task.detached(priority: .utility) {
             await previous?.value
             _ = try? SnapshotCache(root: root).save(snapshot, for: account)
         }
     }
-    private func clearCachedReading(_ account: Account) {
-        cachedAccounts.remove(account.id); usageHistory[account.id] = nil
+    private func clearCachedReading(_ account: Account, preserveHistory: Bool = false) {
+        cachedAccounts.remove(account.id)
+        if !preserveHistory { usageHistory[account.id] = nil }
         alerts.remove(account.id)
         pendingAlerts.removeAll { $0.accountID == account.id }
         guard !demo, !readOnly else { return }
         let previous = cacheTask, root = root, state = alerts
         cacheTask = Task.detached(priority: .utility) {
             await previous?.value
-            try? SnapshotCache(root: root).remove(account)
+            if preserveHistory { try? SnapshotCache(root: root).invalidateSnapshot(account) }
+            else { try? SnapshotCache(root: root).remove(account) }
             try? Paths.write(state, to: root.appendingPathComponent("alerts.json"))
         }
     }
