@@ -6,7 +6,7 @@ public enum MenuEntryPresentation {
         if entry.isBalance { return entry.balanceUSD?.formatted(.currency(code: "USD").precision(.fractionLength(0...2))) ?? "—" }
         var value = entry.isUnlimited ? "∞" : entry.remainingPercent.map { "\(Int($0))%" } ?? "—"
         if !entry.isUnlimited, let period = entry.primaryPeriod { value = period + " " + value }
-        if entry.showsSession, !entry.isUnlimited {
+        if preferences.showSessionInMenuBar, entry.showsSession, !entry.isUnlimited {
             value += " · 5h " + (entry.sessionRemainingPercent.map { "\(Int($0))%" } ?? "—")
         }
         guard entry.accountCount > 1, preferences.display != .byAccount else { return value }
