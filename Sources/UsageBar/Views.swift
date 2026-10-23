@@ -430,6 +430,11 @@ private struct AccountReading: View {
     }
 }
 
+private enum SettingsSection: String, CaseIterable, Identifiable {
+    case general = "General", menuBar = "Menu Bar", dropdown = "Dropdown", updates = "Updates", advanced = "Advanced"
+    var id: String { rawValue }
+}
+
 struct AccountsView: View {
     @ObservedObject var store: AppStore
     var showMenu: () -> Void
@@ -447,6 +452,8 @@ struct AccountsView: View {
     @ViewState private var keyAccount: Account?
     @ViewState private var replacement = ""
     @ViewState private var section: DashboardSection = .history
+    @ViewState private var dropdownPreviewExpandedID: UUID?
+    @ViewState private var settingsSection: SettingsSection = .menuBar
     @ViewState private var historyHours = 24
     @ViewState private var historyAccountID: UUID?
     @AppStorage("hideFromDock") private var hideFromDock = true
@@ -571,10 +578,22 @@ struct AccountsView: View {
     private var selectedTabContent: some View {
         VStack(alignment: .leading, spacing: 18) {
             Text("Settings").font(.system(size: 20, weight: .semibold))
-            menuBarSettings
-            behaviorSettings
-            UpdateSettings(updater: store.updater)
-            moreConnections
+            Picker("Settings section", selection: $settingsSection) {
+                ForEach(SettingsSection.allCases) { section in Text(section.rawValue).tag(section) }
+            }.pickerStyle(.segmented).labelsHidden().controlSize(.large)
+            switch settingsSection {
+            case .general:
+                appearanceSettings
+                behaviorSettings
+            case .menuBar:
+                menuBarSettings
+            case .dropdown:
+                dropdownSettings
+            case .updates:
+                UpdateSettings(updater: store.updater)
+            case .advanced:
+                moreConnections
+            }
         }
     }
     @ViewBuilder private var accountsContent: some View {
@@ -590,19 +609,57 @@ struct AccountsView: View {
                 simpleConnectOptions
             }
     }
+    private var serviceKinds: [ConnectionKind] { [.claudeCode, .codex, .copilot, .openAIAPI, .claudeAPI, .openRouter, .vercelGateway, .xai] }
     private var overviewContent: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: 18) {
             HStack {
-                Text("Connect a service").font(.system(size: 15, weight: .semibold))
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Your accounts").font(.system(size: 20, weight: .semibold))
+                    Text("Connect multiple accounts from each service.").font(.callout).foregroundStyle(.secondary)
+                }
                 Spacer()
                 agentHelpMenu.fixedSize()
             }
-            LazyVGrid(columns: [GridItem(.adaptive(minimum: 210, maximum: 340), spacing: 10)], spacing: 10) {
-                ForEach([ConnectionKind.claudeCode, .codex, .copilot, .openAIAPI, .claudeAPI, .openRouter, .vercelGateway, .xai], id: \.self) { kind in
-                    connectionTile(kind)
+            if !store.accounts.isEmpty {
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 280), spacing: 12, alignment: .top)], alignment: .leading, spacing: 12) {
+                    ForEach(serviceKinds.filter { kind in store.accounts.contains { $0.kind == kind } }, id: \.self) { kind in
+                        connectionTile(kind)
+                    }
+                }
+            }
+            VStack(alignment: .leading, spacing: 10) {
+                Text("Add a service").font(.system(size: 13, weight: .semibold)).foregroundStyle(.secondary)
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 210), spacing: 10)], spacing: 10) {
+                    ForEach(serviceKinds.filter { kind in !store.accounts.contains { $0.kind == kind } }, id: \.self) { kind in
+                        Button { connectService(kind) } label: {
+                            HStack(spacing: 10) {
+                                ProviderMark(provider: kind.provider, size: 23).foregroundStyle(providerAccent(kind.provider))
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text(serviceTitle(kind)).font(.system(size: 12, weight: .semibold))
+                                    Text(kind.isBalance ? "Credits & balance" : kind.isAPI ? "API spending" : "Subscription allowance").font(.system(size: 10)).foregroundStyle(.secondary)
+                                }
+                                Spacer(minLength: 0)
+                                Image(systemName: "plus.circle").foregroundStyle(.secondary)
+                            }.frame(maxWidth: .infinity, minHeight: 42, alignment: .leading).padding(12)
+                                .background(Color.primary.opacity(0.035), in: RoundedRectangle(cornerRadius: 12))
+                                .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(Color.primary.opacity(0.08)))
+                        }.buttonStyle(.plain).disabled(busyConnecting || store.demo).help("Connect " + serviceTitle(kind))
+                    }
                 }
             }
             setupProgress
+        }
+    }
+    private func serviceTitle(_ kind: ConnectionKind) -> String {
+        switch kind {
+        case .claudeCode: "Claude Code"
+        case .codex: "Codex"
+        case .copilot: "GitHub Copilot"
+        case .openAIAPI: "OpenAI API"
+        case .claudeAPI: "Claude API"
+        case .openRouter: "OpenRouter"
+        case .vercelGateway: "Vercel AI Gateway"
+        case .xai: "xAI"
         }
     }
     private func connectionTile(_ kind: ConnectionKind) -> some View {
@@ -647,7 +704,7 @@ struct AccountsView: View {
                 }
                 HStack {
                     if let recommended {
-                        Button("Open") { store.useAccount(recommended) }.controlSize(.small).disabled(store.demo)
+                        Button(kind == .claudeCode ? "Open Claude Code" : "Open Codex") { store.useAccount(recommended) }.controlSize(.small).disabled(store.demo)
                     }
                     Spacer(minLength: 0)
                     if kind == .copilot && !accounts.isEmpty {
@@ -1087,7 +1144,7 @@ struct AccountsView: View {
     }
     private var behaviorSettings: some View {
         VStack(alignment: .leading, spacing: 16) {
-            GroupBox("Startup") {
+            GroupBox("General") {
                 VStack(spacing: 12) {
                     Toggle("Launch at login", isOn: Binding(get: { store.launchAtLogin }, set: { store.setLaunchAtLogin($0) }))
                     Divider()
@@ -1099,10 +1156,7 @@ struct AccountsView: View {
                     if store.loginItemNeedsApproval {
                         Link("Open Login Items Settings…", destination: URL(string: "x-apple.systempreferences:com.apple.LoginItems-Settings.extension")!)
                     }
-                }.padding(10)
-            }
-            GroupBox("Usage monitoring") {
-                VStack(spacing: 12) {
+                    Divider()
                     Toggle("Refresh automatically", isOn: Binding(get: { !store.paused }, set: { if $0 == store.paused { store.togglePause() } }))
                     Divider()
                     HStack {
@@ -1120,38 +1174,83 @@ struct AccountsView: View {
                     Toggle("Allowance notifications", isOn: Binding(get: { store.notificationsEnabled }, set: { store.setNotificationsEnabled($0) }))
                 }.padding(10)
             }
-            HStack {
-                Link("Submit Feedback…", destination: URL(string: "https://github.com/jamesatFRM/Ai-llowance/issues/new")!)
-                Spacer()
-                Text("Ai-llowance " + AppUpdater.version).foregroundStyle(.secondary)
-            }
-        }.font(.system(size: 13)).toggleStyle(.switch).controlSize(.regular).disabled(store.demo)
+        }.font(.system(size: 13)).toggleStyle(SettingsSwitchStyle()).controlSize(.regular).disabled(store.demo)
     }
     private var moreConnections: some View {
-        SettingsCard {
-            DisclosureGroup("More tools & diagnostics") {
-                VStack(alignment: .leading, spacing: 12) {
-                    HStack {
-                        Text("Manual usage links").font(.system(size: 11, weight: .medium))
-                        Spacer()
-                        Link("Cursor ↗", destination: URL(string: "https://www.cursor.com/dashboard")!)
-                        Link("Gemini ↗", destination: URL(string: "https://aistudio.google.com/usage")!)
-                    }.font(.system(size: 11))
-                    Text("These links open provider dashboards; automatic quota tracking is not connected.").font(.system(size: 10)).foregroundStyle(.secondary)
-                    Divider().opacity(0.4)
-                    HStack {
-                        Button("Find installed tools") { store.rediscoverTools() }
-                        Button("Choose Codex…") { store.chooseExecutable() }
-                        Button("Choose Claude…") { store.chooseClaudeExecutable() }
-                        Button("Choose Copilot…") { store.chooseCopilotExecutable() }
-                    }.controlSize(.small).font(.system(size: 10))
-                    Text((AppUpdater.isPreview ? "Preview release · not notarized. " : "") + "No Ai-llowance analytics or backend.").font(.system(size: 10)).foregroundStyle(.secondary)
-                }.padding(.top, 10)
-            }.font(.system(size: 12, weight: .medium))
-        }.disabled(store.demo)
-    }
-    private var menuBarSettings: some View {
         VStack(alignment: .leading, spacing: 16) {
+            GroupBox("Installed tools") {
+                VStack(spacing: 12) {
+                    HStack {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("Find installed tools")
+                            Text("Check this Mac for supported command-line apps.").font(.callout).foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        Button("Scan Again") { store.rediscoverTools() }
+                    }
+                    Divider()
+                    HStack { Text("Codex location"); Spacer(); Button("Choose…") { store.chooseExecutable() }.accessibilityLabel("Choose Codex location") }
+                    Divider()
+                    HStack { Text("Claude location"); Spacer(); Button("Choose…") { store.chooseClaudeExecutable() }.accessibilityLabel("Choose Claude location") }
+                    Divider()
+                    HStack { Text("Copilot location"); Spacer(); Button("Choose…") { store.chooseCopilotExecutable() }.accessibilityLabel("Choose Copilot location") }
+                }.padding(10)
+            }
+            GroupBox("Provider dashboards") {
+                VStack(alignment: .leading, spacing: 12) {
+                    HStack { Text("Cursor"); Spacer(); Link("Open Dashboard ↗", destination: URL(string: "https://www.cursor.com/dashboard")!) }
+                    Divider()
+                    HStack { Text("Gemini"); Spacer(); Link("Open Dashboard ↗", destination: URL(string: "https://aistudio.google.com/usage")!) }
+                    Text("These services open in your browser. Automatic tracking is not connected.")
+                        .font(.callout).foregroundStyle(.secondary)
+                }.padding(10)
+            }
+            Label("No Ai-llowance analytics or backend.", systemImage: "lock.shield")
+                .font(.callout).foregroundStyle(.secondary)
+        }.font(.system(size: 13)).controlSize(.regular).disabled(store.demo)
+    }
+    private var dropdownSettings: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            GroupBox("Dropdown") {
+                VStack(alignment: .leading, spacing: 8) {
+                    Toggle("Always show individual limits", isOn: Binding(get: { store.menuPreferences.detailedQuotaLabels }, set: { store.setDetailedQuotaLabels($0) }))
+                    Text("Show each limit and reset time without expanding an account.")
+                        .font(.callout).foregroundStyle(.secondary)
+                }.padding(10)
+            }
+            GroupBox("Live dropdown preview") {
+                VStack(alignment: .leading, spacing: 10) {
+                    Label("Ai-llowance", systemImage: "chart.bar.fill").font(.headline)
+                    if store.accounts.isEmpty {
+                        Text("Connect an account to preview your dropdown.").foregroundStyle(.secondary)
+                    }
+                    ForEach(MenuProvider.allCases, id: \.self) { provider in
+                        let accounts = store.accounts.filter { $0.kind.provider == provider }
+                        if !accounts.isEmpty {
+                            VStack(alignment: .leading, spacing: 6) {
+                                Text(provider.title).font(.system(size: 10, weight: .semibold)).foregroundStyle(.secondary)
+                                ForEach(accounts) { account in
+                                    CompactAccountRow(account: account, snapshot: store.snapshots[account.id], error: store.errors[account.id], now: store.now, cached: store.isCached(account),
+                                        expanded: dropdownPreviewExpandedID == account.id,
+                                        detailedLabels: store.menuPreferences.detailedQuotaLabels,
+                                        colorByAllowance: store.menuPreferences.colorByAllowance,
+                                        history: dropdownPreviewExpandedID == account.id ? store.history(for: account) : [],
+                                        expand: { dropdownPreviewExpandedID = dropdownPreviewExpandedID == account.id ? nil : account.id },
+                                        manage: { store.selectedAccountID = account.id; section = .accounts },
+                                        openUsage: { store.openUsage(account) })
+                                }
+                            }.padding(11).modifier(InsetSurface(tint: providerAccent(provider), cornerRadius: 14))
+                        }
+                    }
+                }.padding(10).frame(maxWidth: 350)
+                    .frame(maxWidth: .infinity)
+            }
+            Text("Your current accounts and readings. Click an account to preview its expanded details.")
+                .font(.callout).foregroundStyle(.secondary)
+        }.font(.system(size: 13)).toggleStyle(SettingsSwitchStyle()).disabled(store.demo)
+    }
+
+    private var appearanceSettings: some View {
             GroupBox("Appearance") {
                 VStack(spacing: 12) {
                     HStack {
@@ -1161,14 +1260,12 @@ struct AccountsView: View {
                             ForEach(AppTheme.allCases) { theme in Text(theme.title).tag(theme) }
                         }.pickerStyle(.segmented).labelsHidden().frame(width: 240)
                     }
-                    Divider()
-                    VStack(alignment: .leading, spacing: 6) {
-                        Toggle("Show all quota windows in the dropdown", isOn: Binding(get: { store.menuPreferences.detailedQuotaLabels }, set: { store.setDetailedQuotaLabels($0) }))
-                        Text("Show a separate row and reset time for every reported limit, including model-specific limits. When off, keep accounts compact; click an account to see its limits.")
-                            .font(.system(size: 11)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-                    }
                 }.padding(10)
             }
+        .font(.system(size: 13)).disabled(store.demo)
+    }
+    private var menuBarSettings: some View {
+        VStack(alignment: .leading, spacing: 16) {
             GroupBox("Menu bar") {
                 VStack(alignment: .leading, spacing: 12) {
                     ScrollView(.horizontal, showsIndicators: false) {
@@ -1176,20 +1273,21 @@ struct AccountsView: View {
                             if store.menuEntries.isEmpty { Label("Usage", systemImage: "chart.bar") }
                             ForEach(Array(store.menuEntries.enumerated()), id: \.offset) { _, entry in
                                 HStack(spacing: 4) {
-                                    ProviderMark(provider: entry.provider, size: 13)
+                                    ProviderMark(provider: entry.provider, size: ProviderImages.menuIconSize, isMenuBar: true)
                                     Text(MenuEntryPresentation.title(entry, preferences: store.menuPreferences))
                                         .foregroundStyle(store.menuPreferences.colorByAllowance && !entry.isBalance && entry.remainingPercent != nil ? Color(nsColor: .allowance(entry.remainingPercent!)) : NSColor.accountHex(entry.colorHex).map { Color(nsColor: $0) } ?? Color.primary)
                                 }
                             }
                         }.font(.system(size: 12, weight: .medium)).monospacedDigit().padding(12)
                     }.background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 9))
-                    Text("Live menu-bar preview").font(.system(size: 10)).foregroundStyle(.secondary)
+                    Label("Live preview · changes appear immediately", systemImage: "menubar.rectangle")
+                        .font(.system(size: 11)).foregroundStyle(.secondary)
                     Divider()
 
                     HStack {
-                        Text("Display")
+                        Text("Group usage")
                         Spacer()
-                        Picker("Display", selection: Binding(get: { store.menuPreferences.display }, set: { store.setMenuDisplay($0) })) {
+                        Picker("Group usage", selection: Binding(get: { store.menuPreferences.display }, set: { store.setMenuDisplay($0) })) {
                             ForEach(MenuDisplay.allCases) { mode in Text(mode.title).tag(mode) }
                         }.pickerStyle(.segmented).labelsHidden().frame(width: 300)
                     }
@@ -1205,26 +1303,61 @@ struct AccountsView: View {
                         }
                     }
                     Divider()
-                    Toggle("Show 5-hour allowance in menu bar", isOn: Binding(get: { store.menuPreferences.showSessionInMenuBar }, set: { store.setShowSessionInMenuBar($0) }))
-                    Text("Show the additional 5h value beside the weekly percentage. Dashboard and dropdown details stay available.")
+                    Toggle("Show 5-hour allowance", isOn: Binding(get: { store.menuPreferences.showSessionInMenuBar }, set: { store.setShowSessionInMenuBar($0) }))
+                    Text("Show 5-hour usage beside weekly usage.")
+                        .font(.callout).foregroundStyle(.secondary)
+                    HStack {
+                        Text("Weekly label")
+                        Spacer()
+                        Picker("Weekly label", selection: Binding(get: { store.menuPreferences.weeklyMenuLabel }, set: { store.setWeeklyMenuLabel($0) })) {
+                            ForEach(WeeklyMenuLabel.allCases) { label in Text(label.title).tag(label) }
+                        }.pickerStyle(.segmented).labelsHidden().frame(width: 190)
+                            .disabled(!store.menuPreferences.showSessionInMenuBar)
+                    }
+                    HStack {
+                        Text("5-hour label")
+                        Spacer()
+                        Picker("5-hour label", selection: Binding(get: { store.menuPreferences.sessionMenuLabel }, set: { store.setSessionMenuLabel($0) })) {
+                            ForEach(SessionMenuLabel.allCases) { label in Text(label.title).tag(label) }
+                        }.pickerStyle(.segmented).labelsHidden().frame(width: 190)
+                    }
+                    Text("None hides the label, not the percentage. Weekly-only mode has no weekly label.")
                         .font(.callout).foregroundStyle(.secondary)
                     Divider()
-                    Toggle("Color by remaining allowance", isOn: Binding(get: { store.menuPreferences.colorByAllowance }, set: { store.setColorByAllowance($0) }))
-                    Text("White at 100%, cool colors through the middle, red at 0%. Overrides custom menu colors for percentages.")
+                    Toggle("Color by allowance", isOn: Binding(get: { store.menuPreferences.colorByAllowance }, set: { store.setColorByAllowance($0) }))
+                    Text("Cool colors turn warm as allowance runs low.")
                         .font(.callout).foregroundStyle(.secondary)
                     Divider()
-                    Toggle("Include all accounts", isOn: Binding(get: { store.menuPreferences.allAccounts }, set: { store.setAllMenuAccounts($0) }))
+                    HStack {
+                        Text("Accounts shown")
+                        Spacer()
+                        Picker("Accounts shown", selection: Binding(get: { store.menuPreferences.allAccounts }, set: { store.setAllMenuAccounts($0) })) {
+                            Text("All accounts").tag(true)
+                            Text("Selected accounts").tag(false)
+                        }.labelsHidden().frame(width: 190)
+                    }
                     if !store.menuPreferences.allAccounts {
                         ForEach(store.accounts.filter { !$0.kind.isAPI || $0.kind.isBalance }) { account in
                             Toggle(account.name, isOn: Binding(get: { store.menuPreferences.selectedAccountIDs.contains(account.id) }, set: { store.setMenuAccount(account, included: $0) })).toggleStyle(.checkbox)
                         }
                     }
-                    Text("Grouped percentages combine accounts; API credit balances stay separate.").font(.callout).foregroundStyle(.secondary)
                 }.padding(10)
             }
-        }.font(.system(size: 13)).toggleStyle(.switch).controlSize(.regular).disabled(store.demo)
+        }.font(.system(size: 13)).toggleStyle(SettingsSwitchStyle()).controlSize(.regular).disabled(store.demo)
     }
 
+}
+
+// Keep native switch controls aligned consistently across settings groups.
+private struct SettingsSwitchStyle: ToggleStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        HStack(spacing: 20) {
+            configuration.label
+            Spacer(minLength: 12)
+            Toggle(isOn: configuration.$isOn) { configuration.label }
+                .labelsHidden().toggleStyle(.switch).controlSize(.small)
+        }.frame(minHeight: 26)
+    }
 }
 
 private struct UpdateCheckButton: View {
@@ -1237,23 +1370,28 @@ private struct UpdateCheckButton: View {
 private struct UpdateSettings: View {
     @ObservedObject var updater: AppUpdater
     var body: some View {
-        GroupBox("Software Update") {
+        GroupBox("Updates & support") {
             VStack(alignment: .leading, spacing: 12) {
                 HStack {
-                    Label("Updates", systemImage: "arrow.down.circle").font(.system(size: 13, weight: .semibold))
+                    Text("Ai-llowance " + AppUpdater.version).font(.system(size: 13, weight: .medium))
                     Spacer()
-                    Text(AppUpdater.version).font(.system(size: 13)).foregroundStyle(.secondary)
                     Button("Check for Updates…") { updater.check() }.disabled(!updater.canCheck).controlSize(.regular)
                 }
                 Toggle("Automatically check for updates", isOn: Binding(get: { updater.automaticChecks }, set: { updater.setAutomaticChecks($0) }))
-                    .toggleStyle(.switch).controlSize(.regular).font(.system(size: 13)).disabled(!updater.canCheck)
-                Text("Updates install when you choose. Your accounts stay on this Mac.").font(.system(size: 12)).foregroundStyle(.secondary)
+                    .toggleStyle(SettingsSwitchStyle()).controlSize(.regular).font(.system(size: 13)).disabled(!updater.canCheck)
+                Divider()
+                HStack {
+                    Text("Questions or suggestions?").font(.system(size: 12)).foregroundStyle(.secondary)
+                    Spacer()
+                    Link("Send Feedback…", destination: URL(string: "https://github.com/jamesatFRM/Ai-llowance/issues/new")!)
+                }
             }.padding(10)
         }
     }
 }
 
 private struct HistoryCard: View {
+    @ViewState private var hoveredDate: Date?
     let account: Account
     let points: [UsageHistoryPoint]
     let snapshot: Snapshot?
@@ -1282,11 +1420,46 @@ private struct HistoryCard: View {
     }
     private var plotted: [UsageHistoryPoint] { points.filter { value($0) != nil } }
     private var samples: [HistorySample] { HistorySeries.samples(points, kind: account.kind) }
+    private var hoveredSample: HistorySample? {
+        guard let hoveredDate else { return nil }
+        return samples.min { abs($0.timestamp.timeIntervalSince(hoveredDate)) < abs($1.timestamp.timeIntervalSince(hoveredDate)) }
+    }
+    private var historyCaption: String {
+        guard !account.kind.isAPI else { return "Recorded history" }
+        let hours = UsageHeatmap.hours(points: points, kind: account.kind, calendar: .current)
+            .filter { Calendar.current.isDate($0.key, inSameDayAs: now) }
+        guard !hours.isEmpty else { return "Collecting today's history" }
+        return String(format: "Observed today: %.1f pts used", hours.values.reduce(0, +))
+    }
+    private var sessionMeter: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            if !account.kind.isAPI, let session = snapshot?.sessionWindow(for: account.kind),
+               session.id != snapshot?.displayWindow(for: account.kind)?.id {
+                HStack {
+                    Text("5-hour").foregroundStyle(.secondary)
+                    Text("\(Int(session.remainingPercent))% left").monospacedDigit()
+                    Spacer(minLength: 4)
+                    Text(resetText(session.resetsAt, at: now)).foregroundStyle(.secondary).lineLimit(1)
+                }.font(.system(size: 10, weight: .medium))
+                GeometryReader { geometry in
+                    Capsule().fill(Color.primary.opacity(0.06))
+                        .overlay(alignment: .leading) {
+                            Capsule().fill(error || cached ? Color.secondary : graphTint.opacity(0.8))
+                                .frame(width: geometry.size.width * max(0, min(100, session.remainingPercent)) / 100)
+                        }
+                }.frame(height: 3)
+            } else {
+                Text(account.kind.isAPI ? (account.kind.isBalance ? "Prepaid credits" : "Monthly spending") : "No additional 5-hour limit reported")
+                    .font(.system(size: 10)).foregroundStyle(.secondary)
+            }
+        }.frame(height: 26, alignment: .center)
+    }
+
     var body: some View {
         let series = HistorySeries.smoothTrend(samples)
         let segmentCounts = Dictionary(grouping: series, by: \.segment).mapValues(\.count)
         SettingsCard(inset: 10) {
-            VStack(alignment: .leading, spacing: 6) {
+            VStack(alignment: .leading, spacing: 5) {
                 HStack {
                     ProviderMark(provider: account.kind.provider, size: 16).foregroundStyle(dashboardTint)
                     Text(account.name).font(.system(size: 12, weight: .semibold)).foregroundStyle(dashboardTint)
@@ -1309,15 +1482,10 @@ private struct HistoryCard: View {
                 }
                 Text(snapshot?.displayWindow(for: account.kind).map { resetText($0.resetsAt, at: now) } ?? (account.kind.isAPI ? metric : "Current allowance"))
                     .font(.system(size: 10)).foregroundStyle(.secondary).lineLimit(1)
-                if !account.kind.isAPI, let snapshot,
-                   let session = snapshot.sessionWindow(for: account.kind),
-                   session.id != snapshot.displayWindow(for: account.kind)?.id {
-                    Text("5h \(Int(session.remainingPercent))% left")
-                        .font(.system(size: 11, weight: .semibold)).monospacedDigit()
-                }
+                sessionMeter
                 if plotted.isEmpty {
                     Text("No readings in this range yet. History grows as this Mac refreshes your accounts.")
-                        .font(.system(size: 12)).foregroundStyle(.secondary).frame(maxWidth: .infinity, minHeight: 66)
+                        .font(.system(size: 12)).foregroundStyle(.secondary).frame(maxWidth: .infinity).frame(height: 80)
                 } else {
                     Chart {
                         ForEach(series) { sample in
@@ -1355,10 +1523,33 @@ private struct HistoryCard: View {
                             AxisValueLabel()
                         }
                     }
-                    .frame(height: 66).padding(.top, 2)
+                    .chartOverlay { proxy in
+                        GeometryReader { geometry in
+                            Rectangle().fill(.clear).contentShape(Rectangle())
+                                .onContinuousHover { phase in
+                                    switch phase {
+                                    case .active(let location):
+                                        if let plotFrame = proxy.plotFrame {
+                                            let frame = geometry[plotFrame]
+                                            hoveredDate = frame.contains(location) ? proxy.value(atX: location.x - frame.minX, as: Date.self) : nil
+                                        }
+                                    case .ended: hoveredDate = nil
+                                    }
+                                }
+                        }
+                    }
+                    .overlay(alignment: .topLeading) {
+                        if let sample = hoveredSample {
+                            Text(sample.timestamp.formatted(date: .omitted, time: .shortened) + " · " + (account.kind.isAPI ? String(format: "$%.2f", sample.value) : String(format: "%.1f%% left", sample.value)))
+                                .font(.system(size: 10, weight: .medium)).monospacedDigit()
+                                .padding(5).background(.regularMaterial, in: RoundedRectangle(cornerRadius: 5))
+                                .allowsHitTesting(false)
+                        }
+                    }
+                    .frame(height: 60).padding(.top, 2)
                     if let last = plotted.last {
                         HStack {
-                            Text("Smoothed history")
+                            Text(historyCaption).lineLimit(1).help("Observed allowance consumption today in the selected history range. Unmeasured gaps and resets are excluded; this is not total provider usage.")
                             Spacer()
                             Text(last.timestamp, format: .dateTime.month(.abbreviated).day().hour().minute())
                         }.font(.system(size: 10)).foregroundStyle(.secondary)
@@ -1391,7 +1582,7 @@ private struct ActivityHeatmap: View {
         SettingsCard(inset: 10) {
             VStack(alignment: .leading, spacing: 6) {
                 HStack {
-                    Label("Work rhythm", systemImage: "square.grid.3x3.fill").font(.system(size: 13, weight: .semibold))
+                    Label("Allowance activity", systemImage: "square.grid.3x3.fill").font(.system(size: 13, weight: .semibold))
                     Spacer()
                     Text("Last 7 days · " + (calendar.timeZone.abbreviation() ?? calendar.timeZone.identifier)).font(.system(size: 10)).foregroundStyle(.secondary)
                 }
@@ -1399,7 +1590,7 @@ private struct ActivityHeatmap: View {
                     GridRow {
                         Color.clear.frame(width: 62, height: 12)
                         ForEach(0..<24) { hour in
-                            Text(hour % 6 == 0 ? String(format: "%02d", hour) : "")
+                            Text(hour % 6 == 0 ? (hour == 0 ? "12a" : hour == 6 ? "6a" : hour == 12 ? "12p" : "6p") : "")
                                 .font(.system(size: 9)).foregroundStyle(.secondary).frame(maxWidth: .infinity)
                         }
                     }
@@ -1417,7 +1608,7 @@ private struct ActivityHeatmap: View {
                     ForEach(0..<5) { level in RoundedRectangle(cornerRadius: 2).fill(Brand.cyan.opacity(0.12 + Double(level) * 0.22)).frame(width: 12, height: 10) }
                     Text("More")
                     Spacer()
-                    Text("Allowance use · outlined = unmeasured").help("Recorded subscription allowance consumption, not coding hours. Gaps and resets are excluded; API spending is not mixed in.")
+                    Text("Outlined = no reading").help("Recorded subscription allowance consumption, not coding hours. Gaps and resets are excluded; API spending is not mixed in.")
                 }.font(.system(size: 9)).foregroundStyle(.secondary)
             }
         }

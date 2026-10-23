@@ -84,8 +84,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
         var descriptions: [String] = []
         for (index, entry) in entries.enumerated() {
             if index > 0 { title.append(NSAttributedString(string: "   ")) }
-            if let image = ProviderImages.image(entry.provider) {
-                image.size = NSSize(width: 13, height: 13)
+            if let image = ProviderImages.menuImage(entry.provider) {
                 let attachment = NSTextAttachment()
                 attachment.attachmentCell = NSTextAttachmentCell(imageCell: image)
                 title.append(NSAttributedString(attachment: attachment))

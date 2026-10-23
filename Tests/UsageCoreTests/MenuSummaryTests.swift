@@ -105,7 +105,7 @@ private func weeklyReading(_ remaining: Double, kind: ConnectionKind, sessionRem
         let entry = try #require(MenuSummary.entries(accounts: [account], snapshots: [account.id: reading], unavailable: [], preferences: preferences, now: menuTime).first)
         #expect(entry.remainingPercent == 97)
         #expect(entry.sessionRemainingPercent == 93)
-        #expect(MenuEntryPresentation.value(entry, preferences: preferences) == "Week 97% · 5h 93%")
+        #expect(MenuEntryPresentation.value(entry, preferences: preferences) == "w 97% · 5h 93%")
         #expect(reading.displayWindow(for: kind)?.remainingPercent == 97)
         #expect(AllowanceStatus.evaluate(snapshot: try weeklyReading(97, kind: kind, sessionRemaining: 0), kind: kind, now: menuTime).state == .exhausted)
     }
