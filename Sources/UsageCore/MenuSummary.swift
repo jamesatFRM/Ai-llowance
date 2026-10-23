@@ -22,18 +22,20 @@ public struct MenuPreferences: Codable, Equatable, Sendable {
     public var display: MenuDisplay = .byAccount
     public var aggregation: MenuAggregation = .average
     public var showAccountNames = true
+    public var showSessionInMenuBar = true
     public var detailedQuotaLabels = false
     public var colorByAllowance = false
     public var allAccounts = true
     public var selectedAccountIDs: Set<UUID> = []
     public init() {}
-    private enum CodingKeys: String, CodingKey { case colorByAllowance, theme, display, aggregation, showAccountNames, detailedQuotaLabels, allAccounts, selectedAccountIDs }
+    private enum CodingKeys: String, CodingKey { case showSessionInMenuBar, colorByAllowance, theme, display, aggregation, showAccountNames, detailedQuotaLabels, allAccounts, selectedAccountIDs }
     public init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
         theme = try values.decodeIfPresent(AppTheme.self, forKey: .theme) ?? .automatic
         display = try values.decodeIfPresent(MenuDisplay.self, forKey: .display) ?? .byAccount
         aggregation = try values.decodeIfPresent(MenuAggregation.self, forKey: .aggregation) ?? .average
         showAccountNames = try values.decodeIfPresent(Bool.self, forKey: .showAccountNames) ?? true
+        showSessionInMenuBar = try values.decodeIfPresent(Bool.self, forKey: .showSessionInMenuBar) ?? true
         detailedQuotaLabels = try values.decodeIfPresent(Bool.self, forKey: .detailedQuotaLabels) ?? false
         colorByAllowance = try values.decodeIfPresent(Bool.self, forKey: .colorByAllowance) ?? false
         allAccounts = try values.decodeIfPresent(Bool.self, forKey: .allAccounts) ?? true

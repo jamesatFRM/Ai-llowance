@@ -222,12 +222,6 @@ private struct CompactAccountRow: View {
         if let balanceLabel = snapshot?.balanceLabel { return balanceLabel }
         if snapshot?.balanceUSD != nil { return "Credit balance" }
         if snapshot?.costUSD != nil { return "Spent this month · UTC" }
-        if detailedLabels, let snapshot, !snapshot.applicableWindows(for: account.kind).isEmpty {
-            return snapshot.applicableWindows(for: account.kind).map { "\(shortWindowLabel($0)) \(Int($0.remainingPercent))%" }.joined(separator: " · ")
-        }
-        if let snapshot, let week = snapshot.primaryWeeklyWindow(for: account.kind), let session = snapshot.sessionWindow(for: account.kind) {
-            return "Week \(Int(week.remainingPercent))% · 5h \(Int(session.remainingPercent))% left"
-        }
         if let window { return "\(shortWindowLabel(window)) · \(resetText(window.resetsAt, at: now))" }
         return snapshot == nil ? "Waiting for first reading" : "Quota unavailable"
     }
@@ -255,13 +249,22 @@ private struct CompactAccountRow: View {
                 }.padding(.vertical, 4).contentShape(Rectangle())
             }.buttonStyle(.plain).help("\(account.kind.title) · click for limits and actions")
                 .accessibilityLabel("\(account.name), \(readingValue(snapshot, window: window)), \(detail), \(expanded ? "collapse" : "show details")")
+            if detailedLabels, let snapshot {
+                VStack(alignment: .leading, spacing: 8) {
+                    ForEach(snapshot.windows) { window in
+                        QuotaDetailRow(window: window, now: now, unavailable: error != nil || cached || snapshot.isStale(at: now, windows: [window]) || !account.enabled || snapshot.providerRestricted == true)
+                    }
+                }.padding(.leading, 21).padding(.bottom, 4)
+            }
             if expanded {
                 VStack(alignment: .leading, spacing: 8) {
                     if let email = account.expectedIdentity ?? snapshot?.identity {
                         Text(email).font(.system(size: 10)).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle).textSelection(.enabled)
                     }
                     if let snapshot {
-                        ForEach(snapshot.windows) { window in QuotaDetailRow(window: window, now: now, unavailable: error != nil || cached || snapshot.isStale(at: now, windows: [window]) || !account.enabled || snapshot.providerRestricted == true) }
+                        if !detailedLabels {
+                            ForEach(snapshot.windows) { window in QuotaDetailRow(window: window, now: now, unavailable: error != nil || cached || snapshot.isStale(at: now, windows: [window]) || !account.enabled || snapshot.providerRestricted == true) }
+                        }
                         HistorySparkline(points: history, kind: account.kind)
                         Text(readingAge(snapshot.observedAt, at: now)).font(.system(size: 9)).foregroundStyle(.tertiary)
                     }
@@ -1161,7 +1164,7 @@ struct AccountsView: View {
                     Divider()
                     VStack(alignment: .leading, spacing: 6) {
                         Toggle("Show all quota windows in the dropdown", isOn: Binding(get: { store.menuPreferences.detailedQuotaLabels }, set: { store.setDetailedQuotaLabels($0) }))
-                        Text("Show each subscription limit below the account name, such as “5h session 80% · Week 60%”. When off, show the limiting window and its reset time.")
+                        Text("Show a separate row and reset time for every reported limit, including model-specific limits. When off, keep accounts compact; click an account to see its limits.")
                             .font(.system(size: 11)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                     }
                 }.padding(10)
@@ -1201,6 +1204,10 @@ struct AccountsView: View {
                             }.labelsHidden().frame(width: 190)
                         }
                     }
+                    Divider()
+                    Toggle("Show 5-hour allowance in menu bar", isOn: Binding(get: { store.menuPreferences.showSessionInMenuBar }, set: { store.setShowSessionInMenuBar($0) }))
+                    Text("Show the additional 5h value beside the weekly percentage. Dashboard and dropdown details stay available.")
+                        .font(.callout).foregroundStyle(.secondary)
                     Divider()
                     Toggle("Color by remaining allowance", isOn: Binding(get: { store.menuPreferences.colorByAllowance }, set: { store.setColorByAllowance($0) }))
                     Text("White at 100%, cool colors through the middle, red at 0%. Overrides custom menu colors for percentages.")
@@ -1300,18 +1307,14 @@ private struct HistoryCard: View {
                     Text(needsReconnect ? "Reconnect required" : !account.enabled ? "Paused" : cached ? "Saved reading" : status.title)
                         .font(.system(size: 9, weight: .medium)).foregroundStyle(statusColor).lineLimit(1)
                 }
-                if !account.kind.isAPI, let snapshot {
-                    HStack(spacing: 10) {
-                        if let week = snapshot.primaryWeeklyWindow(for: account.kind) {
-                            Text("\(week.periodLabel) \(Int(week.remainingPercent))% left")
-                        }
-                        if let session = snapshot.sessionWindow(for: account.kind) {
-                            Text("5h \(Int(session.remainingPercent))% left")
-                        }
-                    }.font(.system(size: 11, weight: .semibold)).monospacedDigit()
-                }
-                Text(snapshot?.displayWindow(for: account.kind).map { "\($0.periodLabel) · \(resetText($0.resetsAt, at: now))" } ?? (account.kind.isAPI ? metric : "Current allowance"))
+                Text(snapshot?.displayWindow(for: account.kind).map { resetText($0.resetsAt, at: now) } ?? (account.kind.isAPI ? metric : "Current allowance"))
                     .font(.system(size: 10)).foregroundStyle(.secondary).lineLimit(1)
+                if !account.kind.isAPI, let snapshot,
+                   let session = snapshot.sessionWindow(for: account.kind),
+                   session.id != snapshot.displayWindow(for: account.kind)?.id {
+                    Text("5h \(Int(session.remainingPercent))% left")
+                        .font(.system(size: 11, weight: .semibold)).monospacedDigit()
+                }
                 if plotted.isEmpty {
                     Text("No readings in this range yet. History grows as this Mac refreshes your accounts.")
                         .font(.system(size: 12)).foregroundStyle(.secondary).frame(maxWidth: .infinity, minHeight: 66)
