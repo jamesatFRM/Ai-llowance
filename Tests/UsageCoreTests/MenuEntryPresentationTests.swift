@@ -24,12 +24,42 @@ import Testing
     var preferences = MenuPreferences()
     let entry = MenuEntry(provider: .claude, label: "Work", remainingPercent: 97, accountCount: 1,
                           primaryPeriod: "Week", sessionRemainingPercent: 93, showsSession: true)
-    #expect(MenuEntryPresentation.value(entry, preferences: preferences) == "Week 97% · 5h 93%")
+    #expect(MenuEntryPresentation.value(entry, preferences: preferences) == "w 97% · 5h 93%")
     preferences.showSessionInMenuBar = false
     preferences.detailedQuotaLabels = true
     let restored = try JSONDecoder().decode(MenuPreferences.self, from: JSONEncoder().encode(preferences))
     #expect(restored.detailedQuotaLabels)
     #expect(!restored.showSessionInMenuBar)
-    #expect(MenuEntryPresentation.value(entry, preferences: restored) == "Week 97%")
+    #expect(MenuEntryPresentation.value(entry, preferences: restored) == "97%")
     #expect(try JSONDecoder().decode(MenuPreferences.self, from: Data("{}".utf8)).showSessionInMenuBar)
+}
+
+@Test func weeklyMenuLabelChoicesPersistAndRespectSessionVisibility() throws {
+    var preferences = MenuPreferences()
+    let entry = MenuEntry(provider: .claude, label: "Work", remainingPercent: 97, accountCount: 1,
+                          primaryPeriod: "Week", sessionRemainingPercent: 93, showsSession: true)
+    for (label, expected) in [(WeeklyMenuLabel.none, "97% · 5h 93%"), (.short, "w 97% · 5h 93%"), (.full, "Week 97% · 5h 93%")] {
+        preferences.weeklyMenuLabel = label
+        let restored = try JSONDecoder().decode(MenuPreferences.self, from: JSONEncoder().encode(preferences))
+        #expect(restored.weeklyMenuLabel == label)
+        #expect(MenuEntryPresentation.value(entry, preferences: restored) == expected)
+        preferences.showSessionInMenuBar = false
+        #expect(MenuEntryPresentation.value(entry, preferences: preferences) == "97%")
+        preferences.showSessionInMenuBar = true
+    }
+}
+
+@Test func sessionLabelChoicesPersistWithoutHidingReadings() throws {
+    var preferences = MenuPreferences()
+    preferences.weeklyMenuLabel = .none
+    let entry = MenuEntry(provider: .claude, label: "Work", remainingPercent: 97, accountCount: 1,
+                          primaryPeriod: "Week", sessionRemainingPercent: 93, showsSession: true)
+    let sessionOnly = MenuEntry(provider: .claude, label: "Work", remainingPercent: 93, accountCount: 1, primaryPeriod: "5h")
+    for (label, prefix) in [(SessionMenuLabel.none, ""), (.short, "5h "), (.full, "5-Hour ")] {
+        preferences.sessionMenuLabel = label
+        let restored = try JSONDecoder().decode(MenuPreferences.self, from: JSONEncoder().encode(preferences))
+        #expect(restored.sessionMenuLabel == label)
+        #expect(MenuEntryPresentation.value(entry, preferences: restored) == "97% · " + prefix + "93%")
+        #expect(MenuEntryPresentation.value(sessionOnly, preferences: restored) == prefix + "93%")
+    }
 }

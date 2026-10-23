@@ -5,6 +5,42 @@ import UsageCore
 
 @MainActor
 enum ProviderImages {
+    static let menuIconSize: CGFloat = 16
+    private static var menuImages: [MenuProvider: NSImage] = [:]
+
+    static func menuImage(_ provider: MenuProvider?) -> NSImage? {
+        if let provider, let cached = menuImages[provider] { return cached.copy() as? NSImage }
+        guard let source = image(provider) else { return nil }
+        var result = source
+        // Match visible artwork, not the different transparent margins in provider assets.
+        if provider == .claude || provider == .openAI,
+           let cg = source.cgImage(forProposedRect: nil, context: nil, hints: nil) {
+            let bitmap = NSBitmapImageRep(cgImage: cg)
+            var left = bitmap.pixelsWide, top = bitmap.pixelsHigh, right = -1, bottom = -1
+            for y in 0..<bitmap.pixelsHigh {
+                for x in 0..<bitmap.pixelsWide where (bitmap.colorAt(x: x, y: y)?.alphaComponent ?? 0) > 0.05 {
+                    left = min(left, x); right = max(right, x)
+                    top = min(top, y); bottom = max(bottom, y)
+                }
+            }
+            if right >= left, bottom >= top,
+               let cropped = cg.cropping(to: CGRect(x: left, y: top, width: right - left + 1, height: bottom - top + 1)) {
+                let side = CGFloat(max(cropped.width, cropped.height))
+                let canvas = NSImage(size: NSSize(width: menuIconSize, height: menuIconSize))
+                canvas.lockFocus()
+                let width = CGFloat(cropped.width) / side * menuIconSize
+                let height = CGFloat(cropped.height) / side * menuIconSize
+                NSImage(cgImage: cropped, size: .zero).draw(in: NSRect(x: (menuIconSize - width) / 2, y: (menuIconSize - height) / 2, width: width, height: height))
+                canvas.unlockFocus()
+                result = canvas
+            }
+        }
+        result.size = NSSize(width: menuIconSize, height: menuIconSize)
+        result.isTemplate = true
+        if let provider { menuImages[provider] = result }
+        return result.copy() as? NSImage
+    }
+
     private static let claude = load("Claude")
     private static let openAI = load("ChatGPT")
     private static func load(_ name: String) -> NSImage? {
@@ -42,8 +78,9 @@ enum ProviderImages {
 struct ProviderMark: View {
     let provider: MenuProvider?
     var size: CGFloat = 15
+    var isMenuBar = false
     var body: some View {
-        if let image = ProviderImages.image(provider) {
+        if let image = isMenuBar ? ProviderImages.menuImage(provider) : ProviderImages.image(provider) {
             Image(nsImage: image).renderingMode(.template).resizable().interpolation(.high).scaledToFit()
                 .frame(width: size, height: size).foregroundStyle(.primary).accessibilityLabel(provider?.title ?? "All accounts")
         }

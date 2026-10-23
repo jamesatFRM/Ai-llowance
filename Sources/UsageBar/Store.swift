@@ -181,6 +181,8 @@ final class AppStore: ObservableObject {
         do { try persist() } catch { menuPreferences = previous; notice = "Could not save the menu-bar setting." }
     }
     func setTheme(_ value: AppTheme) { updateMenu { $0.theme = value } }
+    func setSessionMenuLabel(_ value: SessionMenuLabel) { updateMenu { $0.sessionMenuLabel = value } }
+    func setWeeklyMenuLabel(_ value: WeeklyMenuLabel) { updateMenu { $0.weeklyMenuLabel = value } }
     func setShowSessionInMenuBar(_ value: Bool) { updateMenu { $0.showSessionInMenuBar = value } }
     func setDetailedQuotaLabels(_ value: Bool) { updateMenu { $0.detailedQuotaLabels = value } }
     func setColorByAllowance(_ value: Bool) { updateMenu { $0.colorByAllowance = value } }

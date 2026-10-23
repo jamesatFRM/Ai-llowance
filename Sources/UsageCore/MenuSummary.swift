@@ -1,5 +1,21 @@
 import Foundation
 
+public enum WeeklyMenuLabel: String, Codable, CaseIterable, Identifiable, Sendable {
+    case none, short, full
+    public var id: String { rawValue }
+    public var title: String {
+        switch self { case .none: return "None"; case .short: return "w"; case .full: return "Week" }
+    }
+}
+
+public enum SessionMenuLabel: String, Codable, CaseIterable, Identifiable, Sendable {
+    case none, short, full
+    public var id: String { rawValue }
+    public var title: String {
+        switch self { case .none: return "None"; case .short: return "5h"; case .full: return "5-Hour" }
+    }
+}
+
 public enum MenuDisplay: String, Codable, CaseIterable, Identifiable, Sendable {
     case combined, byProvider, byAccount
     public var id: String { rawValue }
@@ -23,12 +39,14 @@ public struct MenuPreferences: Codable, Equatable, Sendable {
     public var aggregation: MenuAggregation = .average
     public var showAccountNames = true
     public var showSessionInMenuBar = true
+    public var weeklyMenuLabel: WeeklyMenuLabel = .short
+    public var sessionMenuLabel: SessionMenuLabel = .short
     public var detailedQuotaLabels = false
     public var colorByAllowance = false
     public var allAccounts = true
     public var selectedAccountIDs: Set<UUID> = []
     public init() {}
-    private enum CodingKeys: String, CodingKey { case showSessionInMenuBar, colorByAllowance, theme, display, aggregation, showAccountNames, detailedQuotaLabels, allAccounts, selectedAccountIDs }
+    private enum CodingKeys: String, CodingKey { case sessionMenuLabel, weeklyMenuLabel, showSessionInMenuBar, colorByAllowance, theme, display, aggregation, showAccountNames, detailedQuotaLabels, allAccounts, selectedAccountIDs }
     public init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
         theme = try values.decodeIfPresent(AppTheme.self, forKey: .theme) ?? .automatic
@@ -36,6 +54,8 @@ public struct MenuPreferences: Codable, Equatable, Sendable {
         aggregation = try values.decodeIfPresent(MenuAggregation.self, forKey: .aggregation) ?? .average
         showAccountNames = try values.decodeIfPresent(Bool.self, forKey: .showAccountNames) ?? true
         showSessionInMenuBar = try values.decodeIfPresent(Bool.self, forKey: .showSessionInMenuBar) ?? true
+        weeklyMenuLabel = try values.decodeIfPresent(WeeklyMenuLabel.self, forKey: .weeklyMenuLabel) ?? .short
+        sessionMenuLabel = try values.decodeIfPresent(SessionMenuLabel.self, forKey: .sessionMenuLabel) ?? .short
         detailedQuotaLabels = try values.decodeIfPresent(Bool.self, forKey: .detailedQuotaLabels) ?? false
         colorByAllowance = try values.decodeIfPresent(Bool.self, forKey: .colorByAllowance) ?? false
         allAccounts = try values.decodeIfPresent(Bool.self, forKey: .allAccounts) ?? true
