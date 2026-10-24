@@ -47,3 +47,39 @@ import Testing
     #expect(smooth.prefix(6).allSatisfy { (0...10).contains($0.value) })
     #expect(HistorySeries.smoothTrend([]).isEmpty)
 }
+
+@Test func chartBarsPreserveActualReadingsAndEmptyIntervals() {
+    let start = Date(timeIntervalSince1970: 1000)
+    let raw = [HistorySample(timestamp: start, value: 80, segment: 0),
+               HistorySample(timestamp: start.addingTimeInterval(5), value: 75, segment: 0),
+               HistorySample(timestamp: start.addingTimeInterval(100), value: 99, segment: 1)]
+    let bars = HistorySeries.barSamples(raw, count: 10)
+    #expect(bars.count == 2)
+    #expect(bars.map(\.value) == [75, 99])
+    #expect(bars.map(\.timestamp) == [raw[1].timestamp, raw[2].timestamp])
+    #expect(bars.map(\.segment) == [0, 1])
+    #expect(HistorySeries.barSamples([], count: 10).isEmpty)
+    #expect(HistorySeries.barSamples(raw, count: 0).isEmpty)
+    #expect(HistorySeries.barSamples([raw[0]]).count == 1)
+}
+
+@Test func timeBasedSmoothingPreservesFlatReadingsAndExactEndpoints() {
+    let start = Date(timeIntervalSince1970: 1000)
+    let flat = (0..<60).map { HistorySample(timestamp: start.addingTimeInterval(Double($0) * 30), value: 97, segment: 0) }
+    #expect(HistorySeries.smoothTrend(flat).allSatisfy { abs($0.value - 97) < 0.000001 })
+    let step = (0..<60).map { HistorySample(timestamp: start.addingTimeInterval(Double($0) * 30), value: $0 < 30 ? 90 : 70, segment: 0) }
+    let smooth = HistorySeries.smoothTrend(step)
+    #expect(smooth.first?.value == 90)
+    #expect(smooth.last?.value == 70)
+    #expect(smooth[20].value < 90 && smooth[40].value > 70)
+    #expect(smooth.allSatisfy { (70...90).contains($0.value) })
+}
+
+@Test func fittedAllowanceScaleHasHeadroomAndNeverExaggeratesBelowTenPoints() {
+    #expect(HistorySeries.allowanceTrendDomain([96, 99, 100]) == 90...100)
+    #expect(HistorySeries.allowanceTrendDomain([46, 62]) == 40...65)
+    #expect(HistorySeries.allowanceTrendDomain([0, 0]) == 0...10)
+    #expect(HistorySeries.allowanceTrendDomain([100]) == 90...100)
+    #expect(HistorySeries.allowanceTrendDomain([.nan, .infinity]) == 0...100)
+    #expect(HistorySeries.allowanceTrendDomain([0, 100]) == 0...100)
+}

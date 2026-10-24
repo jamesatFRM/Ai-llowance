@@ -81,13 +81,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
         }
         button.image = nil
         let title = NSMutableAttributedString(string: "")
+        let menuFont = NSFont.monospacedDigitSystemFont(ofSize: 12, weight: .medium)
         var descriptions: [String] = []
         for (index, entry) in entries.enumerated() {
             if index > 0 { title.append(NSAttributedString(string: "   ")) }
             if let image = ProviderImages.menuImage(entry.provider) {
                 let attachment = NSTextAttachment()
                 attachment.attachmentCell = NSTextAttachmentCell(imageCell: image)
-                title.append(NSAttributedString(attachment: attachment))
+                let icon = NSMutableAttributedString(attachment: attachment)
+                // Attachments otherwise sit above the text baseline. Align the visible
+                // mark with the capital/digit height rather than the font's line box.
+                icon.addAttribute(.baselineOffset, value: (menuFont.capHeight - image.size.height) / 2,
+                                  range: NSRange(location: 0, length: icon.length))
+                title.append(icon)
             }
             let value = MenuEntryPresentation.value(entry, preferences: store.menuPreferences)
             let color: NSColor
@@ -99,7 +105,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
                 ? "\(entry.label): allowance unavailable"
                 : "\(entry.label): \(value) allowance remaining")
         }
-        title.addAttributes([.font: NSFont.monospacedDigitSystemFont(ofSize: 12, weight: .medium)], range: NSRange(location: 0, length: title.length))
+        title.addAttributes([.font: menuFont], range: NSRange(location: 0, length: title.length))
         button.attributedTitle = title
         button.toolTip = descriptions.joined(separator: "\n") + "\n\(store.menuPreferences.aggregation.title); each account has its own allowance."
         button.setAccessibilityLabel("Ai-llowance. " + descriptions.joined(separator: ". "))

@@ -180,10 +180,17 @@ final class AppStore: ObservableObject {
         change(&menuPreferences)
         do { try persist() } catch { menuPreferences = previous; notice = "Could not save the menu-bar setting." }
     }
+    func setDashboardChartFullScale(_ value: Bool) { updateMenu { $0.dashboardChartFullScale = value } }
+    func setDashboardChartStyle(_ value: DashboardChartStyle) { updateMenu { $0.dashboardChartStyle = value } }
     func setTheme(_ value: AppTheme) { updateMenu { $0.theme = value } }
     func setSessionMenuLabel(_ value: SessionMenuLabel) { updateMenu { $0.sessionMenuLabel = value } }
     func setWeeklyMenuLabel(_ value: WeeklyMenuLabel) { updateMenu { $0.weeklyMenuLabel = value } }
     func setShowSessionInMenuBar(_ value: Bool) { updateMenu { $0.showSessionInMenuBar = value } }
+    func setDropdownShowEmails(_ value: Bool) { updateMenu { $0.dropdownShowEmails = value } }
+    func setDropdownShowResets(_ value: Bool) { updateMenu { $0.dropdownShowResets = value } }
+    func setDropdownShowBars(_ value: Bool) { updateMenu { $0.dropdownShowBars = value } }
+    func setDropdownShowHeadings(_ value: Bool) { updateMenu { $0.dropdownShowHeadings = value } }
+    func setDropdownRoomyRows(_ value: Bool) { updateMenu { $0.dropdownRoomyRows = value } }
     func setDetailedQuotaLabels(_ value: Bool) { updateMenu { $0.detailedQuotaLabels = value } }
     func setColorByAllowance(_ value: Bool) { updateMenu { $0.colorByAllowance = value } }
     func setShowAccountNames(_ value: Bool) { updateMenu { $0.showAccountNames = value } }
