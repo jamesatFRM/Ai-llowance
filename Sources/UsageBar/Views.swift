@@ -173,17 +173,17 @@ struct Dashboard: View {
                 let accounts = store.accounts.filter { $0.kind.provider == provider }
                 if !accounts.isEmpty {
                     VStack(spacing: 0) {
-                        HStack {
+                        if store.menuPreferences.dropdownShowHeadings { HStack {
                             Text(provider.title).font(.system(size: 9, weight: .semibold)).textCase(.uppercase).tracking(0.7)
                             Spacer()
                             Text("\(accounts.count)").font(.system(size: 8, weight: .medium)).monospacedDigit()
                                 .frame(minWidth: 16, minHeight: 13)
                                 .background(Color.primary.opacity(0.045), in: Capsule())
-                        }.foregroundStyle(.secondary).padding(.bottom, 5)
+                        }.foregroundStyle(.secondary).padding(.bottom, 5) }
                         ForEach(accounts) { account in
                             CompactAccountRow(account: account, snapshot: store.snapshots[account.id], error: store.errors[account.id], now: store.now, cached: store.isCached(account),
                                 expanded: expandedAccountID == account.id,
-                                detailedLabels: store.menuPreferences.detailedQuotaLabels, colorByAllowance: store.menuPreferences.colorByAllowance,
+                                detailedLabels: store.menuPreferences.detailedQuotaLabels, dropdownPreferences: store.menuPreferences, colorByAllowance: store.menuPreferences.colorByAllowance,
                                 history: expandedAccountID == account.id ? store.history(for: account) : [],
                                 expand: { expandedAccountID = expandedAccountID == account.id ? nil : account.id },
                                 manage: { manage(account) }, openUsage: { store.openUsage(account) })
@@ -205,6 +205,7 @@ private struct CompactAccountRow: View {
     let cached: Bool
     let expanded: Bool
     let detailedLabels: Bool
+    var dropdownPreferences = MenuPreferences()
     let colorByAllowance: Bool
     let history: [UsageHistoryPoint]
     let expand: () -> Void
@@ -222,7 +223,7 @@ private struct CompactAccountRow: View {
         if let balanceLabel = snapshot?.balanceLabel { return balanceLabel }
         if snapshot?.balanceUSD != nil { return "Credit balance" }
         if snapshot?.costUSD != nil { return "Spent this month · UTC" }
-        if let window { return "\(shortWindowLabel(window)) · \(resetText(window.resetsAt, at: now))" }
+        if let window { return dropdownPreferences.dropdownShowResets ? "\(shortWindowLabel(window)) · \(resetText(window.resetsAt, at: now))" : shortWindowLabel(window) }
         return snapshot == nil ? "Waiting for first reading" : "Quota unavailable"
     }
     var body: some View {
@@ -241,29 +242,33 @@ private struct CompactAccountRow: View {
                     HStack(spacing: 7) {
                         Text(detail).font(.system(size: 9)).foregroundStyle(error != nil || status.state == .restricted ? Color.orange : Color.secondary).lineLimit(1)
                         Spacer(minLength: 2)
-                        if let window {
+                        if dropdownPreferences.dropdownShowBars, let window {
                             AllowanceBar(remaining: window.remainingPercent, unavailable: error != nil || cached || status.state == .stale || status.state == .restricted || !account.enabled)
                                 .frame(width: 54, height: 3)
                         }
                     }.padding(.leading, 21)
-                }.padding(.vertical, 4).contentShape(Rectangle())
+                    if dropdownPreferences.dropdownShowEmails, let email = account.expectedIdentity ?? snapshot?.identity {
+                        Text(email).font(.system(size: 10)).foregroundStyle(.secondary)
+                            .lineLimit(1).truncationMode(.middle).frame(maxWidth: .infinity, alignment: .leading).padding(.leading, 21)
+                    }
+                }.padding(.vertical, dropdownPreferences.dropdownRoomyRows ? 9 : 4).contentShape(Rectangle())
             }.buttonStyle(.plain).help("\(account.kind.title) · click for limits and actions")
                 .accessibilityLabel("\(account.name), \(readingValue(snapshot, window: window)), \(detail), \(expanded ? "collapse" : "show details")")
             if detailedLabels, let snapshot {
                 VStack(alignment: .leading, spacing: 8) {
                     ForEach(snapshot.windows) { window in
-                        QuotaDetailRow(window: window, now: now, unavailable: error != nil || cached || snapshot.isStale(at: now, windows: [window]) || !account.enabled || snapshot.providerRestricted == true)
+                        QuotaDetailRow(window: window, now: now, unavailable: error != nil || cached || snapshot.isStale(at: now, windows: [window]) || !account.enabled || snapshot.providerRestricted == true, showReset: dropdownPreferences.dropdownShowResets, showBar: dropdownPreferences.dropdownShowBars)
                     }
                 }.padding(.leading, 21).padding(.bottom, 4)
             }
             if expanded {
                 VStack(alignment: .leading, spacing: 8) {
-                    if let email = account.expectedIdentity ?? snapshot?.identity {
+                    if !dropdownPreferences.dropdownShowEmails, let email = account.expectedIdentity ?? snapshot?.identity {
                         Text(email).font(.system(size: 10)).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle).textSelection(.enabled)
                     }
                     if let snapshot {
                         if !detailedLabels {
-                            ForEach(snapshot.windows) { window in QuotaDetailRow(window: window, now: now, unavailable: error != nil || cached || snapshot.isStale(at: now, windows: [window]) || !account.enabled || snapshot.providerRestricted == true) }
+                            ForEach(snapshot.windows) { window in QuotaDetailRow(window: window, now: now, unavailable: error != nil || cached || snapshot.isStale(at: now, windows: [window]) || !account.enabled || snapshot.providerRestricted == true, showReset: dropdownPreferences.dropdownShowResets, showBar: dropdownPreferences.dropdownShowBars) }
                         }
                         HistorySparkline(points: history, kind: account.kind)
                         Text(readingAge(snapshot.observedAt, at: now)).font(.system(size: 9)).foregroundStyle(.tertiary)
@@ -317,6 +322,8 @@ private struct QuotaDetailRow: View {
     let window: QuotaWindow
     let now: Date
     var unavailable = false
+    var showReset = true
+    var showBar = true
     var body: some View {
         let stale = window.resetsAt.map { $0 <= now } ?? false
         VStack(spacing: 3) {
@@ -325,11 +332,11 @@ private struct QuotaDetailRow: View {
                 Spacer()
                 Text("\(Int(window.remainingPercent))% left").fontWeight(.medium).monospacedDigit()
             }.font(.system(size: 10))
-            HStack {
-                Text(resetText(window.resetsAt, at: now)).font(.system(size: 9)).foregroundStyle(.secondary)
+            if showReset || showBar { HStack {
+                if showReset { Text(resetText(window.resetsAt, at: now)).font(.system(size: 9)).foregroundStyle(.secondary) }
                 Spacer()
-                AllowanceBar(remaining: window.remainingPercent, unavailable: unavailable || stale).frame(width: 64, height: 3)
-            }
+                if showBar { AllowanceBar(remaining: window.remainingPercent, unavailable: unavailable || stale).frame(width: 64, height: 3) }
+            } }
         }.foregroundStyle(unavailable || stale ? .secondary : .primary)
     }
 }
@@ -561,6 +568,15 @@ struct AccountsView: View {
                 }.labelsHidden().frame(width: 120)
                 Button { section = .accounts } label: { Image(systemName: "slider.horizontal.3").frame(width: 26, height: 28) }
                     .buttonStyle(QuietButtonStyle()).help("Manage accounts").accessibilityLabel("Manage accounts")
+                Menu {
+                    Picker("Chart style", selection: Binding(get: { store.menuPreferences.dashboardChartStyle }, set: { store.setDashboardChartStyle($0) })) {
+                        ForEach(DashboardChartStyle.allCases) { style in Label(style.title, systemImage: style.symbol).tag(style) }
+                    }
+                    Divider()
+                    Toggle("Full 0–100% scale", isOn: Binding(get: { store.menuPreferences.dashboardChartFullScale }, set: { store.setDashboardChartFullScale($0) }))
+                } label: { Image(systemName: store.menuPreferences.dashboardChartStyle.symbol).frame(width: 26, height: 28) }
+                .menuStyle(.borderlessButton).fixedSize().help("Chart style · " + store.menuPreferences.dashboardChartStyle.title)
+                .accessibilityLabel("Chart style")
                 Picker("Time range", selection: $historyHours) {
                     Text("24 hours").tag(24); Text("7 days").tag(168)
                 }.pickerStyle(.segmented).labelsHidden().frame(width: 146)
@@ -575,6 +591,30 @@ struct AccountsView: View {
         guard section == .accounts, let id = store.selectedAccountID else { return }
         DispatchQueue.main.async { proxy.scrollTo(id, anchor: .top) }
     }
+    private var chartSettings: some View {
+        GroupBox("Dashboard charts") {
+            VStack(alignment: .leading, spacing: 12) {
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 120))], spacing: 8) {
+                    ForEach(DashboardChartStyle.allCases) { style in
+                        Button { store.setDashboardChartStyle(style) } label: {
+                            HStack(spacing: 8) {
+                                Image(systemName: style.symbol).font(.system(size: 17)).frame(width: 24)
+                                Text(style.title)
+                                Spacer(minLength: 0)
+                                if store.menuPreferences.dashboardChartStyle == style { Image(systemName: "checkmark.circle.fill") }
+                            }.font(.system(size: 12, weight: .medium)).padding(10)
+                                .foregroundStyle(store.menuPreferences.dashboardChartStyle == style ? Color.accentColor : Color.primary)
+                                .background(Color.primary.opacity(store.menuPreferences.dashboardChartStyle == style ? 0.09 : 0.035), in: RoundedRectangle(cornerRadius: 8))
+                        }.buttonStyle(.plain)
+                    }
+                }
+                Toggle("Use full 0–100% scale", isOn: Binding(get: { store.menuPreferences.dashboardChartFullScale }, set: { store.setDashboardChartFullScale($0) }))
+                    .toggleStyle(SettingsSwitchStyle())
+                Text("Overview combines account trends, usage share and daily bars. Line, area, bars and dots show history. Ring, pie and gauge show current allowance; API accounts keep a history chart. Your choice is saved for all dashboard cards.")
+                    .font(.system(size: 11)).foregroundStyle(.secondary)
+            }.padding(10)
+        }
+    }
     private var selectedTabContent: some View {
         VStack(alignment: .leading, spacing: 18) {
             Text("Settings").font(.system(size: 20, weight: .semibold))
@@ -584,6 +624,7 @@ struct AccountsView: View {
             switch settingsSection {
             case .general:
                 appearanceSettings
+                chartSettings
                 behaviorSettings
             case .menuBar:
                 menuBarSettings
@@ -792,14 +833,27 @@ struct AccountsView: View {
                     ForEach(row) { account in
                         let points = store.history(for: account).filter { $0.timestamp >= store.now.addingTimeInterval(-Double(historyHours) * 3600) && $0.timestamp <= store.now }
                         HistoryCard(account: account, points: points, snapshot: store.snapshots[account.id],
-                                    error: store.errors[account.id] != nil, cached: store.isCached(account), needsReconnect: store.needsSignIn(account), now: store.now,
+                                    error: store.errors[account.id] != nil, cached: store.isCached(account), needsReconnect: store.needsSignIn(account), now: store.now, chartStyle: store.menuPreferences.dashboardChartStyle, fullScale: store.menuPreferences.dashboardChartFullScale,
+                                    overviewTint: store.menuPreferences.dashboardChartStyle == .mixed ? overviewAccountTint(account, accounts: store.accounts) : nil,
                                     openUsage: { if store.needsSignIn(account) { store.selectedAccountID = account.id; section = .accounts } else { store.openUsage(account) } }, manage: { renaming = account })
                             .frame(maxWidth: .infinity)
                     }
                 }
             }
-            ActivityHeatmap(accounts: store.accounts.filter { historyAccountID == nil || $0.id == historyAccountID },
-                            histories: Dictionary(uniqueKeysWithValues: store.accounts.map { ($0.id, store.history(for: $0)) }), now: store.now)
+            let histories = Dictionary(uniqueKeysWithValues: visibleHistoryAccounts.map { ($0.id, store.history(for: $0)) })
+            if store.menuPreferences.dashboardChartStyle == .mixed {
+                if historyWidth >= 850 {
+                    HStack(alignment: .top, spacing: 12) {
+                        UsageOverviewCharts(accounts: visibleHistoryAccounts, colorAccounts: store.accounts, histories: histories, now: store.now).frame(width: 360)
+                        ActivityHeatmap(accounts: visibleHistoryAccounts, histories: histories, now: store.now)
+                    }
+                } else {
+                    UsageOverviewCharts(accounts: visibleHistoryAccounts, colorAccounts: store.accounts, histories: histories, now: store.now)
+                    ActivityHeatmap(accounts: visibleHistoryAccounts, histories: histories, now: store.now)
+                }
+            } else {
+                ActivityHeatmap(accounts: visibleHistoryAccounts, histories: histories, now: store.now)
+            }
         }.animation(reduceMotion ? nil : .easeInOut(duration: 0.25), value: historyAccountID)
         .animation(reduceMotion ? nil : .easeInOut(duration: 0.25), value: visibleHistoryAccounts.map(\.id))
         .background(GeometryReader { geometry in
@@ -1216,6 +1270,16 @@ struct AccountsView: View {
                     Toggle("Always show individual limits", isOn: Binding(get: { store.menuPreferences.detailedQuotaLabels }, set: { store.setDetailedQuotaLabels($0) }))
                     Text("Show each limit and reset time without expanding an account.")
                         .font(.callout).foregroundStyle(.secondary)
+                    Divider()
+                    Toggle("Show account emails", isOn: Binding(get: { store.menuPreferences.dropdownShowEmails }, set: { store.setDropdownShowEmails($0) }))
+                    Divider()
+                    Toggle("Show reset times", isOn: Binding(get: { store.menuPreferences.dropdownShowResets }, set: { store.setDropdownShowResets($0) }))
+                    Divider()
+                    Toggle("Show progress bars", isOn: Binding(get: { store.menuPreferences.dropdownShowBars }, set: { store.setDropdownShowBars($0) }))
+                    Divider()
+                    Toggle("Show provider headings", isOn: Binding(get: { store.menuPreferences.dropdownShowHeadings }, set: { store.setDropdownShowHeadings($0) }))
+                    Divider()
+                    Toggle("Use comfortable spacing", isOn: Binding(get: { store.menuPreferences.dropdownRoomyRows }, set: { store.setDropdownRoomyRows($0) }))
                 }.padding(10)
             }
             GroupBox("Live dropdown preview") {
@@ -1228,11 +1292,13 @@ struct AccountsView: View {
                         let accounts = store.accounts.filter { $0.kind.provider == provider }
                         if !accounts.isEmpty {
                             VStack(alignment: .leading, spacing: 6) {
-                                Text(provider.title).font(.system(size: 10, weight: .semibold)).foregroundStyle(.secondary)
+                                if store.menuPreferences.dropdownShowHeadings {
+                                    Text(provider.title).font(.system(size: 10, weight: .semibold)).foregroundStyle(.secondary)
+                                }
                                 ForEach(accounts) { account in
                                     CompactAccountRow(account: account, snapshot: store.snapshots[account.id], error: store.errors[account.id], now: store.now, cached: store.isCached(account),
                                         expanded: dropdownPreviewExpandedID == account.id,
-                                        detailedLabels: store.menuPreferences.detailedQuotaLabels,
+                                        detailedLabels: store.menuPreferences.detailedQuotaLabels, dropdownPreferences: store.menuPreferences,
                                         colorByAllowance: store.menuPreferences.colorByAllowance,
                                         history: dropdownPreviewExpandedID == account.id ? store.history(for: account) : [],
                                         expand: { dropdownPreviewExpandedID = dropdownPreviewExpandedID == account.id ? nil : account.id },
@@ -1399,6 +1465,10 @@ private struct HistoryCard: View {
     let cached: Bool
     let needsReconnect: Bool
     let now: Date
+    let chartStyle: DashboardChartStyle
+    let fullScale: Bool
+    var overviewTint: Color? = nil
+    private var effectiveStyle: DashboardChartStyle { chartStyle == .mixed ? .glow : account.kind.isAPI && chartStyle.isCurrentAllowance ? .line : chartStyle }
     var openUsage: () -> Void
     var manage: () -> Void
     private var status: AllowanceStatus { AllowanceStatus.evaluate(snapshot: snapshot, kind: account.kind, now: now, hasError: error) }
@@ -1410,7 +1480,13 @@ private struct HistoryCard: View {
         default: return .secondary
         }
     }
-    private var graphTint: Color { NSColor.accountHex(account.graphColorHex).map { Color(nsColor: $0) } ?? providerAccent(account.kind.provider) }
+    private var graphTint: Color { overviewTint ?? NSColor.accountHex(account.graphColorHex).map { Color(nsColor: $0) } ?? providerAccent(account.kind.provider) }
+    private var gradientAccent: Color {
+        guard let base = NSColor(graphTint).usingColorSpace(.sRGB) else { return graphTint }
+        let shift: CGFloat = base.hueComponent < 0.15 ? -0.10 : 0.10
+        let hue = (base.hueComponent + shift + 1).truncatingRemainder(dividingBy: 1)
+        return Color(nsColor: NSColor(hue: hue, saturation: max(0.65, base.saturationComponent), brightness: 1, alpha: 1))
+    }
     private var dashboardTint: Color { NSColor.accountHex(account.dashboardColorHex).map { Color(nsColor: $0) } ?? providerAccent(account.kind.provider) }
     private var metric: String { account.kind.isBalance ? "Balance (USD)" : account.kind.isAPI ? "Month-to-date spending (USD)" : "Recorded allowance remaining (%)" }
     private func value(_ point: UsageHistoryPoint) -> Double? {
@@ -1422,44 +1498,41 @@ private struct HistoryCard: View {
     private var samples: [HistorySample] { HistorySeries.samples(points, kind: account.kind) }
     private var hoveredSample: HistorySample? {
         guard let hoveredDate else { return nil }
-        return samples.min { abs($0.timestamp.timeIntervalSince(hoveredDate)) < abs($1.timestamp.timeIntervalSince(hoveredDate)) }
+        return (effectiveStyle == .bars ? HistorySeries.barSamples(samples) : samples).min { abs($0.timestamp.timeIntervalSince(hoveredDate)) < abs($1.timestamp.timeIntervalSince(hoveredDate)) }
+    }
+    private var fittedTrend: Bool { !account.kind.isAPI && !fullScale && effectiveStyle != .bars && effectiveStyle != .dots }
+    private var plotDomain: ClosedRange<Double> {
+        if fittedTrend { return HistorySeries.allowanceTrendDomain(samples.map(\.value)) }
+        if account.kind.isAPI {
+            return min(0, (samples.map(\.value).min() ?? 0) * 1.08)...max(1, (samples.map(\.value).max() ?? 1) * 1.08)
+        }
+        return 0...100
     }
     private var historyCaption: String {
         guard !account.kind.isAPI else { return "Recorded history" }
         let hours = UsageHeatmap.hours(points: points, kind: account.kind, calendar: .current)
             .filter { Calendar.current.isDate($0.key, inSameDayAs: now) }
-        guard !hours.isEmpty else { return "Collecting today's history" }
-        return String(format: "Observed today: %.1f pts used", hours.values.reduce(0, +))
+        guard !hours.isEmpty else { return "History building" }
+        return String(format: "%.1f pts observed today", hours.values.reduce(0, +))
     }
-    private var sessionMeter: some View {
-        VStack(alignment: .leading, spacing: 5) {
-            if !account.kind.isAPI, let session = snapshot?.sessionWindow(for: account.kind),
-               session.id != snapshot?.displayWindow(for: account.kind)?.id {
-                HStack {
-                    Text("5-hour").foregroundStyle(.secondary)
-                    Text("\(Int(session.remainingPercent))% left").monospacedDigit()
-                    Spacer(minLength: 4)
-                    Text(resetText(session.resetsAt, at: now)).foregroundStyle(.secondary).lineLimit(1)
-                }.font(.system(size: 10, weight: .medium))
-                GeometryReader { geometry in
-                    Capsule().fill(Color.primary.opacity(0.06))
-                        .overlay(alignment: .leading) {
-                            Capsule().fill(error || cached ? Color.secondary : graphTint.opacity(0.8))
-                                .frame(width: geometry.size.width * max(0, min(100, session.remainingPercent)) / 100)
-                        }
-                }.frame(height: 3)
-            } else {
-                Text(account.kind.isAPI ? (account.kind.isBalance ? "Prepaid credits" : "Monthly spending") : "No additional 5-hour limit reported")
-                    .font(.system(size: 10)).foregroundStyle(.secondary)
-            }
-        }.frame(height: 26, alignment: .center)
+    @ViewBuilder private var sessionBadge: some View {
+        if !account.kind.isAPI, let session = snapshot?.sessionWindow(for: account.kind),
+           session.id != snapshot?.displayWindow(for: account.kind)?.id {
+            Text("5h · \(Int(session.remainingPercent))%")
+                .font(.system(size: 10, weight: .medium)).monospacedDigit()
+                .foregroundStyle(error || cached ? Color.secondary : Color.primary)
+                .padding(.horizontal, 7).padding(.vertical, 3)
+                .background(Color.primary.opacity(0.05), in: Capsule())
+                .help("5-hour allowance: \(Int(session.remainingPercent))% left · \(resetText(session.resetsAt, at: now))")
+                .accessibilityLabel("5-hour allowance \(Int(session.remainingPercent)) percent left, \(resetText(session.resetsAt, at: now))")
+        }
     }
 
     var body: some View {
-        let series = HistorySeries.smoothTrend(samples)
+        let series = effectiveStyle == .bars ? HistorySeries.barSamples(samples) : effectiveStyle == .dots ? samples : HistorySeries.smoothTrend(samples)
         let segmentCounts = Dictionary(grouping: series, by: \.segment).mapValues(\.count)
         SettingsCard(inset: 10) {
-            VStack(alignment: .leading, spacing: 5) {
+            VStack(alignment: .leading, spacing: 4) {
                 HStack {
                     ProviderMark(provider: account.kind.provider, size: 16).foregroundStyle(dashboardTint)
                     Text(account.name).font(.system(size: 12, weight: .semibold)).foregroundStyle(dashboardTint)
@@ -1480,47 +1553,72 @@ private struct HistoryCard: View {
                     Text(needsReconnect ? "Reconnect required" : !account.enabled ? "Paused" : cached ? "Saved reading" : status.title)
                         .font(.system(size: 9, weight: .medium)).foregroundStyle(statusColor).lineLimit(1)
                 }
-                Text(snapshot?.displayWindow(for: account.kind).map { resetText($0.resetsAt, at: now) } ?? (account.kind.isAPI ? metric : "Current allowance"))
-                    .font(.system(size: 10)).foregroundStyle(.secondary).lineLimit(1)
-                sessionMeter
-                if plotted.isEmpty {
+                HStack(spacing: 8) {
+                    Text(snapshot?.displayWindow(for: account.kind).map { resetText($0.resetsAt, at: now) } ?? (account.kind.isAPI ? metric : "Current allowance"))
+                        .font(.system(size: 10)).foregroundStyle(.secondary).lineLimit(1)
+                    Spacer(minLength: 0)
+                    sessionBadge
+                }.frame(height: 18)
+                if effectiveStyle.isCurrentAllowance {
+                    CurrentAllowanceChart(percent: snapshot?.displayWindow(for: account.kind)?.remainingPercent,
+                                          style: effectiveStyle, tint: graphTint,
+                                          saved: cached || error || status.state == .stale || !account.enabled)
+                        .frame(height: 78)
+                    Text("Remaining vs. used · current quota window")
+                        .font(.system(size: 10)).foregroundStyle(.secondary).lineLimit(1)
+                } else if plotted.isEmpty {
                     Text("No readings in this range yet. History grows as this Mac refreshes your accounts.")
                         .font(.system(size: 12)).foregroundStyle(.secondary).frame(maxWidth: .infinity).frame(height: 80)
                 } else {
                     Chart {
                         ForEach(series) { sample in
-                            AreaMark(x: .value("Time", sample.timestamp), yStart: .value("Baseline", 0), yEnd: .value(metric, sample.value), series: .value("Period", "core-" + String(sample.segment)))
-                                .foregroundStyle(LinearGradient(colors: [graphTint.opacity(0.07), graphTint.opacity(0)], startPoint: .top, endPoint: .bottom))
+                            if effectiveStyle == .bars {
+                                BarMark(x: .value("Time", sample.timestamp), y: .value(metric, sample.value), width: .ratio(0.65))
+                                    .foregroundStyle(LinearGradient(colors: [graphTint, graphTint.opacity(0.18)], startPoint: .top, endPoint: .bottom))
+                                    .cornerRadius(2)
+                            } else if effectiveStyle == .dots {
+                                PointMark(x: .value("Time", sample.timestamp), y: .value(metric, sample.value))
+                                    .foregroundStyle(graphTint.opacity(0.8)).symbolSize(18)
+                            } else {
+                            if effectiveStyle == .area || effectiveStyle == .glow {
+                            AreaMark(x: .value("Time", sample.timestamp), yStart: .value("Baseline", plotDomain.lowerBound), yEnd: .value(metric, sample.value), series: .value("Period", "core-" + String(sample.segment)))
+                                .foregroundStyle(LinearGradient(stops: [.init(color: gradientAccent.opacity(0.40), location: 0), .init(color: graphTint.opacity(0.20), location: 0.35), .init(color: graphTint.opacity(0), location: 1)], startPoint: .top, endPoint: .bottom))
                                 .interpolationMethod(.monotone)
-                            LineMark(x: .value("Time", sample.timestamp), y: .value(metric, sample.value), series: .value("Period", "outer-" + String(sample.segment)))
-                                .foregroundStyle(graphTint.opacity(0.08))
-                                .lineStyle(StrokeStyle(lineWidth: 12, lineCap: .round, lineJoin: .round))
-                                .interpolationMethod(.monotone)
-                            LineMark(x: .value("Time", sample.timestamp), y: .value(metric, sample.value), series: .value("Period", "halo-" + String(sample.segment)))
-                                .foregroundStyle(graphTint.opacity(0.18))
-                                .lineStyle(StrokeStyle(lineWidth: 6, lineCap: .round, lineJoin: .round))
-                                .interpolationMethod(.monotone)
+                            }
+                            if effectiveStyle == .glow {
+                                LineMark(x: .value("Time", sample.timestamp), y: .value(metric, sample.value), series: .value("Period", "halo-" + String(sample.segment)))
+                                    .foregroundStyle(gradientAccent.opacity(0.12))
+                                    .lineStyle(StrokeStyle(lineWidth: 6, lineCap: .round, lineJoin: .round))
+                                    .interpolationMethod(.monotone)
+                            }
                             LineMark(x: .value("Time", sample.timestamp), y: .value(metric, sample.value), series: .value("Period", "core-" + String(sample.segment)))
-                                .foregroundStyle(LinearGradient(colors: [graphTint.opacity(0.75), graphTint], startPoint: .leading, endPoint: .trailing))
-                                .lineStyle(StrokeStyle(lineWidth: 2.2, lineCap: .round, lineJoin: .round))
+                                .foregroundStyle(LinearGradient(colors: [gradientAccent, graphTint, gradientAccent], startPoint: .leading, endPoint: .trailing))
+                                .lineStyle(StrokeStyle(lineWidth: 2.4, lineCap: .round, lineJoin: .round))
                                 .interpolationMethod(.monotone)
                             if sample.id == series.last?.id || segmentCounts[sample.segment] == 1 {
                                 PointMark(x: .value("Time", sample.timestamp), y: .value(metric, sample.value))
-                                    .foregroundStyle(graphTint).symbolSize(sample.id == series.last?.id ? 38 : 12)
+                                    .foregroundStyle(graphTint)
+                                    .symbol {
+                                        Circle().fill(graphTint)
+                                            .overlay(Circle().strokeBorder(Color(nsColor: .windowBackgroundColor), lineWidth: 1.5))
+                                            .frame(width: sample.id == series.last?.id ? 7 : 3, height: sample.id == series.last?.id ? 7 : 3)
+                                    }
+                            }
                             }
                         }
                     }
-                    .chartYScale(domain: account.kind.isAPI ? min(0, (series.map(\.value).min() ?? 0) * 1.08)...max(1, (series.map(\.value).max() ?? 1) * 1.08) : 0...100)
+                    .chartYScale(domain: plotDomain, range: .plotDimension(startPadding: 6, endPadding: 10))
                     .chartXAxis {
                         AxisMarks(values: .automatic(desiredCount: 3)) {
-                            AxisGridLine().foregroundStyle(Color.primary.opacity(0.035))
-                            AxisValueLabel(format: .dateTime.day().hour(.defaultDigits(amPM: .abbreviated)))
+                            AxisGridLine(stroke: StrokeStyle(lineWidth: 0.5)).foregroundStyle(Color.primary.opacity(0.035))
+                            AxisValueLabel(format: points.last!.timestamp.timeIntervalSince(points.first!.timestamp) > 86400 ? .dateTime.month(.abbreviated).day() : .dateTime.hour(.defaultDigits(amPM: .abbreviated)))
+                                .font(.system(size: 9)).foregroundStyle(Color(nsColor: .secondaryLabelColor))
                         }
                     }
                     .chartYAxis {
                         AxisMarks(values: .automatic(desiredCount: 3)) {
-                            AxisGridLine().foregroundStyle(Color.primary.opacity(0.055))
-                            AxisValueLabel()
+                            AxisGridLine(stroke: StrokeStyle(lineWidth: 0.5)).foregroundStyle(Color.primary.opacity(0.08))
+                            AxisValueLabel().font(.system(size: 9)).foregroundStyle(Color(nsColor: .secondaryLabelColor))
                         }
                     }
                     .chartOverlay { proxy in
@@ -1546,12 +1644,12 @@ private struct HistoryCard: View {
                                 .allowsHitTesting(false)
                         }
                     }
-                    .frame(height: 60).padding(.top, 2)
+                    .frame(height: 90).padding(.top, 3).padding(.bottom, 2)
                     if let last = plotted.last {
                         HStack {
-                            Text(historyCaption).lineLimit(1).help("Observed allowance consumption today in the selected history range. Unmeasured gaps and resets are excluded; this is not total provider usage.")
+                            Text(fittedTrend ? String(format: "Smoothed trend · %.0f–%.0f%%", plotDomain.lowerBound, plotDomain.upperBound) : effectiveStyle == .bars ? "Latest reading per time bucket" : historyCaption).lineLimit(1).help(fittedTrend ? "The trend uses a fitted vertical scale and one-hour smoothing. Hover for exact recorded readings. Switch to the full 0–100% scale in the chart menu. Missing intervals and resets are never connected." : "History uses the full scale. Hover for exact recorded readings; missing intervals and resets are not connected.")
                             Spacer()
-                            Text(last.timestamp, format: .dateTime.month(.abbreviated).day().hour().minute())
+                            Text(last.timestamp, format: .dateTime.hour().minute()).help("Last reading: " + last.timestamp.formatted(date: .abbreviated, time: .shortened))
                         }.font(.system(size: 10)).foregroundStyle(.secondary)
                     }
 
@@ -1586,7 +1684,7 @@ private struct ActivityHeatmap: View {
                     Spacer()
                     Text("Last 7 days · " + (calendar.timeZone.abbreviation() ?? calendar.timeZone.identifier)).font(.system(size: 10)).foregroundStyle(.secondary)
                 }
-                Grid(horizontalSpacing: 4, verticalSpacing: 2) {
+                Grid(horizontalSpacing: 4, verticalSpacing: 1) {
                     GridRow {
                         Color.clear.frame(width: 62, height: 12)
                         ForEach(0..<24) { hour in
@@ -1625,7 +1723,7 @@ private struct ActivityHeatmap: View {
         return RoundedRectangle(cornerRadius: 3)
             .fill(fill)
             .overlay(RoundedRectangle(cornerRadius: 3).strokeBorder(border, lineWidth: 0.5))
-            .frame(maxWidth: .infinity).frame(height: 12)
+            .frame(maxWidth: .infinity).frame(height: 10)
             .help(description)
             .accessibilityLabel(description)
     }
@@ -1678,4 +1776,156 @@ private struct AccountAppearanceEditor: View {
             }
         }.font(.system(size: 13)).padding(20).frame(width: 360)
     }
+}
+
+/// Current allowance is a composition, not a time series. Never infer a denominator for API dollars.
+private struct CurrentAllowanceChart: View {
+    let percent: Double?
+    let style: DashboardChartStyle
+    let tint: Color
+    let saved: Bool
+    private var remaining: Double? { percent.flatMap { $0.isFinite ? min(100, max(0, $0)) : nil } }
+    var body: some View {
+        HStack(spacing: 16) {
+            if let remaining {
+                if style == .gauge {
+                    ZStack {
+                        Circle().trim(from: 0, to: 0.75).stroke(Color.primary.opacity(0.08), style: StrokeStyle(lineWidth: 9, lineCap: .round))
+                        Circle().trim(from: 0, to: 0.75 * remaining / 100)
+                            .stroke(AngularGradient(colors: [tint.opacity(0.35), tint], center: .center, startAngle: .degrees(0), endAngle: .degrees(270)), style: StrokeStyle(lineWidth: 9, lineCap: .round))
+                        Text(String(format: "%.0f%%", remaining)).font(.system(size: 16, weight: .semibold, design: .rounded)).rotationEffect(.degrees(-135))
+                    }.rotationEffect(.degrees(135)).padding(7).frame(width: 74, height: 74)
+                } else {
+                    Chart {
+                        SectorMark(angle: .value("Remaining", remaining), innerRadius: .ratio(style == .ring ? 0.76 : 0), angularInset: remaining > 0 && remaining < 100 ? 2 : 0)
+                            .foregroundStyle(tint.gradient).cornerRadius(3)
+                        SectorMark(angle: .value("Used", 100 - remaining), innerRadius: .ratio(style == .ring ? 0.76 : 0), angularInset: remaining > 0 && remaining < 100 ? 2 : 0)
+                            .foregroundStyle(Color.primary.opacity(0.08)).cornerRadius(3)
+                    }.chartLegend(.hidden).frame(width: 74, height: 74)
+                        .overlay {
+                            if style == .ring { Text(String(format: "%.0f%%", remaining)).font(.system(size: 16, weight: .semibold, design: .rounded)) }
+                        }
+                }
+                VStack(alignment: .leading, spacing: 7) {
+                    Text(saved ? "Saved allowance" : "Current allowance").font(.system(size: 10, weight: .medium)).foregroundStyle(.secondary)
+                    Label(String(format: "%.0f%% remaining", remaining), systemImage: "circle.fill").foregroundStyle(tint)
+                    Label(String(format: "%.0f%% used", 100 - remaining), systemImage: "circle").foregroundStyle(.secondary)
+                }.font(.system(size: 11, weight: .medium)).monospacedDigit()
+            } else {
+                Text("No allowance reading yet").font(.callout).foregroundStyle(.secondary)
+            }
+            Spacer(minLength: 0)
+        }.frame(maxWidth: .infinity, alignment: .leading)
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(remaining.map { String(format: "%@ %.0f percent remaining, %.0f percent used", saved ? "Saved allowance" : "Current allowance", $0, 100 - $0) } ?? "No allowance reading yet")
+    }
+}
+
+private struct UsageOverviewCharts: View {
+    let accounts: [Account]
+    let colorAccounts: [Account]
+    let histories: [UUID: [UsageHistoryPoint]]
+    let now: Date
+    private let calendar = Calendar.current
+    private struct DailyUsage: Identifiable {
+        let account: UUID
+        let day: Date
+        let value: Double
+        var id: String { account.uuidString + String(day.timeIntervalSince1970) }
+    }
+    private var days: [Date] {
+        let today = calendar.startOfDay(for: now)
+        return (0..<7).compactMap { calendar.date(byAdding: .day, value: $0 - 6, to: today) }
+    }
+    private var eligible: [Account] { accounts.filter { !$0.kind.isAPI } }
+    private var readings: [DailyUsage] {
+        eligible.flatMap { account in
+            let hours = UsageHeatmap.hours(points: histories[account.id] ?? [], kind: account.kind, calendar: calendar)
+            return days.compactMap { day -> DailyUsage? in
+                let observed = hours.filter { calendar.isDate($0.key, inSameDayAs: day) && $0.key <= now }
+                guard !observed.isEmpty else { return nil }
+                return DailyUsage(account: account.id, day: day, value: observed.values.reduce(0, +))
+            }
+        }
+    }
+    private func tint(_ account: Account) -> Color { overviewAccountTint(account, accounts: colorAccounts) }
+    var body: some View {
+        let records = readings
+        let totals = eligible.map { account in (account, records.filter { $0.account == account.id }.reduce(0) { $0 + $1.value }) }
+        let total = totals.reduce(0) { $0 + $1.1 }
+        SettingsCard(inset: 10) {
+            VStack(alignment: .leading, spacing: 6) {
+                HStack {
+                    Text("Usage mix").font(.system(size: 13, weight: .semibold))
+                    Spacer()
+                    Text("Last 7 days").font(.system(size: 10)).foregroundStyle(.secondary)
+                }
+                if total > 0 {
+                    HStack(spacing: 14) {
+                        Chart {
+                            ForEach(eligible) { account in
+                                let amount = totals.first { $0.0.id == account.id }?.1 ?? 0
+                                if amount > 0 {
+                                    SectorMark(angle: .value("Allowance points", amount), innerRadius: .ratio(0.6), angularInset: 2)
+                                        .foregroundStyle(tint(account).gradient).cornerRadius(3)
+                                        .accessibilityLabel(account.name)
+                                        .accessibilityValue(String(format: "%.1f allowance points, %.0f percent of observed consumption", amount, amount / total * 100))
+                                }
+                            }
+                        }.frame(width: 82, height: 82)
+                            .overlay { VStack(spacing: 1) {
+                                Text(String(format: "%.0f", total)).font(.system(size: 17, weight: .semibold, design: .rounded))
+                                Text("points").font(.system(size: 9)).foregroundStyle(.secondary)
+                            } }
+                        VStack(spacing: 3) {
+                            let peak = max(1, days.map { day in records.filter { $0.day == day }.reduce(0) { $0 + $1.value } }.max() ?? 1)
+                            ForEach(days, id: \.self) { day in
+                                let daily = records.filter { $0.day == day }
+                                let amount = daily.reduce(0) { $0 + $1.value }
+                                HStack(spacing: 5) {
+                                    Text(day.formatted(.dateTime.weekday(.abbreviated))).frame(width: 22, alignment: .leading)
+                                    GeometryReader { geometry in
+                                        HStack(spacing: 0) {
+                                            ForEach(eligible) { account in
+                                                let value = daily.first { $0.account == account.id }?.value ?? 0
+                                                Rectangle().fill(tint(account).gradient)
+                                                    .frame(width: geometry.size.width * value / peak)
+                                                    .help(account.name + String(format: ": %.1f allowance points", value))
+                                            }
+                                        }.clipShape(RoundedRectangle(cornerRadius: 2))
+                                    }.frame(height: 7)
+                                    Text(daily.isEmpty ? "—" : String(format: "%.0f", amount)).monospacedDigit().frame(width: 18, alignment: .trailing)
+                                }.font(.system(size: 9)).foregroundStyle(.secondary).frame(height: 10)
+                            }
+                        }.frame(height: 94)
+
+                    }
+                    HStack(spacing: 8) {
+                        ForEach(eligible.prefix(4)) { account in
+                            let amount = totals.first { $0.0.id == account.id }?.1 ?? 0
+                            HStack(spacing: 3) {
+                                Circle().fill(tint(account)).frame(width: 5, height: 5)
+                                Text(account.name + (records.contains { $0.account == account.id } ? String(format: " %.0f%%", amount / total * 100) : " —")).lineLimit(1)
+                            }.help(account.name + (records.contains { $0.account == account.id } ? String(format: ": %.1f allowance points consumed", amount) : ": no measured intervals"))
+                        }
+                        if eligible.count > 4 { Text("+\(eligible.count - 4)").help("Additional accounts are included in both charts.") }
+                    }.font(.system(size: 9)).foregroundStyle(.secondary)
+                } else {
+                    Text(records.isEmpty ? "Collecting usage history" : "No measured consumption yet")
+                        .font(.system(size: 12, weight: .medium)).foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, minHeight: 108)
+                }
+                Text("Observed allowance points · gaps excluded")
+                    .font(.system(size: 9)).foregroundStyle(.secondary)
+                    .help("Each point is one percentage point of an account’s quota. Plans have different capacities, so this compares observed allowance depletion, not tokens, cost or coding time. API accounts are excluded. Empty days have no measured consumption or no readings.")
+            }
+        }
+    }
+}
+
+@MainActor private func overviewAccountTint(_ account: Account, accounts: [Account]) -> Color {
+    if let hex = account.graphColorHex, let color = NSColor.accountHex(hex) { return Color(nsColor: color) }
+    let preceding = accounts.prefix { $0.id != account.id }.filter { $0.kind.provider == account.kind.provider }.count
+    if preceding == 0 { return providerAccent(account.kind.provider) }
+    return [Color.purple, Color.blue, Color.pink][(preceding - 1) % 3]
 }

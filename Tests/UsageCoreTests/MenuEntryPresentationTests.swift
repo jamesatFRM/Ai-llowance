@@ -63,3 +63,32 @@ import Testing
         #expect(MenuEntryPresentation.value(sessionOnly, preferences: restored) == prefix + "93%")
     }
 }
+
+@Test func dropdownCustomizationsPersistIndependently() throws {
+    var preferences = MenuPreferences()
+    preferences.dropdownShowEmails = true
+    preferences.dropdownShowResets = false
+    preferences.dropdownShowBars = false
+    preferences.dropdownShowHeadings = false
+    preferences.dropdownRoomyRows = true
+    let restored = try JSONDecoder().decode(MenuPreferences.self, from: JSONEncoder().encode(preferences))
+    #expect(restored == preferences)
+    let legacy = try JSONDecoder().decode(MenuPreferences.self, from: Data("{}".utf8))
+    #expect(!legacy.dropdownShowEmails && legacy.dropdownShowResets && legacy.dropdownShowBars && legacy.dropdownShowHeadings && !legacy.dropdownRoomyRows)
+    #expect(restored.showSessionInMenuBar && !restored.detailedQuotaLabels)
+}
+
+@Test func dashboardChartStylesPersistWithoutChangingOtherPreferences() throws {
+    for style in DashboardChartStyle.allCases {
+        var preferences = MenuPreferences()
+        preferences.dashboardChartStyle = style
+        preferences.dashboardChartFullScale = true
+        preferences.dropdownShowEmails = true
+        preferences.showSessionInMenuBar = false
+        let restored = try JSONDecoder().decode(MenuPreferences.self, from: JSONEncoder().encode(preferences))
+        #expect(restored == preferences)
+    }
+    #expect(try JSONDecoder().decode(MenuPreferences.self, from: Data("{}".utf8)).dashboardChartStyle == .mixed)
+    #expect(try JSONDecoder().decode(MenuPreferences.self, from: Data(#"{"dashboardChartStyle":"future-style"}"#.utf8)).dashboardChartStyle == .mixed)
+    #expect(DashboardChartStyle.allCases.filter(\.isCurrentAllowance) == [.ring, .pie, .gauge])
+}

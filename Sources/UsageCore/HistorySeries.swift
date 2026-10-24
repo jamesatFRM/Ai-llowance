@@ -9,21 +9,58 @@ public struct HistorySample: Identifiable, Sendable {
 
 /// Lines connect only nearby observations from the same known reporting period.
 public enum HistorySeries {
+    /// A labeled detail scale for percentage trends; bars retain a zero baseline.
+    public static func allowanceTrendDomain(_ values: [Double]) -> ClosedRange<Double> {
+        let finite = values.filter { $0.isFinite && (0...100).contains($0) }
+        guard let minimum = finite.min(), let maximum = finite.max() else { return 0...100 }
+        var lower = max(0, floor((minimum - 2) / 5) * 5)
+        var upper = min(100, ceil((maximum + 2) / 5) * 5)
+        if upper - lower < 10 {
+            lower = max(0, upper - 10)
+            upper = min(100, lower + 10)
+        }
+        return lower...upper
+    }
+
+    /// One actual reading per time bucket; never averages percentages or fills missing buckets.
+    public static func barSamples(_ samples: [HistorySample], count: Int = 24) -> [HistorySample] {
+        guard count > 0, let first = samples.first, let last = samples.last else { return [] }
+        let interval = max(1, last.timestamp.timeIntervalSince(first.timestamp) / Double(count))
+        var buckets: [Int: HistorySample] = [:]
+        for sample in samples {
+            let index = min(count - 1, max(0, Int(sample.timestamp.timeIntervalSince(first.timestamp) / interval)))
+            buckets[index] = sample
+        }
+        return buckets.keys.sorted().compactMap { buckets[$0] }
+    }
+
     /// A bounded visual trend. Never blends across missing intervals or quota resets.
     /// Exact observations remain the source for values and inspection.
     public static func smoothTrend(_ samples: [HistorySample]) -> [HistorySample] {
-        var result = samples
-        for _ in 0..<2 {
-            let source = result
-            result = source.indices.map { index in
-                guard index > 0, index + 1 < source.count,
-                      source[index - 1].segment == source[index].segment,
-                      source[index + 1].segment == source[index].segment else { return source[index] }
-                let value = (source[index - 1].value + 2 * source[index].value + source[index + 1].value) / 4
-                return HistorySample(timestamp: source[index].timestamp, value: value, segment: source[index].segment)
+        // Smooth by elapsed time, not sample count: frequent polling should not
+        // turn the same history into tiny stair steps. Endpoints stay exact.
+        let radius: TimeInterval = 3600
+        return samples.enumerated().map { index, sample in
+            guard index > 0, index + 1 < samples.count,
+                  samples[index - 1].segment == sample.segment,
+                  samples[index + 1].segment == sample.segment else { return sample }
+            var lower = index
+            var upper = index
+            while lower > 0, samples[lower - 1].segment == sample.segment,
+                  sample.timestamp.timeIntervalSince(samples[lower - 1].timestamp) < radius { lower -= 1 }
+            while upper + 1 < samples.count, samples[upper + 1].segment == sample.segment,
+                  samples[upper + 1].timestamp.timeIntervalSince(sample.timestamp) < radius { upper += 1 }
+            var weighted = 0.0
+            var weight = 0.0
+            for neighbor in samples[lower...upper] {
+                let distance = abs(neighbor.timestamp.timeIntervalSince(sample.timestamp))
+                guard distance < radius else { continue }
+                let influence = pow(1 - pow(distance / radius, 3), 3)
+                weighted += neighbor.value * influence
+                weight += influence
             }
+            return HistorySample(timestamp: sample.timestamp, value: weight > 0 ? weighted / weight : sample.value, segment: sample.segment)
         }
-        return result
     }
 
     public static func samples(_ points: [UsageHistoryPoint], kind: ConnectionKind) -> [HistorySample] {
