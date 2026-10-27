@@ -24,6 +24,9 @@ final class AppStore: ObservableObject {
     @Published var snapshots: [UUID: Snapshot] = [:]
     @Published var errors: [UUID: String] = [:]
     @Published var refreshing = false
+    @Published private(set) var refreshingAccounts: Set<UUID> = []
+    private var refreshFailures: [UUID: UsageError] = [:]
+    private var networkFailures: Set<UUID> = []
     @Published var signingIn: UUID?
     @Published private(set) var codexSignInURL: URL?
     @Published var removing = false
@@ -102,9 +105,21 @@ final class AppStore: ObservableObject {
                 let remaining = [72.0, 24.0, 58.0, 16.0][index]
                 var windows = [try! QuotaWindow(id: claude ? "week.all models" : "codex.Secondary", label: "Week · 7d", usedPercent: 100 - remaining,
                     resetsAt: now.addingTimeInterval(Double(index + 2) * 86400), durationMinutes: 10_080)]
-                if claude { windows.append(try! QuotaWindow(id: "session", label: "Session · 5h", usedPercent: index == 0 ? 18 : 52,
+                do { windows.append(try! QuotaWindow(id: claude ? "session" : "codex.Primary", label: "Session · 5h", usedPercent: index == 1 ? 100 : 18,
                     resetsAt: now.addingTimeInterval(7200), durationMinutes: 300)) }
                 snapshots[account.id] = Snapshot(observedAt: now, windows: windows, identity: index % 2 == 0 ? "alex@example.com" : "work@example.com", source: "Sample data")
+                usageHistory[account.id] = (0...48).map { sample in
+                    let progress = Double(sample) / 48
+                    let used = (1 - cos(progress * .pi)) / 2
+                    return UsageHistoryPoint(timestamp: now.addingTimeInterval(Double(sample - 48) * 1800),
+                        remainingPercent: 100 - (100 - remaining) * used, windowID: windows[0].id, resetsAt: windows[0].resetsAt)
+                }
+                if index == 2 {
+                    snapshots[account.id]?.observedAt = now.addingTimeInterval(-480)
+                    errors[account.id] = UsageError.timeout.localizedDescription
+                    refreshFailures[account.id] = .timeout
+                    var schedule = PollState(); schedule.failed(UsageError.timeout, at: now); schedules[account.id] = schedule
+                }
             }
             menuPreferences.display = .byAccount; menuPreferences.showAccountNames = false
             return
@@ -140,7 +155,7 @@ final class AppStore: ObservableObject {
         guard monitor else { return }
         network.pathUpdateHandler = { @Sendable [weak self] path in
             let offline = path.status != .satisfied
-            Task { @MainActor in self?.offline = offline; if !offline { self?.refresh() } }
+            Task { @MainActor in self?.updateConnectivity(offline: offline) }
         }
         network.start(queue: DispatchQueue(label: "Ai-llowance.network", qos: .utility))
         // Dispatch deadlines do not depend on AppKit's default/event-tracking run-loop mode.
@@ -157,6 +172,23 @@ final class AppStore: ObservableObject {
         workspaceObservers.append(NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.didWakeNotification, object: nil, queue: .main) { [weak self] _ in
             Task { @MainActor in self?.sleeping = false; self?.now = Date(); self?.refresh() }
         })
+    }
+    func updateConnectivity(offline: Bool) {
+        let recovered = self.offline && !offline
+        self.offline = offline
+        if recovered {
+            // Retry a network timeout immediately; never bypass a provider's Retry-After.
+            for account in accounts where refreshFailures[account.id] == .timeout || networkFailures.contains(account.id) {
+                schedules[account.id]?.nextAttempt = Date()
+            }
+        }
+        if !offline { refresh() }
+    }
+    func connectionState(_ account: Account) -> ConnectionPresentation {
+        ConnectionPresentation.make(snapshot: snapshots[account.id], kind: account.kind, now: now,
+            enabled: account.enabled && !paused, offline: offline, refreshing: refreshingAccounts.contains(account.id),
+            reconnect: needsSignIn(account), cached: cachedAccounts.contains(account.id),
+            failed: errors[account.id] != nil, networkFailure: networkFailures.contains(account.id), failure: refreshFailures[account.id], retryAt: schedules[account.id]?.nextAttempt)
     }
     var refreshSummary: String {
         if demo { return "Sample data" }
@@ -524,62 +556,89 @@ final class AppStore: ObservableObject {
                 deliverAlerts()
                 scheduleHeartbeat()
             }
-            for account in due {
-                if Task.isCancelled || paused || sleeping || offline { return }
-                guard accounts.contains(where: { $0.id == account.id && $0.enabled }), signingIn != account.id, waitingForClaude[account.id] == nil else { continue }
-                let version = connectionVersions[account.id]
-                let start = Date()
-                var schedule = schedules[account.id] ?? PollState()
-                do {
-                    var snapshot = try await fetchAccount(account, at: start)
-                    snapshot.freshnessInterval = account.kind.freshnessInterval
-                    _ = try snapshot.validated()
-                    try Task.checkCancellation()
-                    guard accounts.contains(where: { $0.id == account.id && $0.enabled }), connectionVersions[account.id] == version,
-                          signingIn != account.id, waitingForClaude[account.id] == nil else { continue }
-                    if !account.kind.isAPI, let index = accounts.firstIndex(where: { $0.id == account.id }) {
-                        let identity = try CodexIdentity.validate(snapshot, for: accounts[index], accounts: accounts, snapshots: snapshots)
-                        if accounts[index].expectedIdentity == nil {
-                            accounts[index].expectedIdentity = identity
-                            do { try persist() }
-                            catch { accounts[index].expectedIdentity = nil; throw error }
-                        }
-                    }
-                    processAlert(snapshot, account: accounts.first(where: { $0.id == account.id }) ?? account)
-                    snapshots[account.id] = snapshot; errors[account.id] = nil; authenticationRequired.remove(account.id)
-                    cachedAccounts.remove(account.id)
-                    if let currentAccount = accounts.first(where: { $0.id == account.id }) { saveCachedReading(snapshot, account: currentAccount) }
-                    schedule.succeeded(at: Date(), interval: refreshInterval(for: account.kind, visible: interfaceVisible, lowPower: ProcessInfo.processInfo.isLowPowerModeEnabled))
-                    if account.kind == .claudeCode {
-                        claudeSignedIn[account.id] = true
-                        if notice?.hasPrefix("Finish Claude’s browser sign-in once.") == true { notice = nil }
-                        // Once direct usage works, restore the user's old status line. No bridge is needed.
-                        do { if restoredLegacyFeeds.insert(account.id).inserted { try claudeConnection().uninstall(account: account) } }
-                        catch { notice = "Usage is connected, but the previous status-line setting could not be restored automatically." }
-                    }
-                } catch is CancellationError { return }
-                catch {
-                    guard !Task.isCancelled, connectionVersions[account.id] == version,
-                          accounts.contains(where: { $0.id == account.id && $0.enabled }) else { continue }
-                    if [.authentication, .missingCredential, .forbidden].contains(error as? UsageError) { authenticationRequired.insert(account.id) }
-                    if let identityError = error as? UsageError {
-                        switch identityError {
-                        case .accountChanged, .duplicateAccount, .claudeDedicatedSignInRequired:
-                            snapshots[account.id] = nil
-                            clearCachedReading(account, preserveHistory: true)
-                            authenticationRequired.insert(account.id)
-                        default: break
-                        }
-                    }
-                    errors[account.id] = safeMessage(error); schedule.failed(error, at: Date())
-                    if account.kind == .claudeCode && error as? UsageError == .authentication {
-                        claudeSignedIn[account.id] = false
+            // Two independent lanes keep one slow provider from blocking every account.
+            await withTaskGroup(of: Void.self) { group in
+                // Interleave providers so several Claude accounts cannot occupy both lanes first.
+                var queues = Dictionary(grouping: due, by: { $0.kind.provider })
+                let providers = due.reduce(into: [MenuProvider]()) { order, account in
+                    if !order.contains(account.kind.provider) { order.append(account.kind.provider) }
+                }
+                var ordered: [Account] = []
+                while ordered.count < due.count {
+                    for provider in providers where queues[provider]?.isEmpty == false {
+                        ordered.append(queues[provider]!.removeFirst())
                     }
                 }
-                schedules[account.id] = schedule
+                var remaining = ordered.makeIterator()
+                for _ in 0..<2 {
+                    if let account = remaining.next() { group.addTask { await self.refreshAccount(account) } }
+                }
+                while await group.next() != nil {
+                    if Task.isCancelled { group.cancelAll(); break }
+                    if let account = remaining.next() { group.addTask { await self.refreshAccount(account) } }
+                }
             }
             now = Date()
         }
+    }
+    private func refreshAccount(_ account: Account) async {
+        guard !Task.isCancelled, !shuttingDown else { return }
+        refreshingAccounts.insert(account.id)
+        defer { refreshingAccounts.remove(account.id); now = Date() }
+        if Task.isCancelled || paused || sleeping || offline { return }
+        guard accounts.contains(where: { $0.id == account.id && $0.enabled }), signingIn != account.id, waitingForClaude[account.id] == nil else { return }
+        let version = connectionVersions[account.id]
+        let start = Date()
+        var schedule = schedules[account.id] ?? PollState()
+        do {
+            var snapshot = try await fetchAccount(account, at: start)
+            snapshot.freshnessInterval = account.kind.freshnessInterval
+            _ = try snapshot.validated()
+            try Task.checkCancellation()
+            guard accounts.contains(where: { $0.id == account.id && $0.enabled }), connectionVersions[account.id] == version,
+                  signingIn != account.id, waitingForClaude[account.id] == nil else { return }
+            if !account.kind.isAPI, let index = accounts.firstIndex(where: { $0.id == account.id }) {
+                let identity = try CodexIdentity.validate(snapshot, for: accounts[index], accounts: accounts, snapshots: snapshots)
+                if accounts[index].expectedIdentity == nil {
+                    accounts[index].expectedIdentity = identity
+                    do { try persist() }
+                    catch { accounts[index].expectedIdentity = nil; throw error }
+                }
+            }
+            processAlert(snapshot, account: accounts.first(where: { $0.id == account.id }) ?? account)
+            snapshots[account.id] = snapshot; errors[account.id] = nil; refreshFailures[account.id] = nil; networkFailures.remove(account.id); authenticationRequired.remove(account.id)
+            cachedAccounts.remove(account.id)
+            if let currentAccount = accounts.first(where: { $0.id == account.id }) { saveCachedReading(snapshot, account: currentAccount) }
+            schedule.succeeded(at: Date(), interval: refreshInterval(for: account.kind, visible: interfaceVisible, lowPower: ProcessInfo.processInfo.isLowPowerModeEnabled))
+            if account.kind == .claudeCode {
+                claudeSignedIn[account.id] = true
+                if notice?.hasPrefix("Finish Claude’s browser sign-in once.") == true { notice = nil }
+                // Once direct usage works, restore the user's old status line. No bridge is needed.
+                do { if restoredLegacyFeeds.insert(account.id).inserted { try claudeConnection().uninstall(account: account) } }
+                catch { notice = "Usage is connected, but the previous status-line setting could not be restored automatically." }
+            }
+        } catch is CancellationError { return }
+        catch {
+            guard !Task.isCancelled, connectionVersions[account.id] == version,
+                  accounts.contains(where: { $0.id == account.id && $0.enabled }) else { return }
+            if [.authentication, .missingCredential, .forbidden].contains(error as? UsageError) { authenticationRequired.insert(account.id) }
+            if let identityError = error as? UsageError {
+                switch identityError {
+                case .accountChanged, .duplicateAccount, .claudeDedicatedSignInRequired:
+                    snapshots[account.id] = nil
+                    clearCachedReading(account, preserveHistory: true)
+                    authenticationRequired.insert(account.id)
+                default: break
+                }
+            }
+            if error is URLError { networkFailures.insert(account.id) } else { networkFailures.remove(account.id) }
+            refreshFailures[account.id] = error as? UsageError ?? .unavailable("Refresh failed")
+            errors[account.id] = safeMessage(error); schedule.failed(error, at: Date())
+            if account.kind == .claudeCode && error as? UsageError == .authentication {
+                claudeSignedIn[account.id] = false
+            }
+        }
+        schedules[account.id] = schedule
     }
     private func fetchAccount(_ account: Account, at date: Date) async throws -> Snapshot {
         if let fetchOverride { return try await fetchOverride(account, date) }

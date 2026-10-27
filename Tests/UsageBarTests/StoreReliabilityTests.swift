@@ -116,3 +116,67 @@ private actor NotificationDecision {
     #expect(store.menuEntries.first?.isLastKnown == false)
     await store.shutdown()
 }
+
+private actor RefreshConcurrencyProbe {
+    var active = 0
+    var maximum = 0
+    func fetch(_ account: Account, at date: Date) async throws -> Snapshot {
+        active += 1; maximum = max(maximum, active)
+        defer { active -= 1 }
+        try await Task.sleep(for: account.name == "Slow" ? .milliseconds(800) : .milliseconds(30))
+        return Snapshot(observedAt: date, windows: [try QuotaWindow(id: "codex.week", label: "Week", usedPercent: 20, durationMinutes: 10_080)], identity: account.id.uuidString + "@example.com", source: "Fixture")
+    }
+}
+
+@Test @MainActor func slowAccountDoesNotBlockFastReadingAndConcurrencyIsBounded() async throws {
+    let root = try reliabilityRoot(); defer { try? FileManager.default.removeItem(at: root) }
+    let probe = RefreshConcurrencyProbe()
+    let store = AppStore(root: root, monitor: false, fetch: { account, date in try await probe.fetch(account, at: date) })
+    let slow = Account(name: "Slow", kind: .codex)
+    let fast = Account(name: "Fast", kind: .codex)
+    let third = Account(name: "Third", kind: .codex)
+    store.accounts = [slow, fast, third]
+    store.refresh(force: true)
+    try await waitUntil { store.snapshots[third.id] != nil }
+    #expect(store.snapshots[slow.id] == nil)
+    #expect(store.snapshots[fast.id] != nil)
+    #expect(store.refreshingAccounts.contains(slow.id))
+    #expect(!store.refreshingAccounts.contains(fast.id))
+    #expect(await probe.maximum == 2)
+    await store.shutdown()
+    #expect(store.snapshots[slow.id] == nil)
+    #expect(store.refreshingAccounts.isEmpty)
+}
+
+private actor RecoveryProbe {
+    var attempts = 0
+    let firstError: UsageError
+    init(_ error: UsageError) { firstError = error }
+    func fetch(_ account: Account, date: Date) throws -> Snapshot {
+        attempts += 1
+        if attempts == 1 { throw firstError }
+        return Snapshot(observedAt: date, windows: [try QuotaWindow(id: "codex.week", label: "Week", usedPercent: 20, durationMinutes: 10_080)], identity: "recovery@example.com", source: "Fixture")
+    }
+}
+@Test @MainActor func reconnectingNetworkRetriesTimeoutButRespectsProviderBackoff() async throws {
+    for failure in [UsageError.timeout, UsageError.rateLimited(600)] {
+        let root = try reliabilityRoot(); defer { try? FileManager.default.removeItem(at: root) }
+        let probe = RecoveryProbe(failure)
+        let store = AppStore(root: root, monitor: false, fetch: { account, date in try await probe.fetch(account, date: date) })
+        let account = Account(name: "Test", kind: .codex); store.accounts = [account]
+        store.refresh(force: true)
+        try await waitUntil { !store.refreshing }
+        #expect(store.errors[account.id] != nil)
+        store.updateConnectivity(offline: true); store.updateConnectivity(offline: false)
+        try await waitUntil { !store.refreshing }
+        if failure == .timeout {
+            #expect(await probe.attempts == 2)
+            #expect(store.errors[account.id] == nil)
+            #expect(store.connectionState(account).title == "Available")
+        } else {
+            #expect(await probe.attempts == 1)
+            #expect(store.connectionState(account).title == "Provider busy")
+        }
+        await store.shutdown()
+    }
+}
