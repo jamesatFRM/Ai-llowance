@@ -162,7 +162,7 @@ struct Dashboard: View {
                                     .frame(width: 14).foregroundStyle(.orange)
                                 Text(account.name).fontWeight(.medium).lineLimit(1)
                                 Spacer(minLength: 4)
-                                Text(store.needsSignIn(account) ? "Reconnect" : (store.errors[account.id] != nil ? "Check" : status.title)).foregroundStyle(.secondary).lineLimit(1)
+                                Text(store.connectionState(account).title).foregroundStyle(.secondary).lineLimit(1)
                                 Image(systemName: "chevron.right").font(.system(size: 8, weight: .semibold)).foregroundStyle(.tertiary)
                             }.font(.system(size: 11)).contentShape(Rectangle())
                         }.buttonStyle(.plain)
@@ -183,7 +183,7 @@ struct Dashboard: View {
                         ForEach(accounts) { account in
                             CompactAccountRow(account: account, snapshot: store.snapshots[account.id], error: store.errors[account.id], now: store.now, cached: store.isCached(account),
                                 expanded: expandedAccountID == account.id,
-                                detailedLabels: store.menuPreferences.detailedQuotaLabels, dropdownPreferences: store.menuPreferences, colorByAllowance: store.menuPreferences.colorByAllowance,
+                                detailedLabels: store.menuPreferences.detailedQuotaLabels, connection: store.connectionState(account), dropdownPreferences: store.menuPreferences, colorByAllowance: store.menuPreferences.colorByAllowance,
                                 history: expandedAccountID == account.id ? store.history(for: account) : [],
                                 expand: { expandedAccountID = expandedAccountID == account.id ? nil : account.id },
                                 manage: { manage(account) }, openUsage: { store.openUsage(account) })
@@ -205,6 +205,7 @@ private struct CompactAccountRow: View {
     let cached: Bool
     let expanded: Bool
     let detailedLabels: Bool
+    var connection: ConnectionPresentation? = nil
     var dropdownPreferences = MenuPreferences()
     let colorByAllowance: Bool
     let history: [UsageHistoryPoint]
@@ -214,6 +215,7 @@ private struct CompactAccountRow: View {
     private var status: AllowanceStatus { AllowanceStatus.evaluate(snapshot: snapshot, kind: account.kind, now: now, hasError: error != nil) }
     private var window: QuotaWindow? { snapshot?.displayWindow(for: account.kind) }
     private var detail: String {
+        if let connection, connection.saved || connection.needsAction || status.state == .exhausted || snapshot == nil { return connection.title + " · " + connection.detail }
         if !account.enabled { return "Paused" }
         if error != nil { return snapshot == nil ? "Check connection" : "Last known · refresh failed" }
         if cached { return "Saved reading · checking for update" }
@@ -240,9 +242,9 @@ private struct CompactAccountRow: View {
                             .foregroundStyle(.secondary).frame(width: 12)
                     }
                     HStack(spacing: 7) {
-                        Text(detail).font(.system(size: 9)).foregroundStyle(error != nil || status.state == .restricted ? Color.orange : Color.secondary).lineLimit(1)
+                        Text(detail).font(.system(size: 9)).foregroundStyle(error != nil || status.state == .restricted ? Color.orange : Color.secondary).lineLimit(connection?.saved == true || connection?.needsAction == true || status.state == .exhausted ? 2 : 1)
                         Spacer(minLength: 2)
-                        if dropdownPreferences.dropdownShowBars, let window {
+                        if dropdownPreferences.dropdownShowBars, connection?.saved != true, connection?.needsAction != true, status.state != .exhausted, let window {
                             AllowanceBar(remaining: window.remainingPercent, unavailable: error != nil || cached || status.state == .stale || status.state == .restricted || !account.enabled)
                                 .frame(width: 54, height: 3)
                         }
@@ -833,9 +835,9 @@ struct AccountsView: View {
                     ForEach(row) { account in
                         let points = store.history(for: account).filter { $0.timestamp >= store.now.addingTimeInterval(-Double(historyHours) * 3600) && $0.timestamp <= store.now }
                         HistoryCard(account: account, points: points, snapshot: store.snapshots[account.id],
-                                    error: store.errors[account.id] != nil, cached: store.isCached(account), needsReconnect: store.needsSignIn(account), now: store.now, chartStyle: store.menuPreferences.dashboardChartStyle, fullScale: store.menuPreferences.dashboardChartFullScale,
+                                    error: store.errors[account.id] != nil, cached: store.isCached(account), needsReconnect: store.needsSignIn(account), connection: store.connectionState(account), now: store.now, chartStyle: store.menuPreferences.dashboardChartStyle, fullScale: store.menuPreferences.dashboardChartFullScale,
                                     overviewTint: store.menuPreferences.dashboardChartStyle == .mixed ? overviewAccountTint(account, accounts: store.accounts) : nil,
-                                    openUsage: { if store.needsSignIn(account) { store.selectedAccountID = account.id; section = .accounts } else { store.openUsage(account) } }, manage: { renaming = account })
+                                    openUsage: { if store.connectionState(account).needsAction { store.selectedAccountID = account.id; section = .accounts } else { store.openUsage(account) } }, manage: { renaming = account })
                             .frame(maxWidth: .infinity)
                     }
                 }
@@ -1298,7 +1300,7 @@ struct AccountsView: View {
                                 ForEach(accounts) { account in
                                     CompactAccountRow(account: account, snapshot: store.snapshots[account.id], error: store.errors[account.id], now: store.now, cached: store.isCached(account),
                                         expanded: dropdownPreviewExpandedID == account.id,
-                                        detailedLabels: store.menuPreferences.detailedQuotaLabels, dropdownPreferences: store.menuPreferences,
+                                        detailedLabels: store.menuPreferences.detailedQuotaLabels, connection: store.connectionState(account), dropdownPreferences: store.menuPreferences,
                                         colorByAllowance: store.menuPreferences.colorByAllowance,
                                         history: dropdownPreviewExpandedID == account.id ? store.history(for: account) : [],
                                         expand: { dropdownPreviewExpandedID = dropdownPreviewExpandedID == account.id ? nil : account.id },
@@ -1464,6 +1466,7 @@ private struct HistoryCard: View {
     let error: Bool
     let cached: Bool
     let needsReconnect: Bool
+    let connection: ConnectionPresentation
     let now: Date
     let chartStyle: DashboardChartStyle
     let fullScale: Bool
@@ -1473,7 +1476,7 @@ private struct HistoryCard: View {
     var manage: () -> Void
     private var status: AllowanceStatus { AllowanceStatus.evaluate(snapshot: snapshot, kind: account.kind, now: now, hasError: error) }
     private var statusColor: Color {
-        if !account.enabled || cached { return .secondary }
+        if !account.enabled || cached || connection.saved { return .secondary }
         switch status.state {
         case .ready, .unlimited: return Color(red: 0.23, green: 0.78, blue: 0.61)
         case .low, .exhausted, .restricted: return .orange
@@ -1515,50 +1518,63 @@ private struct HistoryCard: View {
         guard !hours.isEmpty else { return "History building" }
         return String(format: "%.1f pts observed today", hours.values.reduce(0, +))
     }
-    @ViewBuilder private var sessionBadge: some View {
-        if !account.kind.isAPI, let session = snapshot?.sessionWindow(for: account.kind),
-           session.id != snapshot?.displayWindow(for: account.kind)?.id {
-            Text("5h · \(Int(session.remainingPercent))%")
-                .font(.system(size: 10, weight: .medium)).monospacedDigit()
-                .foregroundStyle(error || cached ? Color.secondary : Color.primary)
-                .padding(.horizontal, 7).padding(.vertical, 3)
-                .background(Color.primary.opacity(0.05), in: Capsule())
-                .help("5-hour allowance: \(Int(session.remainingPercent))% left · \(resetText(session.resetsAt, at: now))")
-                .accessibilityLabel("5-hour allowance \(Int(session.remainingPercent)) percent left, \(resetText(session.resetsAt, at: now))")
+    private func quotaReset(_ date: Date?) -> String {
+        guard let date else { return "Reset not reported" }
+        return date <= now ? "Reset expected · checking" : resetText(date, at: now)
+    }
+    private var primaryQuotaTitle: String {
+        if account.kind.isAPI { return metric }
+        switch snapshot?.displayWindow(for: account.kind)?.periodLabel {
+        case "Week": return "Weekly allowance"
+        case "5h": return "5-hour allowance"
+        default: return "Allowance remaining"
         }
+    }
+    private var primaryQuotaDetail: String {
+        guard let snapshot else { return "Awaiting first reading" }
+        if account.kind.isAPI { return "Provider report" }
+        if snapshot.unlimited == true { return "No usage limit reported" }
+        guard let window = snapshot.displayWindow(for: account.kind) else { return "Limit not reported" }
+        return quotaReset(window.resetsAt)
+    }
+    @ViewBuilder private var quotaSummary: some View {
+        HStack(alignment: .top, spacing: 12) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(primaryQuotaTitle)
+                    .font(.system(size: 10, weight: .medium)).foregroundStyle(.secondary)
+                Text(readingValue(snapshot, window: snapshot?.displayWindow(for: account.kind)))
+                    .font(.system(size: 25, weight: .semibold, design: .rounded)).monospacedDigit()
+                    .foregroundStyle(connection.saved ? Color.secondary : Color.primary)
+                Text(primaryQuotaDetail)
+                    .font(.system(size: 10)).foregroundStyle(.secondary).lineLimit(1).minimumScaleFactor(0.85)
+            }.frame(maxWidth: .infinity, alignment: .leading)
+            if !account.kind.isAPI, let session = snapshot?.sessionWindow(for: account.kind),
+               session.id != snapshot?.displayWindow(for: account.kind)?.id {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("5-hour allowance").font(.system(size: 10, weight: .medium)).foregroundStyle(.secondary)
+                    Text("\(Int(session.remainingPercent))% left")
+                        .font(.system(size: 18, weight: .semibold, design: .rounded)).monospacedDigit().frame(height: 30, alignment: .leading)
+                        .foregroundStyle(connection.saved ? Color.secondary : session.remainingPercent <= 20 ? Color.orange : Color.primary)
+                    Text(quotaReset(session.resetsAt)).font(.system(size: 10)).foregroundStyle(.secondary).lineLimit(1).minimumScaleFactor(0.85)
+                }.frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }.padding(.vertical, 2)
     }
 
     var body: some View {
         let series = effectiveStyle == .bars ? HistorySeries.barSamples(samples) : effectiveStyle == .dots ? samples : HistorySeries.smoothTrend(samples)
         let segmentCounts = Dictionary(grouping: series, by: \.segment).mapValues(\.count)
-        SettingsCard(inset: 10) {
-            VStack(alignment: .leading, spacing: 4) {
-                HStack {
+        SettingsCard(inset: 12) {
+            VStack(alignment: .leading, spacing: 5) {
+                HStack(spacing: 7) {
                     ProviderMark(provider: account.kind.provider, size: 16).foregroundStyle(dashboardTint)
-                    Text(account.name).font(.system(size: 12, weight: .semibold)).foregroundStyle(dashboardTint)
-                    Spacer()
-                    Image(systemName: !account.enabled ? "pause.circle" : cached ? "clock" : status.symbol)
-                        .foregroundStyle(statusColor).help(!account.enabled ? "Paused" : cached ? "Saved reading" : status.title)
-                }
-                Text(account.expectedIdentity ?? account.kind.title)
-                    .font(.system(size: 11)).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
-                HStack(alignment: .firstTextBaseline) {
-                    Text(readingValue(snapshot, window: snapshot?.displayWindow(for: account.kind)))
-                        .font(.system(size: 24, weight: .semibold, design: .rounded)).monospacedDigit()
-                        .foregroundStyle(error || cached || status.state == .stale || status.state == .restricted || !account.enabled ? Color.secondary : Color.primary)
-                    if !account.kind.isAPI, let period = snapshot?.displayWindow(for: account.kind)?.periodLabel {
-                        Text(period).font(.system(size: 11, weight: .semibold)).foregroundStyle(.secondary)
-                    }
+                    Text(account.name).font(.system(size: 12, weight: .semibold)).lineLimit(1)
                     Spacer(minLength: 4)
-                    Text(needsReconnect ? "Reconnect required" : !account.enabled ? "Paused" : cached ? "Saved reading" : status.title)
-                        .font(.system(size: 9, weight: .medium)).foregroundStyle(statusColor).lineLimit(1)
+                    Image(systemName: connection.symbol).foregroundStyle(statusColor).help(connection.title)
                 }
-                HStack(spacing: 8) {
-                    Text(snapshot?.displayWindow(for: account.kind).map { resetText($0.resetsAt, at: now) } ?? (account.kind.isAPI ? metric : "Current allowance"))
-                        .font(.system(size: 10)).foregroundStyle(.secondary).lineLimit(1)
-                    Spacer(minLength: 0)
-                    sessionBadge
-                }.frame(height: 18)
+                Text(account.expectedIdentity ?? snapshot?.identity ?? account.kind.title)
+                    .font(.system(size: 11)).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
+                quotaSummary
                 if effectiveStyle.isCurrentAllowance {
                     CurrentAllowanceChart(percent: snapshot?.displayWindow(for: account.kind)?.remainingPercent,
                                           style: effectiveStyle, tint: graphTint,
@@ -1644,7 +1660,7 @@ private struct HistoryCard: View {
                                 .allowsHitTesting(false)
                         }
                     }
-                    .frame(height: 90).padding(.top, 3).padding(.bottom, 2)
+                    .frame(height: 76).padding(.top, 3).padding(.bottom, 2)
                     if let last = plotted.last {
                         HStack {
                             Text(fittedTrend ? String(format: "Smoothed trend · %.0f–%.0f%%", plotDomain.lowerBound, plotDomain.upperBound) : effectiveStyle == .bars ? "Latest reading per time bucket" : historyCaption).lineLimit(1).help(fittedTrend ? "The trend uses a fitted vertical scale and one-hour smoothing. Hover for exact recorded readings. Switch to the full 0–100% scale in the chart menu. Missing intervals and resets are never connected." : "History uses the full scale. Hover for exact recorded readings; missing intervals and resets are not connected.")
@@ -1654,8 +1670,12 @@ private struct HistoryCard: View {
                     }
 
                 }
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(connection.title).font(.system(size: 10, weight: .medium)).foregroundStyle(statusColor)
+                    Text(connection.detail).font(.system(size: 10)).foregroundStyle(.secondary).lineLimit(2)
+                }.frame(maxWidth: .infinity, minHeight: 40, maxHeight: 40, alignment: .topLeading)
                 HStack(spacing: 8) {
-                    Button(action: openUsage) { Label(needsReconnect ? "Reconnect account" : "Open usage", systemImage: needsReconnect ? "person.crop.circle.badge.exclamationmark" : "arrow.up.right").frame(maxWidth: .infinity).frame(height: 24) }
+                    Button(action: openUsage) { Label(connection.needsAction ? (needsReconnect ? (account.kind.isAPI ? "Manage API key" : "Reconnect account") : "Connection details") : "Open usage", systemImage: connection.needsAction ? "person.crop.circle.badge.exclamationmark" : "arrow.up.right").frame(maxWidth: .infinity).frame(height: 24) }
                     Button(action: manage) { Image(systemName: "slider.horizontal.3").frame(width: 28, height: 24) }.help("Name & color").accessibilityLabel("Edit " + account.name)
                 }.font(.system(size: 11, weight: .medium)).buttonStyle(QuietButtonStyle())
             }

@@ -17,7 +17,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
     private var notificationDelegate: AllowanceNotificationDelegate?
     private var renderedEntries: [MenuEntry]?
     private var renderedPreferences: MenuPreferences?
-    private let store = AppStore(demo: CommandLine.arguments.contains("--demo") || CommandLine.arguments.contains("--preview") || CommandLine.arguments.contains("--export-preview"))
+    private let store = AppStore(demo: Bundle.main.object(forInfoDictionaryKey: "AILSamplePreview") as? Bool == true || CommandLine.arguments.contains("--demo") || CommandLine.arguments.contains("--preview") || CommandLine.arguments.contains("--export-preview"))
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy((UserDefaults.standard.object(forKey: "hideFromDock") as? Bool ?? true) ? .accessory : .regular)
         if let index = CommandLine.arguments.firstIndex(of: "--export-preview"), CommandLine.arguments.count > index + 1 {
@@ -188,7 +188,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
             })
             let created = NSWindow(contentViewController: controller)
             created.title = "Ai-llowance · Dashboard"; created.styleMask = [.titled, .closable, .miniaturizable, .resizable]
-            created.setContentSize(NSSize(width: 980, height: 536)); created.center()
+            created.setContentSize(NSSize(width: 980, height: 620)); created.center()
             created.isReleasedWhenClosed = false; created.delegate = self; window = created
         }
         applyWindowAppearance()

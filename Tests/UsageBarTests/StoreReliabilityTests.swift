@@ -116,3 +116,105 @@ private actor NotificationDecision {
     #expect(store.menuEntries.first?.isLastKnown == false)
     await store.shutdown()
 }
+
+private actor RefreshConcurrencyProbe {
+    var active = 0
+    var maximum = 0
+    func fetch(_ account: Account, at date: Date) async throws -> Snapshot {
+        active += 1; maximum = max(maximum, active)
+        defer { active -= 1 }
+        try await Task.sleep(for: account.name == "Slow" ? .milliseconds(800) : .milliseconds(30))
+        return Snapshot(observedAt: date, windows: [try QuotaWindow(id: "codex.week", label: "Week", usedPercent: 20, durationMinutes: 10_080)], identity: account.id.uuidString + "@example.com", source: "Fixture")
+    }
+}
+
+@Test @MainActor func slowAccountDoesNotBlockFastReadingAndConcurrencyIsBounded() async throws {
+    let root = try reliabilityRoot(); defer { try? FileManager.default.removeItem(at: root) }
+    let probe = RefreshConcurrencyProbe()
+    let store = AppStore(root: root, monitor: false, fetch: { account, date in try await probe.fetch(account, at: date) })
+    var slow = Account(name: "Slow", kind: .codex)
+    var fast = Account(name: "Fast", kind: .codex)
+    var third = Account(name: "Third", kind: .codex)
+    slow.expectedIdentity = slow.id.uuidString + "@example.com"
+    fast.expectedIdentity = fast.id.uuidString + "@example.com"
+    third.expectedIdentity = third.id.uuidString + "@example.com"
+    store.accounts = [slow, fast, third]
+    store.refresh(force: true)
+    try await waitUntil { store.snapshots[third.id] != nil }
+    #expect(store.snapshots[slow.id] == nil)
+    #expect(store.snapshots[fast.id] != nil)
+    #expect(store.refreshingAccounts.contains(slow.id))
+    #expect(!store.refreshingAccounts.contains(fast.id))
+    #expect(await probe.maximum == 2)
+    await store.shutdown()
+    #expect(store.snapshots[slow.id] == nil)
+    #expect(store.refreshingAccounts.isEmpty)
+}
+
+private actor RecoveryProbe {
+    var attempts = 0
+    let firstError: UsageError
+    init(_ error: UsageError) { firstError = error }
+    func fetch(_ account: Account, date: Date) throws -> Snapshot {
+        attempts += 1
+        if attempts == 1 { throw firstError }
+        return Snapshot(observedAt: date, windows: [try QuotaWindow(id: "codex.week", label: "Week", usedPercent: 20, durationMinutes: 10_080)], identity: "recovery@example.com", source: "Fixture")
+    }
+}
+@Test @MainActor func reconnectingNetworkRetriesTimeoutButRespectsProviderBackoff() async throws {
+    for failure in [UsageError.timeout, UsageError.rateLimited(600)] {
+        let root = try reliabilityRoot(); defer { try? FileManager.default.removeItem(at: root) }
+        let probe = RecoveryProbe(failure)
+        let store = AppStore(root: root, monitor: false, fetch: { account, date in try await probe.fetch(account, date: date) })
+        let account = Account(name: "Test", kind: .codex); store.accounts = [account]
+        store.refresh(force: true)
+        try await waitUntil { !store.refreshing }
+        #expect(store.errors[account.id] != nil)
+        store.updateConnectivity(offline: true); store.updateConnectivity(offline: false)
+        try await waitUntil { !store.refreshing }
+        if failure == .timeout {
+            #expect(await probe.attempts == 2)
+            #expect(store.errors[account.id] == nil)
+            #expect(store.connectionState(account).title == "Available")
+        } else {
+            #expect(await probe.attempts == 1)
+            #expect(store.connectionState(account).title == "Provider busy")
+        }
+        await store.shutdown()
+    }
+}
+
+@Test @MainActor func historyWriteFailureIsVisibleWithoutDiscardingLiveUsage() async throws {
+    let root = try reliabilityRoot(); defer { try? FileManager.default.removeItem(at: root) }
+    // A non-directory at the cache path deterministically simulates unwritable storage.
+    try Data("fixture".utf8).write(to: root.appendingPathComponent("Readings"))
+    let store = AppStore(root: root, monitor: false, fetch: { _, date in
+        Snapshot(observedAt: date, windows: [try QuotaWindow(id: "codex.week", label: "Week", usedPercent: 17, durationMinutes: 10_080)], identity: "fixture@example.com", source: "Fixture")
+    })
+    let account = Account(name: "Test", kind: .codex); store.accounts = [account]
+    store.refresh(force: true)
+    try await waitUntil { !store.refreshing && store.notice != nil }
+    #expect(store.snapshots[account.id]?.displayWindow(for: .codex)?.remainingPercent == 83)
+    #expect(store.errors[account.id] == nil)
+    #expect(store.history(for: account).count == 1)
+    #expect(store.notice?.contains("could not be saved") == true)
+    #expect(store.notice?.contains(root.path) == false)
+    await store.shutdown()
+}
+
+@Test @MainActor func duplicateNewAccountsBindInOrderDespiteDifferentProviderLatency() async throws {
+    let root = try reliabilityRoot(); defer { try? FileManager.default.removeItem(at: root) }
+    let store = AppStore(root: root, monitor: false, fetch: { account, date in
+        if account.name == "First" { try await Task.sleep(for: .milliseconds(100)) }
+        return Snapshot(observedAt: date, windows: [try QuotaWindow(id: "codex.week", label: "Week", usedPercent: 20, durationMinutes: 10_080)], identity: "same@example.com", source: "Fixture")
+    })
+    let first = Account(name: "First", kind: .codex), second = Account(name: "Second", kind: .codex)
+    store.accounts = [first, second]
+    store.refresh(force: true)
+    try await waitUntil { !store.refreshing }
+    #expect(store.snapshots[first.id] != nil)
+    #expect(store.snapshots[second.id] == nil)
+    #expect(store.errors[second.id] == UsageError.duplicateAccount("First").localizedDescription)
+    #expect(store.needsSignIn(second))
+    await store.shutdown()
+}
