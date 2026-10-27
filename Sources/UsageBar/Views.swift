@@ -215,7 +215,7 @@ private struct CompactAccountRow: View {
     private var window: QuotaWindow? { snapshot?.displayWindow(for: account.kind) }
     private var detail: String {
         if !account.enabled { return "Paused" }
-        if error != nil { return "Check connection" }
+        if error != nil { return snapshot == nil ? "Check connection" : "Last known · refresh failed" }
         if cached { return "Saved reading · checking for update" }
         if status.state == .stale { return "Last known · waiting for update" }
         if status.state == .restricted { return "Provider restriction" }

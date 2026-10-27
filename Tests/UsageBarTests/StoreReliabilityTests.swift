@@ -43,7 +43,7 @@ private actor NotificationDecision {
     await store.shutdown()
 }
 
-@Test @MainActor func closedMenuExpiresAtQuotaResetWithoutAnotherProviderRead() async throws {
+@Test @MainActor func closedMenuMarksLastKnownAtQuotaResetWithoutAnotherProviderRead() async throws {
     let root = try reliabilityRoot(); defer { try? FileManager.default.removeItem(at: root) }
     let store = AppStore(root: root, monitor: false)
     let account = Account(name: "Paused", kind: .codex)
@@ -53,7 +53,8 @@ private actor NotificationDecision {
     store.accounts = [account]; store.snapshots[account.id] = snapshot; store.paused = true
     #expect(store.heartbeatDelay(at: date) == 20)
     store.now = date.addingTimeInterval(21)
-    #expect(store.menuEntries.first?.remainingPercent == nil)
+    #expect(store.menuEntries.first?.remainingPercent == 70)
+    #expect(store.menuEntries.first?.isLastKnown == true)
     #expect(store.heartbeatDelay(at: store.now) == 900) // No repeated one-second wakeups after expiry.
     await store.shutdown()
 }
@@ -93,4 +94,25 @@ private actor NotificationDecision {
     let restored = AppStore(root: root, monitor: false)
     #expect(!restored.notificationsEnabled)
     await restored.shutdown(); await store.shutdown()
+}
+
+@Test @MainActor func failedRefreshKeepsReadingAndHistoryAndRecoveryClearsMarker() async throws {
+    let root = try reliabilityRoot(); defer { try? FileManager.default.removeItem(at: root) }
+    let store = AppStore(root: root, monitor: false, fetch: { _, _ in throw UsageError.timeout })
+    var account = Account(name: "Offline", kind: .codex)
+    account.expectedIdentity = "fixture@example.com"
+    let snapshot = Snapshot(observedAt: Date(), windows: [try QuotaWindow(id: "codex.week", label: "Week", usedPercent: 27, durationMinutes: 10_080)], identity: account.expectedIdentity, source: "Fixture")
+    store.accounts = [account]; store.snapshots[account.id] = snapshot
+    let cache = SnapshotCache(root: root)
+    let history = try cache.save(snapshot, for: account)
+    store.refresh(force: true)
+    try await waitUntil { !store.refreshing }
+    #expect(store.errors[account.id] != nil)
+    #expect(store.snapshots[account.id]?.observedAt == snapshot.observedAt)
+    #expect(store.menuEntries.first?.remainingPercent == 73)
+    #expect(store.menuEntries.first?.isLastKnown == true)
+    #expect(cache.loadHistory(accounts: [account])[account.id] == history)
+    store.errors[account.id] = nil
+    #expect(store.menuEntries.first?.isLastKnown == false)
+    await store.shutdown()
 }
