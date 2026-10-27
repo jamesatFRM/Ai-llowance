@@ -557,7 +557,7 @@ final class AppStore: ObservableObject {
                 scheduleHeartbeat()
             }
             // Two independent lanes keep one slow provider from blocking every account.
-            await withTaskGroup(of: Void.self) { group in
+            await withTaskGroup(of: Account.self) { group in
                 // Interleave providers so several Claude accounts cannot occupy both lanes first.
                 var queues = Dictionary(grouping: due, by: { $0.kind.provider })
                 let providers = due.reduce(into: [MenuProvider]()) { order, account in
@@ -569,13 +569,24 @@ final class AppStore: ObservableObject {
                         ordered.append(queues[provider]!.removeFirst())
                     }
                 }
-                var remaining = ordered.makeIterator()
-                for _ in 0..<2 {
-                    if let account = remaining.next() { group.addTask { await self.refreshAccount(account) } }
-                }
-                while await group.next() != nil {
+                var pending = ordered
+                var discovering: Set<ConnectionKind> = []
+                var inFlight = 0
+                // Serialize first-time identity binding within each provider. Otherwise
+                // duplicate new connections would be assigned by response timing.
+                while !pending.isEmpty || inFlight > 0 {
+                    while inFlight < 2, let index = pending.firstIndex(where: {
+                        $0.kind.isAPI || $0.expectedIdentity != nil || !discovering.contains($0.kind)
+                    }) {
+                        let account = pending.remove(at: index)
+                        if !account.kind.isAPI && account.expectedIdentity == nil { discovering.insert(account.kind) }
+                        inFlight += 1
+                        group.addTask { await self.refreshAccount(account); return account }
+                    }
+                    guard let completed = await group.next() else { break }
+                    inFlight -= 1
+                    if !completed.kind.isAPI && completed.expectedIdentity == nil { discovering.remove(completed.kind) }
                     if Task.isCancelled { group.cancelAll(); break }
-                    if let account = remaining.next() { group.addTask { await self.refreshAccount(account) } }
                 }
             }
             now = Date()
@@ -814,9 +825,18 @@ final class AppStore: ObservableObject {
            points.last.map({ point.windowID != $0.windowID || point.timestamp.timeIntervalSince($0.timestamp) >= 300 }) ?? true { points.append(point) }
         usageHistory[account.id] = Array(points.filter { snapshot.observedAt.timeIntervalSince($0.timestamp) <= 604800 }.suffix(SnapshotCache.maximumPoints))
         let previous = cacheTask, root = root
-        cacheTask = Task.detached(priority: .utility) {
+        cacheTask = Task.detached(priority: .utility) { [weak self] in
             await previous?.value
-            _ = try? SnapshotCache(root: root).save(snapshot, for: account)
+            do { _ = try SnapshotCache(root: root).save(snapshot, for: account) }
+            catch {
+                await self?.reportHistorySaveFailure()
+            }
+        }
+    }
+    private func reportHistorySaveFailure() {
+        // Preserve the live reading and never expose paths, provider output, or credentials.
+        if notice == nil {
+            notice = "A usage reading could not be saved on this Mac. Check available disk space and folder permissions. Live usage is still available, but this reading may be missing after restart."
         }
     }
     private func clearCachedReading(_ account: Account, preserveHistory: Bool = false) {
