@@ -173,7 +173,13 @@ final class AppStore: ObservableObject {
         return age < 60 ? "Updated just now" : "Updated \(age / 60)m ago"
     }
     var menuEntries: [MenuEntry] {
-        MenuSummary.entries(accounts: accounts, snapshots: snapshots, unavailable: Set(errors.keys), preferences: menuPreferences, now: now)
+        let lastKnown = Set(accounts.compactMap { account -> UUID? in
+            guard !authenticationRequired.contains(account.id), let snapshot = snapshots[account.id],
+                  snapshot.observedAt <= now.addingTimeInterval(60),
+                  now.timeIntervalSince(snapshot.observedAt) <= 7 * 86400 else { return nil }
+            return offline || cachedAccounts.contains(account.id) || errors[account.id] != nil || snapshot.isStale(at: now) ? account.id : nil
+        })
+        return MenuSummary.entries(accounts: accounts, snapshots: snapshots, unavailable: Set(errors.keys).union(authenticationRequired), preferences: menuPreferences, now: now, lastKnown: lastKnown)
     }
     private func updateMenu(_ change: (inout MenuPreferences) -> Void) {
         let previous = menuPreferences

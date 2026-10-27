@@ -97,7 +97,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
             }
             let value = MenuEntryPresentation.value(entry, preferences: store.menuPreferences)
             let color: NSColor
-            if store.menuPreferences.colorByAllowance, !entry.isBalance, let percent = entry.remainingPercent { color = .allowance(percent) }
+            if entry.isLastKnown { color = .secondaryLabelColor }
+            else if store.menuPreferences.colorByAllowance, !entry.isBalance, let percent = entry.remainingPercent { color = .allowance(percent) }
             else { color = NSColor.accountHex(entry.colorHex) ?? .labelColor }
             title.append(NSAttributedString(string: " " + MenuEntryPresentation.title(entry, preferences: store.menuPreferences), attributes: [.foregroundColor: color]))
             descriptions.append(entry.isBalance ? "\(entry.label): \(entry.balanceUSD?.formatted(.currency(code: "USD")) ?? "balance unavailable")"
@@ -107,8 +108,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
         }
         title.addAttributes([.font: menuFont], range: NSRange(location: 0, length: title.length))
         button.attributedTitle = title
-        button.toolTip = descriptions.joined(separator: "\n") + "\n\(store.menuPreferences.aggregation.title); each account has its own allowance."
-        button.setAccessibilityLabel("Ai-llowance. " + descriptions.joined(separator: ". "))
+        button.toolTip = descriptions.joined(separator: "\n") + "\n\(store.menuPreferences.aggregation.title); each account has its own allowance. ~ marks a last-known reading awaiting refresh."
+        button.setAccessibilityLabel("Ai-llowance. " + descriptions.joined(separator: ". ") + (store.menuEntries.contains(where: \.isLastKnown) ? ". Last-known readings are awaiting refresh." : ""))
     }
     @objc private func togglePopover() {
         if popover.isShown { closePopover() }

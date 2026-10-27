@@ -120,6 +120,7 @@ public struct MenuEntry: Sendable, Equatable {
     public let balanceUSD: Decimal?
     public let isBalance: Bool
     public let colorHex: String?
+    public var isLastKnown = false
     public init(provider: MenuProvider?, label: String, remainingPercent: Double?, accountCount: Int, isUnlimited: Bool = false,
                 balanceUSD: Decimal? = nil, isBalance: Bool = false, colorHex: String? = nil, primaryPeriod: String? = nil, sessionRemainingPercent: Double? = nil, showsSession: Bool = false) {
         self.provider = provider; self.label = label; self.remainingPercent = remainingPercent
@@ -145,7 +146,7 @@ extension Snapshot {
 
 public enum MenuSummary {
     public static func entries(accounts: [Account], snapshots: [UUID: Snapshot], unavailable: Set<UUID>,
-                               preferences: MenuPreferences, now: Date) -> [MenuEntry] {
+                               preferences: MenuPreferences, now: Date, lastKnown: Set<UUID> = []) -> [MenuEntry] {
         let duplicateIDs = duplicateSubscriptionAccountIDs(in: accounts, snapshots: snapshots)
         let selected = accounts.filter {
             $0.enabled && (!$0.kind.isAPI || $0.kind.isBalance)
@@ -159,19 +160,19 @@ public enum MenuSummary {
         }
         func entry(_ group: [Account], label: String, icon: MenuProvider?) -> MenuEntry {
             let allUnlimited = !group.isEmpty && group.allSatisfy { account in
-                guard !unavailable.contains(account.id), let snapshot = snapshots[account.id],
+                guard (!unavailable.contains(account.id) || lastKnown.contains(account.id)), let snapshot = snapshots[account.id],
                       identityMatches(snapshot, account: account), snapshot.providerRestricted != true, snapshot.unlimited == true,
                       snapshot.applicableWindows(for: account.kind).isEmpty,
-                      (try? snapshot.validated()) != nil, !snapshot.isStale(at: now) else { return false }
+                      (try? snapshot.validated()) != nil, (!snapshot.isStale(at: now) || lastKnown.contains(account.id)) else { return false }
                 return true
             }
             let values = group.compactMap { account -> Double? in
-                guard !unavailable.contains(account.id), let snapshot = snapshots[account.id],
+                guard (!unavailable.contains(account.id) || lastKnown.contains(account.id)), let snapshot = snapshots[account.id],
                       identityMatches(snapshot, account: account), snapshot.providerRestricted != true,
                       (try? snapshot.validated()) != nil else { return nil }
                 let applicable = snapshot.applicableWindows(for: account.kind)
                 guard let window = snapshot.displayWindow(for: account.kind),
-                      !snapshot.isStale(at: now, windows: applicable) else { return nil }
+                      (!snapshot.isStale(at: now, windows: applicable) || lastKnown.contains(account.id)) else { return nil }
                 return window.remainingPercent
             }
             // Incomplete groups stay unavailable; silently dropping a depleted/unread account is misleading.
@@ -180,10 +181,10 @@ public enum MenuSummary {
             else if preferences.aggregation == .lowest { value = values.min() }
             else { value = values.reduce(0, +) / Double(values.count) }
             let sessions = group.compactMap { account -> Double? in
-                guard !unavailable.contains(account.id), let snapshot = snapshots[account.id],
+                guard (!unavailable.contains(account.id) || lastKnown.contains(account.id)), let snapshot = snapshots[account.id],
                       identityMatches(snapshot, account: account), snapshot.providerRestricted != true,
                       (try? snapshot.validated()) != nil,
-                      !snapshot.isStale(at: now, windows: snapshot.applicableWindows(for: account.kind)) else { return nil }
+                      (!snapshot.isStale(at: now, windows: snapshot.applicableWindows(for: account.kind)) || lastKnown.contains(account.id)) else { return nil }
                 return snapshot.sessionWindow(for: account.kind)?.remainingPercent
             }
             let sessionValue = sessions.count == group.count && !sessions.isEmpty
@@ -191,17 +192,21 @@ public enum MenuSummary {
             let periods = Set(group.compactMap { snapshots[$0.id]?.displayWindow(for: $0.kind)?.periodLabel })
             let period = periods.count == 1 ? periods.first : "Quota"
             let showSession = group.allSatisfy { $0.kind == .claudeCode || $0.kind == .codex } && period != "5h"
-            return MenuEntry(provider: icon, label: label, remainingPercent: value, accountCount: group.count, isUnlimited: allUnlimited, colorHex: Set(group.compactMap(\.menuColorHex)).count == 1 && group.allSatisfy { $0.menuColorHex != nil } ? group.first?.menuColorHex : nil, primaryPeriod: period, sessionRemainingPercent: sessionValue, showsSession: showSession)
+            var result = MenuEntry(provider: icon, label: label, remainingPercent: value, accountCount: group.count, isUnlimited: allUnlimited, colorHex: Set(group.compactMap(\.menuColorHex)).count == 1 && group.allSatisfy { $0.menuColorHex != nil } ? group.first?.menuColorHex : nil, primaryPeriod: period, sessionRemainingPercent: sessionValue, showsSession: showSession)
+            result.isLastKnown = (value != nil || allUnlimited) && group.contains { lastKnown.contains($0.id) }
+            return result
         }
         func balanceEntry(_ account: Account) -> MenuEntry {
             let balance: Decimal?
-            if !unavailable.contains(account.id), let snapshot = snapshots[account.id],
+            if (!unavailable.contains(account.id) || lastKnown.contains(account.id)), let snapshot = snapshots[account.id],
                identityMatches(snapshot, account: account), (try? snapshot.validated()) != nil,
-               !snapshot.isStale(at: now), snapshot.providerRestricted != true {
+               (!snapshot.isStale(at: now) || lastKnown.contains(account.id)), snapshot.providerRestricted != true {
                 balance = snapshot.balanceUSD
             } else { balance = nil }
-            return MenuEntry(provider: provider(account), label: account.name, remainingPercent: nil,
+            var result = MenuEntry(provider: provider(account), label: account.name, remainingPercent: nil,
                              accountCount: 1, balanceUSD: balance, isBalance: true, colorHex: account.menuColorHex)
+            result.isLastKnown = lastKnown.contains(account.id) && balance != nil
+            return result
         }
         func allowanceAccounts(_ provider: MenuProvider? = nil) -> [Account] {
             selected.filter { !$0.kind.isBalance && (provider == nil || $0.kind.provider == provider) }

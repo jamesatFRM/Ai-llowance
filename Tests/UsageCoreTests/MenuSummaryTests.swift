@@ -126,3 +126,32 @@ private func weeklyReading(_ remaining: Double, kind: ConnectionKind, sessionRem
     #expect(history.map(\.remainingPercent) == [93, 97])
     #expect(history.map(\.windowID) == ["session", "week.all models"])
 }
+
+@Test func lastKnownReadingsSurviveFailuresWithoutLosingIdentityProtection() throws {
+    var a = Account(name: "A", kind: .claudeCode)
+    a.expectedIdentity = "a@example.com"
+    var reading = try weeklyReading(74, kind: .claudeCode, sessionRemaining: 86)
+    reading.identity = "a@example.com"
+    for mode in MenuDisplay.allCases {
+        var prefs = MenuPreferences(); prefs.display = mode; prefs.showSessionInMenuBar = true
+        let entry = try #require(MenuSummary.entries(accounts: [a], snapshots: [a.id: reading], unavailable: [a.id], preferences: prefs, now: menuTime.addingTimeInterval(4000), lastKnown: [a.id]).first)
+        #expect(entry.remainingPercent == 74)
+        #expect(entry.sessionRemainingPercent == 86)
+        #expect(entry.isLastKnown)
+        #expect(MenuEntryPresentation.value(entry, preferences: prefs).hasPrefix("~"))
+        var wrong = reading; wrong.identity = "other@example.com"
+        #expect(MenuSummary.entries(accounts: [a], snapshots: [a.id: wrong], unavailable: [a.id], preferences: prefs, now: menuTime, lastKnown: [a.id]).first?.remainingPercent == nil)
+        let fresh = try #require(MenuSummary.entries(accounts: [a], snapshots: [a.id: reading], unavailable: [], preferences: prefs, now: menuTime).first)
+        #expect(!fresh.isLastKnown)
+        #expect(!MenuEntryPresentation.value(fresh, preferences: prefs).hasPrefix("~"))
+    }
+}
+
+@Test func lastKnownBalanceRetainsAmountWithMarker() throws {
+    let account = Account(name: "Credits", kind: .vercelGateway)
+    let reading = Snapshot(observedAt: menuTime, source: "Fixture", balanceUSD: 12)
+    let entry = try #require(MenuSummary.entries(accounts: [account], snapshots: [account.id: reading], unavailable: [account.id], preferences: MenuPreferences(), now: menuTime.addingTimeInterval(4000), lastKnown: [account.id]).first)
+    #expect(entry.balanceUSD == 12)
+    #expect(entry.isLastKnown)
+    #expect(MenuEntryPresentation.value(entry, preferences: MenuPreferences()).hasPrefix("~"))
+}
