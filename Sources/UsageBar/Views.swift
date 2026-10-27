@@ -1522,15 +1522,30 @@ private struct HistoryCard: View {
         guard let date else { return "Reset not reported" }
         return date <= now ? "Reset expected · checking" : resetText(date, at: now)
     }
+    private var primaryQuotaTitle: String {
+        if account.kind.isAPI { return metric }
+        switch snapshot?.displayWindow(for: account.kind)?.periodLabel {
+        case "Week": return "Weekly allowance"
+        case "5h": return "5-hour allowance"
+        default: return "Allowance remaining"
+        }
+    }
+    private var primaryQuotaDetail: String {
+        guard let snapshot else { return "Awaiting first reading" }
+        if account.kind.isAPI { return "Provider report" }
+        if snapshot.unlimited == true { return "No usage limit reported" }
+        guard let window = snapshot.displayWindow(for: account.kind) else { return "Limit not reported" }
+        return quotaReset(window.resetsAt)
+    }
     @ViewBuilder private var quotaSummary: some View {
         HStack(alignment: .top, spacing: 12) {
             VStack(alignment: .leading, spacing: 4) {
-                Text(account.kind.isAPI ? metric : snapshot?.displayWindow(for: account.kind)?.periodLabel == "Week" ? "Weekly allowance" : "Allowance remaining")
+                Text(primaryQuotaTitle)
                     .font(.system(size: 10, weight: .medium)).foregroundStyle(.secondary)
                 Text(readingValue(snapshot, window: snapshot?.displayWindow(for: account.kind)))
                     .font(.system(size: 25, weight: .semibold, design: .rounded)).monospacedDigit()
                     .foregroundStyle(connection.saved ? Color.secondary : Color.primary)
-                Text(account.kind.isAPI ? "Provider report" : quotaReset(snapshot?.displayWindow(for: account.kind)?.resetsAt))
+                Text(primaryQuotaDetail)
                     .font(.system(size: 10)).foregroundStyle(.secondary).lineLimit(1).minimumScaleFactor(0.85)
             }.frame(maxWidth: .infinity, alignment: .leading)
             if !account.kind.isAPI, let session = snapshot?.sessionWindow(for: account.kind),
