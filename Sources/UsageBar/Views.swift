@@ -162,7 +162,7 @@ struct Dashboard: View {
                                     .frame(width: 14).foregroundStyle(.orange)
                                 Text(account.name).fontWeight(.medium).lineLimit(1)
                                 Spacer(minLength: 4)
-                                Text(store.needsSignIn(account) ? "Reconnect" : (store.errors[account.id] != nil ? "Check" : status.title)).foregroundStyle(.secondary).lineLimit(1)
+                                Text(store.connectionState(account).title).foregroundStyle(.secondary).lineLimit(1)
                                 Image(systemName: "chevron.right").font(.system(size: 8, weight: .semibold)).foregroundStyle(.tertiary)
                             }.font(.system(size: 11)).contentShape(Rectangle())
                         }.buttonStyle(.plain)
@@ -215,7 +215,7 @@ private struct CompactAccountRow: View {
     private var status: AllowanceStatus { AllowanceStatus.evaluate(snapshot: snapshot, kind: account.kind, now: now, hasError: error != nil) }
     private var window: QuotaWindow? { snapshot?.displayWindow(for: account.kind) }
     private var detail: String {
-        if let connection, connection.saved || connection.needsAction || snapshot == nil { return connection.title + " · " + connection.detail }
+        if let connection, connection.saved || connection.needsAction || status.state == .exhausted || snapshot == nil { return connection.title + " · " + connection.detail }
         if !account.enabled { return "Paused" }
         if error != nil { return snapshot == nil ? "Check connection" : "Last known · refresh failed" }
         if cached { return "Saved reading · checking for update" }
@@ -242,9 +242,9 @@ private struct CompactAccountRow: View {
                             .foregroundStyle(.secondary).frame(width: 12)
                     }
                     HStack(spacing: 7) {
-                        Text(detail).font(.system(size: 9)).foregroundStyle(error != nil || status.state == .restricted ? Color.orange : Color.secondary).lineLimit(connection?.saved == true || connection?.needsAction == true ? 2 : 1)
+                        Text(detail).font(.system(size: 9)).foregroundStyle(error != nil || status.state == .restricted ? Color.orange : Color.secondary).lineLimit(connection?.saved == true || connection?.needsAction == true || status.state == .exhausted ? 2 : 1)
                         Spacer(minLength: 2)
-                        if dropdownPreferences.dropdownShowBars, connection?.saved != true, connection?.needsAction != true, let window {
+                        if dropdownPreferences.dropdownShowBars, connection?.saved != true, connection?.needsAction != true, status.state != .exhausted, let window {
                             AllowanceBar(remaining: window.remainingPercent, unavailable: error != nil || cached || status.state == .stale || status.state == .restricted || !account.enabled)
                                 .frame(width: 54, height: 3)
                         }
