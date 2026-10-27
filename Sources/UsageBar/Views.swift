@@ -242,9 +242,9 @@ private struct CompactAccountRow: View {
                             .foregroundStyle(.secondary).frame(width: 12)
                     }
                     HStack(spacing: 7) {
-                        Text(detail).font(.system(size: 9)).foregroundStyle(error != nil || status.state == .restricted ? Color.orange : Color.secondary).lineLimit(1)
+                        Text(detail).font(.system(size: 9)).foregroundStyle(error != nil || status.state == .restricted ? Color.orange : Color.secondary).lineLimit(connection?.saved == true || connection?.needsAction == true ? 2 : 1)
                         Spacer(minLength: 2)
-                        if dropdownPreferences.dropdownShowBars, let window {
+                        if dropdownPreferences.dropdownShowBars, connection?.saved != true, connection?.needsAction != true, let window {
                             AllowanceBar(remaining: window.remainingPercent, unavailable: error != nil || cached || status.state == .stale || status.state == .restricted || !account.enabled)
                                 .frame(width: 54, height: 3)
                         }
@@ -1660,7 +1660,7 @@ private struct HistoryCard: View {
                     Text(connection.detail).font(.system(size: 10)).foregroundStyle(.secondary).lineLimit(2)
                 }.frame(maxWidth: .infinity, minHeight: 40, maxHeight: 40, alignment: .topLeading)
                 HStack(spacing: 8) {
-                    Button(action: openUsage) { Label(connection.needsAction ? (needsReconnect ? "Reconnect account" : "Connection details") : "Open usage", systemImage: connection.needsAction ? "person.crop.circle.badge.exclamationmark" : "arrow.up.right").frame(maxWidth: .infinity).frame(height: 24) }
+                    Button(action: openUsage) { Label(connection.needsAction ? (needsReconnect ? (account.kind.isAPI ? "Manage API key" : "Reconnect account") : "Connection details") : "Open usage", systemImage: connection.needsAction ? "person.crop.circle.badge.exclamationmark" : "arrow.up.right").frame(maxWidth: .infinity).frame(height: 24) }
                     Button(action: manage) { Image(systemName: "slider.horizontal.3").frame(width: 28, height: 24) }.help("Name & color").accessibilityLabel("Edit " + account.name)
                 }.font(.system(size: 11, weight: .medium)).buttonStyle(QuietButtonStyle())
             }

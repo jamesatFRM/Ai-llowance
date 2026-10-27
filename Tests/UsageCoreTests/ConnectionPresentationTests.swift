@@ -31,3 +31,16 @@ import Testing
     #expect(expired.saved)
     #expect(expired.title == "Saved reading")
 }
+
+@Test func recoveryInstructionsMatchCredentialTypeAndOverdueRetriesAreQueued() {
+    let now = Date()
+    let api = ConnectionPresentation.make(snapshot: nil, kind: .xai, now: now, reconnect: true, failed: true, failure: .authentication)
+    #expect(api.title == "Update API key")
+    #expect(!api.detail.contains("email"))
+    let denied = ConnectionPresentation.make(snapshot: nil, kind: .openAIAPI, now: now, reconnect: true, failed: true, failure: .forbidden)
+    #expect(denied.title == "Check access")
+    #expect(denied.needsAction)
+    let queued = ConnectionPresentation.make(snapshot: nil, kind: .codex, now: now, failed: true, failure: .timeout, retryAt: now.addingTimeInterval(-1))
+    #expect(queued.detail.contains("Retry queued"))
+    #expect(!queued.detail.contains("Retry in 1m"))
+}

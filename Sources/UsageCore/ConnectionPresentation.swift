@@ -19,11 +19,17 @@ public struct ConnectionPresentation: Equatable, Sendable {
             Self(title: title, detail: detail, symbol: symbol, needsAction: action, saved: saved && snapshot != nil)
         }
         if !enabled { return state("Paused", age, "pause.circle") }
-        if reconnect { return state("Reconnect required", "Sign in with this account’s saved email", "person.crop.circle.badge.exclamationmark", action: true) }
+        if reconnect {
+            if failure == .forbidden { return state("Check access", "This credential needs permission to read usage", "lock", action: true) }
+            if kind.isAPI { return state("Update API key", "Replace this account’s missing or expired key", "key", action: true) }
+            return state("Reconnect required", "Sign in with this account’s saved email", "person.crop.circle.badge.exclamationmark", action: true)
+        }
         if offline { return state("Offline", age + " · retries when online", "wifi.slash") }
         if refreshing { return state("Updating…", age, "arrow.triangle.2.circlepath") }
         if failed {
-            let retry = retryAt.map { "Retry in \(max(1, Int(ceil($0.timeIntervalSince(now) / 60))))m" } ?? "Retrying automatically"
+            let retry = retryAt.map { date in
+                date <= now ? "Retry queued" : "Retry in \(max(1, Int(ceil(date.timeIntervalSince(now) / 60))))m"
+            } ?? "Retrying automatically"
             if networkFailure { return state("Connection interrupted", age + " · " + retry, "wifi.exclamationmark") }
             switch failure {
             case .rateLimited: return state("Provider busy", age + " · " + retry, "clock")

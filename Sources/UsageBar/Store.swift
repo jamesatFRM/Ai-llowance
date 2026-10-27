@@ -111,7 +111,7 @@ final class AppStore: ObservableObject {
                 usageHistory[account.id] = (0...48).map { sample in
                     let progress = Double(sample) / 48
                     let used = (1 - cos(progress * .pi)) / 2
-                    return UsageHistoryPoint(timestamp: now.addingTimeInterval(Double(sample - 48) * 1800),
+                    return UsageHistoryPoint(timestamp: now.addingTimeInterval(Double(sample - 48) * 1800 - (index == 2 ? 480 : 0)),
                         remainingPercent: 100 - (100 - remaining) * used, windowID: windows[0].id, resetsAt: windows[0].resetsAt)
                 }
                 if index == 2 {
