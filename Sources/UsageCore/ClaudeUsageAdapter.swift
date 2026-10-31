@@ -86,8 +86,10 @@ public enum ClaudeUsageReport {
             windows.append(try QuotaWindow(id: id, label: label, usedPercent: percent,
                                           resetsAt: group(4).flatMap { resetDate($0, now: now) }, durationMinutes: model == nil ? 300 : 10_080))
         }
-        guard !windows.isEmpty, ids.contains("session"), ids.contains("week.all models") else {
-            throw UsageError.unavailable("Claude Code did not return plan limits. Update Claude Code to a version that supports /usage in print mode, then refresh.")
+        // Verified Ultra accounts omit the session row. The all-model weekly row
+        // remains authoritative; model-only or behavioral reports are insufficient.
+        guard ids.contains("week.all models") else {
+            throw UsageError.unavailable("Claude Code did not return an all-model weekly limit. Open /usage in this account’s Claude Code profile and retry. If /usage is unsupported, update Claude Code.")
         }
         return Snapshot(observedAt: now, windows: windows, source: "Claude Code /usage",
                         note: "Read directly from Claude’s plan-usage command. No conversation or open Terminal is needed for updates.")

@@ -182,3 +182,41 @@ private func envelope(_ text: String, turns: Int = 0, cost: Double = 0) throws -
         try await ClaudeUsageAdapter(executable: cli, root: root).fetch(account: account, now: checkTime)
     }
 }
+
+@Test func verifiedUltraWeeklyOnlyReportHasNoInventedSessionLimit() throws {
+    let weeklyOnly = planText.components(separatedBy: .newlines)
+        .filter { !$0.hasPrefix("Current session:") }.joined(separator: "\n")
+    let snapshot = try ClaudeUsageReport.parse(envelope(weeklyOnly), at: checkTime)
+    #expect(snapshot.windows.map(\.id) == ["week.all models", "week.Fable"])
+    #expect(snapshot.displayWindow(for: .claudeCode)?.remainingPercent == 19)
+    #expect(snapshot.sessionWindow(for: .claudeCode) == nil)
+    #expect(snapshot.unlimited != true)
+    let account = Account(name: "Ultra", kind: .claudeCode)
+    for mode in [MenuDisplay.byAccount, .byProvider, .combined] {
+        var preferences = MenuPreferences(); preferences.display = mode
+        let entries = MenuSummary.entries(accounts: [account], snapshots: [account.id: snapshot], unavailable: [], preferences: preferences, now: checkTime)
+        #expect(entries.first?.remainingPercent == 19)
+        #expect(entries.first?.sessionRemainingPercent == nil)
+        #expect(entries.first?.showsSession == false)
+    }
+}
+
+@Test func ultraTransitionReplacesCachedSessionWithoutLosingWeeklyHistory() throws {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent("UltraTransition-\(UUID().uuidString)")
+    try Paths.prepare(root); defer { try? FileManager.default.removeItem(at: root) }
+    var account = Account(name: "Ultra", kind: .claudeCode)
+    account.expectedIdentity = "ultra@example.com"
+    let cache = SnapshotCache(root: root)
+    var before = try ClaudeUsageReport.parse(envelope(planText), at: checkTime)
+    before.identity = account.expectedIdentity
+    _ = try cache.save(before, for: account)
+    let text = planText.components(separatedBy: .newlines).filter { !$0.hasPrefix("Current session:") }.joined(separator: "\n")
+    let later = checkTime.addingTimeInterval(300)
+    var after = try ClaudeUsageReport.parse(envelope(text), at: later)
+    after.identity = account.expectedIdentity
+    _ = try cache.save(after, for: account)
+    let restored = cache.load(accounts: [account], now: later)[account.id]
+    #expect(restored?.sessionWindow(for: .claudeCode) == nil)
+    #expect(restored?.displayWindow(for: .claudeCode)?.remainingPercent == 19)
+    #expect(cache.loadHistory(accounts: [account], now: later)[account.id]?.count == 2)
+}

@@ -1372,7 +1372,7 @@ struct AccountsView: View {
                     }
                     Divider()
                     Toggle("Show 5-hour allowance", isOn: Binding(get: { store.menuPreferences.showSessionInMenuBar }, set: { store.setShowSessionInMenuBar($0) }))
-                    Text("Show 5-hour usage beside weekly usage.")
+                    Text("Show 5-hour usage beside weekly usage when the account reports a session limit. Verified Claude Ultra accounts may only report weekly limits.")
                         .font(.callout).foregroundStyle(.secondary)
                     HStack {
                         Text("Weekly label")
