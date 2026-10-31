@@ -191,7 +191,12 @@ public enum MenuSummary {
                 ? (preferences.aggregation == .lowest ? sessions.min() : sessions.reduce(0, +) / Double(sessions.count)) : nil
             let periods = Set(group.compactMap { snapshots[$0.id]?.displayWindow(for: $0.kind)?.periodLabel })
             let period = periods.count == 1 ? periods.first : "Quota"
-            let showSession = group.allSatisfy { $0.kind == .claudeCode || $0.kind == .codex } && period != "5h"
+            // Do not invent a missing 5-hour window (for example, verified Ultra).
+            // A grouped session percentage is meaningful only when every account reports it.
+            let showSession = group.allSatisfy {
+                ($0.kind == .claudeCode || $0.kind == .codex)
+                    && snapshots[$0.id]?.sessionWindow(for: $0.kind) != nil
+            } && period != "5h"
             var result = MenuEntry(provider: icon, label: label, remainingPercent: value, accountCount: group.count, isUnlimited: allUnlimited, colorHex: Set(group.compactMap(\.menuColorHex)).count == 1 && group.allSatisfy { $0.menuColorHex != nil } ? group.first?.menuColorHex : nil, primaryPeriod: period, sessionRemainingPercent: sessionValue, showsSession: showSession)
             result.isLastKnown = (value != nil || allUnlimited) && group.contains { lastKnown.contains($0.id) }
             return result
