@@ -218,3 +218,31 @@ private actor RecoveryProbe {
     #expect(store.needsSignIn(second))
     await store.shutdown()
 }
+
+@Test @MainActor func retryTargetsOnlySelectedAccountAndBypassesTransientDelay() async throws {
+    let root = try reliabilityRoot(); defer { try? FileManager.default.removeItem(at: root) }
+    let store = AppStore(root: root, monitor: false, fetch: { _, _ in throw UsageError.timeout })
+    let first = Account(name: "First", kind: .codex)
+    let second = Account(name: "Second", kind: .claudeCode)
+    store.accounts = [first, second]
+    store.refresh()
+    try await waitUntil { !store.refreshing }
+    store.errors[second.id] = "Untouched sentinel"
+    store.retryConnection(first)
+    #expect(store.refreshing)
+    try await waitUntil { !store.refreshing }
+    #expect(store.errors[second.id] == "Untouched sentinel")
+    await store.shutdown()
+}
+
+@Test @MainActor func explicitAccountRetryHonorsRateLimit() async throws {
+    let root = try reliabilityRoot(); defer { try? FileManager.default.removeItem(at: root) }
+    let store = AppStore(root: root, monitor: false, fetch: { _, _ in throw UsageError.rateLimited(3600) })
+    let account = Account(name: "Limited", kind: .codex)
+    store.accounts = [account]; store.refresh()
+    try await waitUntil { !store.refreshing }
+    store.retryConnection(account)
+    #expect(!store.refreshing)
+    #expect(store.notice?.contains("provider asked us to wait") == true)
+    await store.shutdown()
+}

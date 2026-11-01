@@ -453,7 +453,7 @@ private struct SettingsCard<Content: View>: View {
 }
 
 private enum DashboardSection: String, CaseIterable, Identifiable {
-    case overview = "Overview", history = "History", accounts = "Accounts", settings = "Settings", connection = "Connection"
+    case trends = "Trends", overview = "Overview", history = "History", accounts = "Accounts", settings = "Settings", connection = "Connection"
     var id: String { rawValue }
 }
 
@@ -541,6 +541,7 @@ struct AccountsView: View {
                                 case .overview: overviewContent
                                 case .connection: connectionPage
                                 case .history: historyContent
+                                case .trends: HistoryTrendsView(store: store)
                                 case .accounts: accountsContent
                                 case .settings: selectedTabContent.frame(maxWidth: 640).frame(maxWidth: .infinity, alignment: .top)
                                 }
@@ -552,6 +553,7 @@ struct AccountsView: View {
                                 section = .accounts
                             }
                             if store.accounts.isEmpty { section = .overview }
+                            if (CommandLine.arguments.contains("--history") || Bundle.main.object(forInfoDictionaryKey: "AILHistoryPreview") as? Bool == true) { section = .trends }
                             store.rediscoverTools(); scrollToSelected(proxy)
                         }
                         .onChange(of: store.accountNavigationVersion) { _, _ in
@@ -602,10 +604,10 @@ struct AccountsView: View {
         HStack(spacing: 6) {
             BrandIcon(size: 23)
             Text("Ai-llowance").font(.system(size: 12, weight: .semibold)).padding(.trailing, 6)
-            ForEach([DashboardSection.history, .overview, .settings]) { item in
+            ForEach([DashboardSection.history, .trends, .overview, .settings]) { item in
                 Button { section = item } label: {
-                    Label(item == .history ? "Usage" : item == .overview ? "Accounts" : "Settings",
-                          systemImage: item == .history ? "chart.xyaxis.line" : item == .overview ? "square.grid.2x2" : "gearshape")
+                    Label(item == .history ? "Usage" : item == .trends ? "History" : item == .overview ? "Accounts" : "Settings",
+                          systemImage: item == .history ? "chart.xyaxis.line" : item == .trends ? "clock.arrow.circlepath" : item == .overview ? "square.grid.2x2" : "gearshape")
                         .font(.system(size: 11, weight: .medium))
                         .padding(.horizontal, 8).frame(height: 28)
                         .foregroundStyle(section == item || (item == .overview && (section == .accounts || section == .connection)) ? Color.primary : .secondary)
@@ -892,7 +894,7 @@ struct AccountsView: View {
                     }
                 }
             }
-            let histories = Dictionary(uniqueKeysWithValues: visibleHistoryAccounts.map { ($0.id, store.history(for: $0)) })
+            let histories = Dictionary(uniqueKeysWithValues: visibleHistoryAccounts.map { ($0.id, store.history(for: $0).filter { $0.timestamp >= store.now.addingTimeInterval(-7 * 86400) }) })
             if store.menuPreferences.dashboardChartStyle == .mixed {
                 if historyWidth >= 850 {
                     HStack(alignment: .top, spacing: 12) {
@@ -1223,7 +1225,7 @@ struct AccountsView: View {
                         Button("Check sign-in") { store.retryConnection(account) }
                     } else { Button("Check Codex sign-in") { store.retryConnection(account) }.help("Sign in through Codex CLI, then check again.") }
                 } else if store.errors[account.id] != nil {
-                    Button("Retry connection") { store.retryConnection(account) }.disabled(store.refreshing)
+                    Button("Retry connection") { store.retryConnection(account) }.disabled(store.refreshingAccounts.contains(account.id))
                 } else { Button("Open usage ↗") { store.openUsage(account) } }
                 Spacer()
                 Menu {

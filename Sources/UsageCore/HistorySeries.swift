@@ -84,7 +84,7 @@ public enum HistorySeries {
                 let changedWindow = !kind.isAPI && (point.windowID != previous.windowID || resetChanged)
                 let restoredQuota = !kind.isAPI && value > last.value
                 let newBillingPeriod = kind.isAPI && !kind.isBalance && value < last.value
-                if gap <= 0 || gap > 1800 || changedWindow || restoredQuota || newBillingPeriod { segment += 1 }
+                if gap <= 0 || gap > max(previous.continuityInterval ?? 1800, point.continuityInterval ?? 1800) || changedWindow || restoredQuota || newBillingPeriod { segment += 1 }
             }
             result.append(HistorySample(timestamp: point.timestamp, value: value, segment: segment))
             previous = point
