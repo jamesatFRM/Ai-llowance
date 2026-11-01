@@ -1687,7 +1687,7 @@ private struct HistoryCard: View {
                 } else {
                     Chart {
                         ForEach(series) { sample in
-                            if effectiveStyle == .matrix {
+                            if effectiveStyle == .matrix || effectiveStyle == .bars {
                                 PointMark(x: .value("Time", sample.timestamp), y: .value(metric, sample.value))
                                     .foregroundStyle(Color.clear).symbolSize(0)
                             } else if effectiveStyle == .bars {
@@ -1725,6 +1725,7 @@ private struct HistoryCard: View {
                             }
                         }
                     }
+                    .id(effectiveStyle)
                     .chartYScale(domain: plotDomain, range: .plotDimension(startPadding: 6, endPadding: 10))
                     .chartXAxis {
                         AxisMarks(values: .automatic(desiredCount: 3)) {
@@ -1742,12 +1743,12 @@ private struct HistoryCard: View {
                     .chartOverlay { proxy in
                         GeometryReader { geometry in
                             ZStack(alignment: .topLeading) {
-                                if effectiveStyle == .matrix, let plotFrame = proxy.plotFrame {
+                                if effectiveStyle == .matrix || effectiveStyle == .bars, let plotFrame = proxy.plotFrame {
                                     let frame = geometry[plotFrame]
                                     DotMatrixPlot(points: series.compactMap { sample in
                                         guard let x = proxy.position(forX: sample.timestamp), let y = proxy.position(forY: sample.value) else { return nil }
                                         return MatrixPoint(x: x, y: y, segment: sample.segment)
-                                    }, tint: graphTint)
+                                    }, tint: graphTint, bars: effectiveStyle == .bars)
                                         .frame(width: frame.width, height: frame.height)
                                         .offset(x: frame.minX, y: frame.minY)
                                         .allowsHitTesting(false)
@@ -1809,11 +1810,22 @@ private struct MatrixPoint {
 private struct DotMatrixPlot: View {
     let points: [MatrixPoint]
     let tint: Color
+    var bars = false
     var body: some View {
         Canvas { context, size in
             let step: CGFloat = 4
             let radius: CGFloat = 1.15
             guard size.width > 0, size.height > 0 else { return }
+            if bars {
+                let width = max(3, min(14, size.width / 36))
+                for point in points {
+                    let top = min(size.height - 1, max(0, point.y))
+                    let rect = CGRect(x: point.x - width / 2, y: top, width: width, height: max(1, size.height - top))
+                    let path = Path(roundedRect: rect, cornerRadius: 2)
+                    context.fill(path, with: .linearGradient(Gradient(colors: [tint.opacity(0.95), tint.opacity(0.22)]), startPoint: CGPoint(x: point.x, y: top), endPoint: CGPoint(x: point.x, y: size.height)))
+                }
+                return
+            }
             for x in stride(from: step / 2, through: size.width, by: step) {
                 var lineY: CGFloat?
                 if let exact = points.min(by: { abs($0.x - x) < abs($1.x - x) }), abs(exact.x - x) <= step / 2 {
