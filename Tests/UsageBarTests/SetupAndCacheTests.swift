@@ -164,8 +164,8 @@ func removedClaudeCLIStillAllowsAccountRemovalWithoutLosingStatusLine(userEdited
     let next = now.addingTimeInterval(300)
     try cache.save(setupSnapshot("personal@example.com", at: next), for: account)
     let continued = try #require(cache.loadHistory(accounts: [account], now: next)[account.id])
-    #expect(continued.count == 2017)
-    #expect(continued.first == original[1])
+    #expect(continued.count == 2018) // The oldest day is now archived instead of discarded.
+    #expect(continued.first == original.first)
     #expect(continued.last?.timestamp == next)
     var other = account; other.expectedIdentity = "other@example.com"
     #expect(cache.loadHistory(accounts: [other], now: next).isEmpty)

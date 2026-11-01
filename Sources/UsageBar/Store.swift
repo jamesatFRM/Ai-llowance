@@ -47,6 +47,7 @@ final class AppStore: ObservableObject {
     @Published private(set) var launchAtLogin = false
     @Published private(set) var loginItemNeedsApproval = false
     @Published private(set) var browserProfiles: [BrowserProfile] = []
+    @Published private(set) var usageDays: [UUID: [UsageDay]] = [:]
     @Published private(set) var usageHistory: [UUID: [UsageHistoryPoint]] = [:]
     @Published var executable = CodexAdapter.findExecutable()
     @Published var claudeExecutable = ClaudeConnection.findExecutable()
@@ -71,6 +72,7 @@ final class AppStore: ObservableObject {
     private var connectionTask: Task<Void, Never>?
     private var heartbeat: DispatchSourceTimer?
     private var pendingManualRefresh = false
+    private var pendingAccountRetries: Set<UUID> = []
     private var connectionVersions: [UUID: UUID] = [:]
     private var claudeCompletions: [UUID: URL] = [:]
     private let fetchOverride: (@Sendable (Account, Date) async throws -> Snapshot)?
@@ -114,6 +116,20 @@ final class AppStore: ObservableObject {
                     return UsageHistoryPoint(timestamp: now.addingTimeInterval(Double(sample - 48) * 1800 - (index == 2 ? 480 : 0)),
                         remainingPercent: 100 - (100 - remaining) * used, windowID: windows[0].id, resetsAt: windows[0].resetsAt)
                 }
+                if (CommandLine.arguments.contains("--history") || Bundle.main.object(forInfoDictionaryKey: "AILHistoryPreview") as? Bool == true) {
+                    let older = (2...359).reversed().map { day -> UsageHistoryPoint in
+                        let date = now.addingTimeInterval(-Double(day) * 86400)
+                        var point = UsageHistoryPoint(timestamp: date, remainingPercent: max(4, 97 - Double((day + index * 2) % 7) * (8 + Double(index))), windowID: windows[0].id, resetsAt: date.addingTimeInterval(Double(day % 7 + 1) * 86400))
+                        point.sessionRemainingPercent = 30 + Double((day * 13 + index * 19) % 70)
+                        return point
+                    }
+                    usageHistory[account.id] = older + (usageHistory[account.id] ?? [])
+                    usageDays[account.id] = (0...359).reversed().map { day in
+                        let date = HistoryTrends.calendar.startOfDay(for: now).addingTimeInterval(-Double(day) * 86400)
+                        let wave = 12 + Double(index) * 3 + 5 * sin(Double(day) / 24) + 2 * cos(Double(day) / 8)
+                        return UsageDay(day: date, weekly: MeasuredUsage(amount: max(0,wave), seconds: day == 0 ? 3600 : 85000), session: MeasuredUsage(amount: max(0,wave * 2.4), seconds: day == 0 ? 3600 : 82000))
+                    }
+                }
                 if index == 2 {
                     snapshots[account.id]?.observedAt = now.addingTimeInterval(-480)
                     errors[account.id] = UsageError.timeout.localizedDescription
@@ -143,6 +159,7 @@ final class AppStore: ObservableObject {
             snapshots = cache.load(accounts: isolatedAccounts, now: now)
             cachedAccounts = Set(snapshots.keys)
             usageHistory = cache.loadHistory(accounts: isolatedAccounts, now: now)
+            usageDays = cache.loadUsage(accounts: isolatedAccounts, now: now)
             for account in accounts where account.kind == .claudeCode && account.usesExistingClaude == true {
                 authenticationRequired.insert(account.id)
                 errors[account.id] = UsageError.claudeDedicatedSignInRequired.localizedDescription
@@ -470,8 +487,16 @@ final class AppStore: ObservableObject {
         }
     }
     func retryConnection(_ account: Account) {
-        if authenticationRequired.contains(account.id) { schedules[account.id] = PollState() }
-        refresh(force: true)
+        guard !paused else { notice = "Resume automatic refresh before retrying this account."; return }
+        guard !offline else { notice = "You’re offline. This account will retry when the connection returns."; return }
+        guard accounts.contains(where: { $0.id == account.id && $0.enabled }) else { return }
+        if case .rateLimited = refreshFailures[account.id], let next = schedules[account.id]?.nextAttempt, next > Date() {
+            notice = "This provider asked us to wait. Retry available at " + next.formatted(date: .omitted, time: .shortened) + "."
+            return
+        }
+        schedules[account.id] = PollState()
+        if refreshing { pendingAccountRetries.insert(account.id); return }
+        refresh(force: true, accountIDs: [account.id])
     }
     func needsSignIn(_ account: Account) -> Bool {
         authenticationRequired.contains(account.id) || (account.kind == .claudeCode && claudeSignedIn[account.id] == false)
@@ -552,14 +577,14 @@ final class AppStore: ObservableObject {
             if account.kind == .codex && !account.usesExistingCodex { try? FileManager.default.removeItem(at: Paths.profile(account.id, root: root)) }
         } catch { notice = safeMessage(error) }
     }
-    func refresh(force: Bool = false) {
+    func refresh(force: Bool = false, accountIDs: Set<UUID>? = nil) {
         now = Date()
         defer { scheduleHeartbeat() }
         checkClaudeSignIns(at: now)
         guard !shuttingDown, !demo, !paused, !sleeping, !removing, !offline else { return }
         if refreshing { pendingManualRefresh = pendingManualRefresh || force; return }
         let due = accounts.filter {
-            $0.enabled && signingIn != $0.id && waitingForClaude[$0.id] == nil && (schedules[$0.id] ?? PollState()).shouldRefresh(at: now, manual: force)
+            $0.enabled && (accountIDs == nil || accountIDs!.contains($0.id)) && signingIn != $0.id && waitingForClaude[$0.id] == nil && (schedules[$0.id] ?? PollState()).shouldRefresh(at: now, manual: force)
         }
         guard !due.isEmpty else { return }
         refreshing = true
@@ -568,7 +593,10 @@ final class AppStore: ObservableObject {
                 refreshing = false
                 let pending = pendingManualRefresh
                 pendingManualRefresh = false
+                let retries = pendingAccountRetries
+                pendingAccountRetries.removeAll()
                 if pending { refresh(force: true) }
+                else if !retries.isEmpty { refresh(force: true, accountIDs: retries) }
                 deliverAlerts()
                 scheduleHeartbeat()
             }
@@ -841,18 +869,23 @@ final class AppStore: ObservableObject {
     private func saveCachedReading(_ snapshot: Snapshot, account: Account) {
         guard !demo, !readOnly else { return }
         var points = usageHistory[account.id] ?? []
-        let point = UsageHistoryPoint(timestamp: snapshot.observedAt, remainingPercent: snapshot.displayWindow(for: account.kind)?.remainingPercent, balanceUSD: snapshot.balanceUSD, costUSD: snapshot.costUSD, windowID: snapshot.displayWindow(for: account.kind)?.id, resetsAt: snapshot.displayWindow(for: account.kind)?.resetsAt)
+        var point = UsageHistoryPoint(timestamp: snapshot.observedAt, remainingPercent: snapshot.displayWindow(for: account.kind)?.remainingPercent, balanceUSD: snapshot.balanceUSD, costUSD: snapshot.costUSD, windowID: snapshot.displayWindow(for: account.kind)?.id, resetsAt: snapshot.displayWindow(for: account.kind)?.resetsAt)
+        let interval = refreshInterval(for: account.kind, visible: interfaceVisible, lowPower: ProcessInfo.processInfo.isLowPowerModeEnabled)
+        point.sessionRemainingPercent = snapshot.sessionWindow(for: account.kind)?.remainingPercent
+        point.sessionResetsAt = snapshot.sessionWindow(for: account.kind)?.resetsAt
+        point.continuityInterval = min(4500, max(1800, interval * 1.25))
         let status = AllowanceStatus.evaluate(snapshot: snapshot, kind: account.kind, now: now)
         if ![.unavailable, .stale, .restricted].contains(status.state),
-           points.last.map({ point.windowID != $0.windowID || point.timestamp.timeIntervalSince($0.timestamp) >= 300 }) ?? true {
+           SnapshotCache.shouldAppend(point, after: points.last) {
+            usageDays[account.id] = ConsumptionHistory.append(usageDays[account.id] ?? [], previous: points.last, current: point, kind: account.kind)
             if points.last?.timestamp == point.timestamp { points[points.count - 1] = point }
             else if points.last.map({ point.timestamp > $0.timestamp }) ?? true { points.append(point) }
         }
-        usageHistory[account.id] = Array(points.filter { snapshot.observedAt.timeIntervalSince($0.timestamp) <= 604800 }.suffix(SnapshotCache.maximumPoints))
+        usageHistory[account.id] = SnapshotCache.compact(points, now: snapshot.observedAt)
         let previous = cacheTask, root = root
         cacheTask = Task.detached(priority: .utility) { [weak self] in
             await previous?.value
-            do { _ = try SnapshotCache(root: root).save(snapshot, for: account) }
+            do { _ = try SnapshotCache(root: root).save(snapshot, for: account, interval: interval) }
             catch {
                 await self?.reportHistorySaveFailure()
             }
@@ -866,7 +899,7 @@ final class AppStore: ObservableObject {
     }
     private func clearCachedReading(_ account: Account, preserveHistory: Bool = false) {
         cachedAccounts.remove(account.id)
-        if !preserveHistory { usageHistory[account.id] = nil }
+        if !preserveHistory { usageHistory[account.id] = nil; usageDays[account.id] = nil }
         alerts.remove(account.id)
         pendingAlerts.removeAll { $0.accountID == account.id }
         guard !demo, !readOnly else { return }
