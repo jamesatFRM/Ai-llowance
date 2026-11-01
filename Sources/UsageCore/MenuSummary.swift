@@ -68,6 +68,7 @@ public struct MenuPreferences: Codable, Equatable, Sendable {
     public var dropdownShowEmails = false
     public var dropdownShowResets = true
     public var dropdownShowBars = true
+    public var dropdownShowRecentUsage = false
     public var dropdownShowHeadings = true
     public var dropdownRoomyRows = false
     public var detailedQuotaLabels = false
@@ -76,7 +77,7 @@ public struct MenuPreferences: Codable, Equatable, Sendable {
     public var selectedAccountIDs: Set<UUID> = []
     public var accountOrder: [UUID] = []
     public init() {}
-    private enum CodingKeys: String, CodingKey { case dashboardTransparency, dropdownTransparency, liquidGlass, accountOrder, dashboardChartFullScale, dashboardChartStyle, dropdownShowEmails, dropdownShowResets, dropdownShowBars, dropdownShowHeadings, dropdownRoomyRows, sessionMenuLabel, weeklyMenuLabel, showSessionInMenuBar, colorByAllowance, theme, display, aggregation, showAccountNames, detailedQuotaLabels, allAccounts, selectedAccountIDs }
+    private enum CodingKeys: String, CodingKey { case dropdownShowRecentUsage, dashboardTransparency, dropdownTransparency, liquidGlass, accountOrder, dashboardChartFullScale, dashboardChartStyle, dropdownShowEmails, dropdownShowResets, dropdownShowBars, dropdownShowHeadings, dropdownRoomyRows, sessionMenuLabel, weeklyMenuLabel, showSessionInMenuBar, colorByAllowance, theme, display, aggregation, showAccountNames, detailedQuotaLabels, allAccounts, selectedAccountIDs }
     public init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
         dashboardChartFullScale = try values.decodeIfPresent(Bool.self, forKey: .dashboardChartFullScale) ?? false
@@ -93,6 +94,7 @@ public struct MenuPreferences: Codable, Equatable, Sendable {
         sessionMenuLabel = try values.decodeIfPresent(SessionMenuLabel.self, forKey: .sessionMenuLabel) ?? .short
         dropdownShowEmails = try values.decodeIfPresent(Bool.self, forKey: .dropdownShowEmails) ?? false
         dropdownShowResets = try values.decodeIfPresent(Bool.self, forKey: .dropdownShowResets) ?? true
+        dropdownShowRecentUsage = try values.decodeIfPresent(Bool.self, forKey: .dropdownShowRecentUsage) ?? false
         dropdownShowBars = try values.decodeIfPresent(Bool.self, forKey: .dropdownShowBars) ?? true
         dropdownShowHeadings = try values.decodeIfPresent(Bool.self, forKey: .dropdownShowHeadings) ?? true
         dropdownRoomyRows = try values.decodeIfPresent(Bool.self, forKey: .dropdownRoomyRows) ?? false

@@ -222,7 +222,7 @@ struct Dashboard: View {
                             CompactAccountRow(account: account, snapshot: store.snapshots[account.id], error: store.errors[account.id], now: store.now, cached: store.isCached(account),
                                 expanded: expandedAccountID == account.id,
                                 detailedLabels: store.menuPreferences.detailedQuotaLabels, connection: store.connectionState(account), dropdownPreferences: store.menuPreferences, colorByAllowance: store.menuPreferences.colorByAllowance,
-                                history: expandedAccountID == account.id ? store.history(for: account) : [],
+                                history: expandedAccountID == account.id || store.menuPreferences.dropdownShowRecentUsage ? store.history(for: account) : [],
                                 expand: { expandedAccountID = expandedAccountID == account.id ? nil : account.id },
                                 manage: { manage(account) }, openUsage: { store.openUsage(account) })
                             if account.id != accounts.last?.id { Divider().opacity(0.35).padding(.leading, 21).padding(.vertical, 4) }
@@ -282,9 +282,16 @@ private struct CompactAccountRow: View {
                     HStack(spacing: 7) {
                         Text(detail).font(.system(size: 9)).foregroundStyle(error != nil || status.state == .restricted ? Color.orange : Color.secondary).lineLimit(connection?.saved == true || connection?.needsAction == true || status.state == .exhausted ? 2 : 1)
                         Spacer(minLength: 2)
-                        if dropdownPreferences.dropdownShowBars, connection?.saved != true, connection?.needsAction != true, status.state != .exhausted, let window {
-                            AllowanceBar(remaining: window.remainingPercent, unavailable: error != nil || cached || status.state == .stale || status.state == .restricted || !account.enabled)
-                                .frame(width: 54, height: 3)
+                        VStack(alignment: .trailing, spacing: 3) {
+                            if dropdownPreferences.dropdownShowRecentUsage {
+                                RecentUsageSparkline(history: history, kind: account.kind, now: now,
+                                    tint: NSColor.accountHex(account.menuColorHex).map { Color(nsColor: $0) } ?? providerAccent(account.kind.provider))
+                                    .frame(width: 60, height: 18)
+                            }
+                            if dropdownPreferences.dropdownShowBars, connection?.saved != true, connection?.needsAction != true, status.state != .exhausted, let window {
+                                AllowanceBar(remaining: window.remainingPercent, unavailable: error != nil || cached || status.state == .stale || status.state == .restricted || !account.enabled)
+                                    .frame(width: 54, height: 3)
+                            }
                         }
                     }.padding(.leading, 21)
                     if dropdownPreferences.dropdownShowEmails, let email = account.expectedIdentity ?? snapshot?.identity {
@@ -543,7 +550,7 @@ struct AccountsView: View {
                                 case .history: historyContent
                                 case .trends: HistoryTrendsView(store: store)
                                 case .accounts: accountsContent
-                                case .settings: selectedTabContent.frame(maxWidth: 640).frame(maxWidth: .infinity, alignment: .top)
+                                case .settings: selectedTabContent.frame(maxWidth: settingsSection == .dropdown ? 1000 : 640).frame(maxWidth: .infinity, alignment: .top)
                                 }
                             }.padding(12)
                         }
@@ -1318,7 +1325,7 @@ struct AccountsView: View {
         }.font(.system(size: 13)).controlSize(.regular).disabled(store.demo)
     }
     private var dropdownSettings: some View {
-        VStack(alignment: .leading, spacing: 16) {
+        HStack(alignment: .top, spacing: 20) {
             GroupBox("Dropdown") {
                 VStack(alignment: .leading, spacing: 8) {
                     TransparencyControl(title: "Dropdown transparency", value: store.menuPreferences.dropdownTransparency, save: store.setDropdownTransparency)
@@ -1333,6 +1340,10 @@ struct AccountsView: View {
                     Divider()
                     Toggle("Show reset times", isOn: Binding(get: { store.menuPreferences.dropdownShowResets }, set: { store.setDropdownShowResets($0) }))
                     Divider()
+                    Toggle("Show recent usage graph", isOn: Binding(get: { store.menuPreferences.dropdownShowRecentUsage }, set: { store.setDropdownShowRecentUsage($0) }))
+                    Text("A tiny 6-hour consumption graph beside each account. Spikes show heavier use; gaps mean no reading.")
+                        .font(.callout).foregroundStyle(.secondary)
+                    Divider()
                     Toggle("Show progress bars", isOn: Binding(get: { store.menuPreferences.dropdownShowBars }, set: { store.setDropdownShowBars($0) }))
                     Divider()
                     Toggle("Show provider headings", isOn: Binding(get: { store.menuPreferences.dropdownShowHeadings }, set: { store.setDropdownShowHeadings($0) }))
@@ -1340,7 +1351,9 @@ struct AccountsView: View {
                     Toggle("Use comfortable spacing", isOn: Binding(get: { store.menuPreferences.dropdownRoomyRows }, set: { store.setDropdownRoomyRows($0) }))
                 }.padding(10)
             }
+            VStack(alignment: .leading, spacing: 10) {
             GroupBox("Live dropdown preview") {
+                ScrollView {
                 VStack(alignment: .leading, spacing: 10) {
                     Label("Ai-llowance", systemImage: "chart.bar.fill").font(.headline)
                     if store.accounts.isEmpty {
@@ -1358,7 +1371,7 @@ struct AccountsView: View {
                                         expanded: dropdownPreviewExpandedID == account.id,
                                         detailedLabels: store.menuPreferences.detailedQuotaLabels, connection: store.connectionState(account), dropdownPreferences: store.menuPreferences,
                                         colorByAllowance: store.menuPreferences.colorByAllowance,
-                                        history: dropdownPreviewExpandedID == account.id ? store.history(for: account) : [],
+                                        history: dropdownPreviewExpandedID == account.id || store.menuPreferences.dropdownShowRecentUsage ? store.history(for: account) : [],
                                         expand: { dropdownPreviewExpandedID = dropdownPreviewExpandedID == account.id ? nil : account.id },
                                         manage: { store.selectedAccountID = account.id; section = .accounts },
                                         openUsage: { store.openUsage(account) })
@@ -1369,10 +1382,12 @@ struct AccountsView: View {
                 }.padding(10).frame(maxWidth: 350)
                     .background { WorkspaceBackground(transparency: store.menuPreferences.dropdownTransparency).clipShape(RoundedRectangle(cornerRadius: 18)) }
                     .frame(maxWidth: .infinity)
+                }.frame(maxHeight: 480)
             }
             Text("Your current accounts and readings. Click an account to preview its expanded details.")
                 .font(.callout).foregroundStyle(.secondary)
-        }.font(.system(size: 13)).toggleStyle(SettingsSwitchStyle()).disabled(store.demo)
+            }.frame(width: 340)
+        }.font(.system(size: 13)).toggleStyle(SettingsSwitchStyle())
     }
 
     private var appearanceSettings: some View {
