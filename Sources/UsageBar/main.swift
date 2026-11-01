@@ -188,7 +188,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
             })
             let created = NSWindow(contentViewController: controller)
             created.title = "Ai-llowance · Dashboard"; created.styleMask = [.titled, .closable, .miniaturizable, .resizable]
-            created.setContentSize(NSSize(width: 980, height: 620)); created.center()
+            created.setContentSize(NSSize(width: 1080, height: 720)); created.center()
             created.isReleasedWhenClosed = false; created.delegate = self; window = created
         }
         applyWindowAppearance()

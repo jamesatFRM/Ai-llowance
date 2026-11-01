@@ -635,7 +635,12 @@ final class AppStore: ObservableObject {
                 claudeSignedIn[account.id] = true
                 if notice?.hasPrefix("Finish Claude’s browser sign-in once.") == true { notice = nil }
                 // Once direct usage works, restore the user's old status line. No bridge is needed.
-                do { if restoredLegacyFeeds.insert(account.id).inserted { try claudeConnection().uninstall(account: account) } }
+                do {
+                    if !restoredLegacyFeeds.contains(account.id) {
+                        try claudeConnection().uninstall(account: account)
+                        restoredLegacyFeeds.insert(account.id)
+                    }
+                }
                 catch { notice = "Usage is connected, but the previous status-line setting could not be restored automatically." }
             }
         } catch is CancellationError { return }
