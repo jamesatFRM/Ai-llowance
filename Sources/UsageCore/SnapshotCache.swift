@@ -99,7 +99,12 @@ public struct SnapshotCache: Sendable {
                                           resetsAt: snapshot.displayWindow(for: account.kind)?.resetsAt)
             // Preserve the sample timestamp. Replacing it every minute would move
             // the five-minute boundary forever and leave the chart with one point.
-            if history.last.map({ point.windowID != $0.windowID || point.timestamp.timeIntervalSince($0.timestamp) >= 300 }) ?? true { history.append(point) }
+            if history.last.map({ point.windowID != $0.windowID || point.timestamp.timeIntervalSince($0.timestamp) >= 300 }) ?? true {
+                // A quota-window change can arrive with the same provider timestamp.
+                // Replace that instant rather than writing duplicate dates that read() rejects.
+                if history.last?.timestamp == point.timestamp { history[history.count - 1] = point }
+                else { history.append(point) }
+            }
             history = Array(history.suffix(Self.maximumPoints))
         }
         try Paths.write(Record(accountID: account.id, kind: account.kind, scopeID: account.scopeID, credentialRevision: account.credentialRevision,

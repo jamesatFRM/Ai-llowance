@@ -57,6 +57,8 @@ public struct MenuPreferences: Codable, Equatable, Sendable {
     public var dashboardChartStyle: DashboardChartStyle = .mixed
     public var theme: AppTheme = .automatic
     public var liquidGlass = true
+    public var dashboardTransparency: Double = 0.75
+    public var dropdownTransparency: Double = 0.75
     public var display: MenuDisplay = .byAccount
     public var aggregation: MenuAggregation = .average
     public var showAccountNames = true
@@ -74,12 +76,14 @@ public struct MenuPreferences: Codable, Equatable, Sendable {
     public var selectedAccountIDs: Set<UUID> = []
     public var accountOrder: [UUID] = []
     public init() {}
-    private enum CodingKeys: String, CodingKey { case liquidGlass, accountOrder, dashboardChartFullScale, dashboardChartStyle, dropdownShowEmails, dropdownShowResets, dropdownShowBars, dropdownShowHeadings, dropdownRoomyRows, sessionMenuLabel, weeklyMenuLabel, showSessionInMenuBar, colorByAllowance, theme, display, aggregation, showAccountNames, detailedQuotaLabels, allAccounts, selectedAccountIDs }
+    private enum CodingKeys: String, CodingKey { case dashboardTransparency, dropdownTransparency, liquidGlass, accountOrder, dashboardChartFullScale, dashboardChartStyle, dropdownShowEmails, dropdownShowResets, dropdownShowBars, dropdownShowHeadings, dropdownRoomyRows, sessionMenuLabel, weeklyMenuLabel, showSessionInMenuBar, colorByAllowance, theme, display, aggregation, showAccountNames, detailedQuotaLabels, allAccounts, selectedAccountIDs }
     public init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
         dashboardChartFullScale = try values.decodeIfPresent(Bool.self, forKey: .dashboardChartFullScale) ?? false
         dashboardChartStyle = (try values.decodeIfPresent(String.self, forKey: .dashboardChartStyle)).flatMap(DashboardChartStyle.init(rawValue:)) ?? .mixed
         liquidGlass = try values.decodeIfPresent(Bool.self, forKey: .liquidGlass) ?? true
+        dashboardTransparency = min(1, max(0, try values.decodeIfPresent(Double.self, forKey: .dashboardTransparency) ?? 0.75))
+        dropdownTransparency = min(1, max(0, try values.decodeIfPresent(Double.self, forKey: .dropdownTransparency) ?? 0.75))
         theme = try values.decodeIfPresent(AppTheme.self, forKey: .theme) ?? .automatic
         display = try values.decodeIfPresent(MenuDisplay.self, forKey: .display) ?? .byAccount
         aggregation = try values.decodeIfPresent(MenuAggregation.self, forKey: .aggregation) ?? .average

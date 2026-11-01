@@ -215,7 +215,10 @@ final class AppStore: ObservableObject {
     }
     private func updateMenu(_ change: (inout MenuPreferences) -> Void) {
         let previous = menuPreferences
-        change(&menuPreferences)
+        var next = previous
+        change(&next)
+        guard next != previous else { return }
+        menuPreferences = next
         do { try persist() } catch { menuPreferences = previous; notice = "Could not save the menu-bar setting." }
     }
     var orderedMenuAccounts: [Account] {
@@ -230,6 +233,8 @@ final class AppStore: ObservableObject {
     func resetMenuAccountOrder() { updateMenu { $0.accountOrder = [] } }
     func setDashboardChartFullScale(_ value: Bool) { updateMenu { $0.dashboardChartFullScale = value } }
     func setDashboardChartStyle(_ value: DashboardChartStyle) { updateMenu { $0.dashboardChartStyle = value } }
+    func setDashboardTransparency(_ value: Double) { guard value.isFinite else { return }; updateMenu { $0.dashboardTransparency = min(1, max(0, value)) } }
+    func setDropdownTransparency(_ value: Double) { guard value.isFinite else { return }; updateMenu { $0.dropdownTransparency = min(1, max(0, value)) } }
     func setLiquidGlass(_ enabled: Bool) { updateMenu { $0.liquidGlass = enabled } }
     func setTheme(_ value: AppTheme) { updateMenu { $0.theme = value } }
     func setSessionMenuLabel(_ value: SessionMenuLabel) { updateMenu { $0.sessionMenuLabel = value } }
@@ -780,7 +785,8 @@ final class AppStore: ObservableObject {
                 schedules[account.id]?.adjustHealthyInterval(refreshInterval(for: account.kind, visible: value, lowPower: lowPower))
             }
         }
-        if becameVisible { rediscoverTools(); refresh(force: true) }
+        // Opening UI is not a manual refresh; retain the chosen cadence and backoff.
+        if becameVisible { rediscoverTools(); refresh() }
         scheduleHeartbeat()
     }
     private func scheduleHeartbeat() {
@@ -838,7 +844,10 @@ final class AppStore: ObservableObject {
         let point = UsageHistoryPoint(timestamp: snapshot.observedAt, remainingPercent: snapshot.displayWindow(for: account.kind)?.remainingPercent, balanceUSD: snapshot.balanceUSD, costUSD: snapshot.costUSD, windowID: snapshot.displayWindow(for: account.kind)?.id, resetsAt: snapshot.displayWindow(for: account.kind)?.resetsAt)
         let status = AllowanceStatus.evaluate(snapshot: snapshot, kind: account.kind, now: now)
         if ![.unavailable, .stale, .restricted].contains(status.state),
-           points.last.map({ point.windowID != $0.windowID || point.timestamp.timeIntervalSince($0.timestamp) >= 300 }) ?? true { points.append(point) }
+           points.last.map({ point.windowID != $0.windowID || point.timestamp.timeIntervalSince($0.timestamp) >= 300 }) ?? true {
+            if points.last?.timestamp == point.timestamp { points[points.count - 1] = point }
+            else if points.last.map({ point.timestamp > $0.timestamp }) ?? true { points.append(point) }
+        }
         usageHistory[account.id] = Array(points.filter { snapshot.observedAt.timeIntervalSince($0.timestamp) <= 604800 }.suffix(SnapshotCache.maximumPoints))
         let previous = cacheTask, root = root
         cacheTask = Task.detached(priority: .utility) { [weak self] in

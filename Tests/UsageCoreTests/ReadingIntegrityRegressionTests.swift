@@ -165,3 +165,20 @@ private func integrityReading(at date: Date, remaining: Double = 80) throws -> S
     #expect(MenuSummary.entries(accounts: [first], snapshots: [first.id: unlimited], unavailable: [], preferences: MenuPreferences(), now: integrityNow).first?.isUnlimited == false)
     #expect(MenuSummary.entries(accounts: [first], snapshots: [first.id: reading], unavailable: [], preferences: MenuPreferences(), now: integrityNow).first?.remainingPercent == 80)
 }
+
+@Test func sameTimestampQuotaChangeKeepsHistoryReadableAcrossRestart() throws {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent("SameTimestamp-\(UUID().uuidString)")
+    defer { try? FileManager.default.removeItem(at: root) }
+    let account = integrityAccount(), cache = SnapshotCache(root: root)
+    _ = try cache.save(integrityReading(at: integrityNow), for: account)
+    let weekly = Snapshot(observedAt: integrityNow, windows: [try QuotaWindow(id: "week.all models", label: "Week", usedPercent: 30,
+        resetsAt: integrityNow.addingTimeInterval(86400), durationMinutes: 10080)], identity: "person@example.com", source: "Fixture")
+    let history = try cache.save(weekly, for: account)
+    #expect(history.count == 1)
+    #expect(history.first?.windowID == "week.all models")
+    let reloaded = SnapshotCache(root: root)
+    #expect(reloaded.load(accounts: [account], now: integrityNow)[account.id] == weekly)
+    #expect(reloaded.loadHistory(accounts: [account], now: integrityNow)[account.id] == history)
+    _ = try reloaded.save(integrityReading(at: integrityNow.addingTimeInterval(300)), for: account)
+    #expect(reloaded.loadHistory(accounts: [account], now: integrityNow.addingTimeInterval(300))[account.id]?.count == 2)
+}

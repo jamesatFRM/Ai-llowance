@@ -308,7 +308,7 @@ private actor FetchGate {
     let account = Account(name: "Fixture", kind: .codex)
     store.accounts = [account]
     let deadline = Date().addingTimeInterval(10)
-    while store.snapshots[account.id] == nil && Date() < deadline { try await Task.sleep(for: .milliseconds(100)) }
+    while (store.snapshots[account.id] == nil || store.refreshing) && Date() < deadline { try await Task.sleep(for: .milliseconds(100)) }
     #expect(store.snapshots[account.id]?.identity == "fixture@example.com")
     #expect(!store.refreshing)
     await store.shutdown()
