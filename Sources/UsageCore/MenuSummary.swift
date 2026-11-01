@@ -34,18 +34,18 @@ public enum AppTheme: String, Codable, CaseIterable, Identifiable, Sendable {
     public var title: String { rawValue.capitalized }
 }
 public enum DashboardChartStyle: String, Codable, CaseIterable, Identifiable, Sendable {
-    case mixed, glow, line, area, bars, dots, ring, pie, gauge
+    case mixed, matrix, glow, line, area, bars, dots, ring, pie, gauge
     public var id: String { rawValue }
     public var title: String {
         switch self {
-        case .mixed: "Overview"; case .glow: "Glow"; case .line: "Line"; case .area: "Area"; case .bars: "Bars"
+        case .mixed: "Overview"; case .matrix: "Dot matrix"; case .glow: "Glow"; case .line: "Line"; case .area: "Area"; case .bars: "Bars"
         case .dots: "Dots"; case .ring: "Ring"; case .pie: "Pie"; case .gauge: "Gauge"
         }
     }
     public var isCurrentAllowance: Bool { self == .ring || self == .pie || self == .gauge }
     public var symbol: String {
         switch self {
-        case .mixed: "rectangle.3.group"; case .glow, .line: "chart.xyaxis.line"; case .area: "chart.line.uptrend.xyaxis"
+        case .mixed: "rectangle.3.group"; case .matrix: "circle.grid.3x3.fill"; case .glow, .line: "chart.xyaxis.line"; case .area: "chart.line.uptrend.xyaxis"
         case .bars: "chart.bar.fill"; case .dots: "circle.grid.3x3.fill"
         case .ring: "circle.circle"; case .pie: "chart.pie.fill"; case .gauge: "gauge.with.dots.needle.67percent"
         }
@@ -56,6 +56,7 @@ public struct MenuPreferences: Codable, Equatable, Sendable {
     public var dashboardChartFullScale = false
     public var dashboardChartStyle: DashboardChartStyle = .mixed
     public var theme: AppTheme = .automatic
+    public var liquidGlass = true
     public var display: MenuDisplay = .byAccount
     public var aggregation: MenuAggregation = .average
     public var showAccountNames = true
@@ -73,11 +74,12 @@ public struct MenuPreferences: Codable, Equatable, Sendable {
     public var selectedAccountIDs: Set<UUID> = []
     public var accountOrder: [UUID] = []
     public init() {}
-    private enum CodingKeys: String, CodingKey { case accountOrder, dashboardChartFullScale, dashboardChartStyle, dropdownShowEmails, dropdownShowResets, dropdownShowBars, dropdownShowHeadings, dropdownRoomyRows, sessionMenuLabel, weeklyMenuLabel, showSessionInMenuBar, colorByAllowance, theme, display, aggregation, showAccountNames, detailedQuotaLabels, allAccounts, selectedAccountIDs }
+    private enum CodingKeys: String, CodingKey { case liquidGlass, accountOrder, dashboardChartFullScale, dashboardChartStyle, dropdownShowEmails, dropdownShowResets, dropdownShowBars, dropdownShowHeadings, dropdownRoomyRows, sessionMenuLabel, weeklyMenuLabel, showSessionInMenuBar, colorByAllowance, theme, display, aggregation, showAccountNames, detailedQuotaLabels, allAccounts, selectedAccountIDs }
     public init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
         dashboardChartFullScale = try values.decodeIfPresent(Bool.self, forKey: .dashboardChartFullScale) ?? false
         dashboardChartStyle = (try values.decodeIfPresent(String.self, forKey: .dashboardChartStyle)).flatMap(DashboardChartStyle.init(rawValue:)) ?? .mixed
+        liquidGlass = try values.decodeIfPresent(Bool.self, forKey: .liquidGlass) ?? true
         theme = try values.decodeIfPresent(AppTheme.self, forKey: .theme) ?? .automatic
         display = try values.decodeIfPresent(MenuDisplay.self, forKey: .display) ?? .byAccount
         aggregation = try values.decodeIfPresent(MenuAggregation.self, forKey: .aggregation) ?? .average

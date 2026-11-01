@@ -230,6 +230,7 @@ final class AppStore: ObservableObject {
     func resetMenuAccountOrder() { updateMenu { $0.accountOrder = [] } }
     func setDashboardChartFullScale(_ value: Bool) { updateMenu { $0.dashboardChartFullScale = value } }
     func setDashboardChartStyle(_ value: DashboardChartStyle) { updateMenu { $0.dashboardChartStyle = value } }
+    func setLiquidGlass(_ enabled: Bool) { updateMenu { $0.liquidGlass = enabled } }
     func setTheme(_ value: AppTheme) { updateMenu { $0.theme = value } }
     func setSessionMenuLabel(_ value: SessionMenuLabel) { updateMenu { $0.sessionMenuLabel = value } }
     func setWeeklyMenuLabel(_ value: WeeklyMenuLabel) { updateMenu { $0.weeklyMenuLabel = value } }

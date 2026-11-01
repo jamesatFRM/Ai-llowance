@@ -22,18 +22,39 @@ private struct PanelBackground: View {
     }
 }
 
+private struct LiquidGlassPreference: EnvironmentKey {
+    static let defaultValue = true
+}
+private extension EnvironmentValues {
+    var liquidGlass: Bool {
+        get { self[LiquidGlassPreference.self] }
+        set { self[LiquidGlassPreference.self] = newValue }
+    }
+}
+private struct DesktopGlass: NSViewRepresentable {
+    func makeNSView(context: Context) -> NSVisualEffectView {
+        let view = NSVisualEffectView()
+        view.material = .hudWindow
+        view.blendingMode = .behindWindow
+        view.state = .active
+        return view
+    }
+    func updateNSView(_ view: NSVisualEffectView, context: Context) {}
+}
+
 // One native material backing; cards use inexpensive translucent fills.
 private struct WorkspaceBackground: View {
+    @Environment(\.liquidGlass) private var liquidGlass
     @Environment(\.colorScheme) private var scheme
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     var body: some View {
         ZStack {
-            if reduceTransparency {
+            if reduceTransparency || !liquidGlass {
                 Color(nsColor: .windowBackgroundColor)
             } else {
-                Rectangle().fill(.regularMaterial)
+                DesktopGlass()
             }
-            if !reduceTransparency {
+            if !reduceTransparency && liquidGlass {
                 RadialGradient(colors: [Color.mint.opacity(scheme == .dark ? 0.10 : 0.06), .clear], center: .topLeading, startRadius: 0, endRadius: 650)
                 RadialGradient(colors: [Color.purple.opacity(scheme == .dark ? 0.09 : 0.045), .clear], center: .bottomTrailing, startRadius: 0, endRadius: 650)
             }
@@ -132,7 +153,7 @@ struct Dashboard: View {
                 Button { NSApplication.shared.terminate(nil) } label: { Image(systemName: "power").frame(width: 22, height: 22) }
                     .help("Quit Ai-llowance").accessibilityLabel("Quit Ai-llowance")
             }.font(.system(size: 10)).buttonStyle(QuietButtonStyle()).foregroundStyle(.secondary).padding(.horizontal, 9).padding(.bottom, 3)
-        }.padding(7).frame(width: 350).background(WorkspaceBackground()).preferredColorScheme(store.menuPreferences.theme.colorScheme)
+        }.padding(7).frame(width: 350).background(WorkspaceBackground()).preferredColorScheme(store.menuPreferences.theme.colorScheme).environment(\.liquidGlass, store.menuPreferences.liquidGlass)
     }
 
     private func manage(_ account: Account) { store.selectedAccountID = account.id; manage() }
@@ -385,6 +406,7 @@ private struct SparklineShape: Shape {
     }
 }
 private struct SettingsCard<Content: View>: View {
+    @Environment(\.liquidGlass) private var liquidGlass
     @Environment(\.colorScheme) private var scheme
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     @Environment(\.colorSchemeContrast) private var contrast
@@ -395,9 +417,9 @@ private struct SettingsCard<Content: View>: View {
         content.padding(inset).frame(maxWidth: .infinity, alignment: .leading)
             .background {
                 let shape = RoundedRectangle(cornerRadius: 24, style: .continuous)
-                shape.fill(Color(nsColor: .windowBackgroundColor).opacity(reduceTransparency ? 1 : scheme == .dark ? 0.38 : 0.64))
+                shape.fill(Color(nsColor: .windowBackgroundColor).opacity(reduceTransparency || !liquidGlass ? 1 : scheme == .dark ? 0.10 : 0.22))
                     .overlay {
-                        if !reduceTransparency {
+                        if !reduceTransparency && liquidGlass {
                             shape.fill(LinearGradient(colors: [
                                 Color.white.opacity(scheme == .dark ? 0.14 : 0.75),
                                 tint.opacity(0.045),
@@ -535,7 +557,7 @@ struct AccountsView: View {
                 Text(AppUpdater.versionLabel).foregroundStyle(.tertiary)
                 Button { NSApplication.shared.terminate(nil) } label: { Image(systemName: "power").frame(width: 26, height: 26) }.buttonStyle(QuietButtonStyle()).help("Quit Ai-llowance")
             }.font(.system(size: 10)).padding(.horizontal, 14).padding(.vertical, 6)
-        }.frame(minWidth: 760, minHeight: 480).controlSize(.regular).background { if section == .settings { Color(nsColor: .windowBackgroundColor) } else { WorkspaceBackground() } }.preferredColorScheme(store.menuPreferences.theme.colorScheme)
+        }.frame(minWidth: 760, minHeight: 480).controlSize(.regular).background { WorkspaceBackground() }.preferredColorScheme(store.menuPreferences.theme.colorScheme).environment(\.liquidGlass, store.menuPreferences.liquidGlass)
         .background(Color(nsColor: .windowBackgroundColor).opacity(0.001))
         .alert("Remove \(removing?.name ?? "account")?", isPresented: Binding(get: { removing != nil }, set: { if !$0 { removing = nil } })) {
             Button("Cancel", role: .cancel) { removing = nil }
@@ -850,7 +872,7 @@ struct AccountsView: View {
                     ForEach(row) { account in
                         let points = store.history(for: account).filter { $0.timestamp >= store.now.addingTimeInterval(-Double(historyHours) * 3600) && $0.timestamp <= store.now }
                         HistoryCard(account: account, points: points, snapshot: store.snapshots[account.id],
-                                    error: store.errors[account.id] != nil, cached: store.isCached(account), needsReconnect: store.needsSignIn(account), connection: store.connectionState(account), now: store.now, chartStyle: store.menuPreferences.dashboardChartStyle, fullScale: store.menuPreferences.dashboardChartFullScale,
+                                    error: store.errors[account.id] != nil, cached: store.isCached(account), needsReconnect: store.needsSignIn(account), connection: store.connectionState(account), now: store.now, historyHours: historyHours, chartStyle: store.menuPreferences.dashboardChartStyle, fullScale: store.menuPreferences.dashboardChartFullScale,
                                     overviewTint: store.menuPreferences.dashboardChartStyle == .mixed ? overviewAccountTint(account, accounts: store.accounts) : nil,
                                     openUsage: { if store.connectionState(account).needsAction { store.selectedAccountID = account.id; section = .accounts } else { store.openUsage(account) } }, manage: { renaming = account })
                             .frame(maxWidth: .infinity)
@@ -1343,6 +1365,11 @@ struct AccountsView: View {
                             ForEach(AppTheme.allCases) { theme in Text(theme.title).tag(theme) }
                         }.pickerStyle(.segmented).labelsHidden().frame(width: 240)
                     }
+                    Divider()
+                    Toggle("Liquid Glass", isOn: Binding(get: { store.menuPreferences.liquidGlass }, set: { store.setLiquidGlass($0) }))
+                        .toggleStyle(SettingsSwitchStyle())
+                    Text("Let desktop colors show through the dashboard. Turn off for an opaque background. macOS Reduce Transparency takes priority.")
+                        .font(.callout).foregroundStyle(.secondary)
                 }.padding(10)
             }
         .font(.system(size: 13)).disabled(store.demo)
@@ -1515,10 +1542,14 @@ private struct HistoryCard: View {
     let needsReconnect: Bool
     let connection: ConnectionPresentation
     let now: Date
+    let historyHours: Int
     let chartStyle: DashboardChartStyle
     let fullScale: Bool
     var overviewTint: Color? = nil
-    private var effectiveStyle: DashboardChartStyle { chartStyle == .mixed ? .glow : account.kind.isAPI && chartStyle.isCurrentAllowance ? .line : chartStyle }
+    private var effectiveStyle: DashboardChartStyle {
+        if historyHours == 168 { return .bars }
+        return chartStyle == .mixed ? .matrix : account.kind.isAPI && chartStyle.isCurrentAllowance ? .line : chartStyle
+    }
     var openUsage: () -> Void
     var manage: () -> Void
     private var status: AllowanceStatus { AllowanceStatus.evaluate(snapshot: snapshot, kind: account.kind, now: now, hasError: error) }
@@ -1548,7 +1579,7 @@ private struct HistoryCard: View {
     private var samples: [HistorySample] { HistorySeries.samples(points, kind: account.kind) }
     private var hoveredSample: HistorySample? {
         guard let hoveredDate else { return nil }
-        return (effectiveStyle == .bars ? HistorySeries.barSamples(samples) : samples).min { abs($0.timestamp.timeIntervalSince(hoveredDate)) < abs($1.timestamp.timeIntervalSince(hoveredDate)) }
+        return (effectiveStyle == .bars ? HistorySeries.barSamples(samples, count: historyHours == 168 ? 28 : 24) : samples).min { abs($0.timestamp.timeIntervalSince(hoveredDate)) < abs($1.timestamp.timeIntervalSince(hoveredDate)) }
     }
     private var fittedTrend: Bool { !account.kind.isAPI && !fullScale && effectiveStyle != .bars && effectiveStyle != .dots }
     private var plotDomain: ClosedRange<Double> {
@@ -1626,7 +1657,7 @@ private struct HistoryCard: View {
     }
 
     var body: some View {
-        let series = effectiveStyle == .bars ? HistorySeries.barSamples(samples) : effectiveStyle == .dots ? samples : HistorySeries.smoothTrend(samples)
+        let series = effectiveStyle == .bars ? HistorySeries.barSamples(samples, count: historyHours == 168 ? 28 : 24) : effectiveStyle == .dots ? samples : HistorySeries.smoothTrend(samples)
         let segmentCounts = Dictionary(grouping: series, by: \.segment).mapValues(\.count)
         SettingsCard(inset: 18, tint: dashboardTint) {
             VStack(alignment: .leading, spacing: 8) {
@@ -1652,7 +1683,10 @@ private struct HistoryCard: View {
                 } else {
                     Chart {
                         ForEach(series) { sample in
-                            if effectiveStyle == .bars {
+                            if effectiveStyle == .matrix {
+                                PointMark(x: .value("Time", sample.timestamp), y: .value(metric, sample.value))
+                                    .foregroundStyle(Color.clear).symbolSize(0)
+                            } else if effectiveStyle == .bars {
                                 BarMark(x: .value("Time", sample.timestamp), y: .value(metric, sample.value), width: .ratio(0.65))
                                     .foregroundStyle(LinearGradient(colors: [graphTint, graphTint.opacity(0.18)], startPoint: .top, endPoint: .bottom))
                                     .cornerRadius(2)
@@ -1703,6 +1737,17 @@ private struct HistoryCard: View {
                     }
                     .chartOverlay { proxy in
                         GeometryReader { geometry in
+                            ZStack(alignment: .topLeading) {
+                                if effectiveStyle == .matrix, let plotFrame = proxy.plotFrame {
+                                    let frame = geometry[plotFrame]
+                                    DotMatrixPlot(points: series.compactMap { sample in
+                                        guard let x = proxy.position(forX: sample.timestamp), let y = proxy.position(forY: sample.value) else { return nil }
+                                        return MatrixPoint(x: x, y: y, segment: sample.segment)
+                                    }, tint: graphTint)
+                                        .frame(width: frame.width, height: frame.height)
+                                        .offset(x: frame.minX, y: frame.minY)
+                                        .allowsHitTesting(false)
+                                }
                             Rectangle().fill(.clear).contentShape(Rectangle())
                                 .onContinuousHover { phase in
                                     switch phase {
@@ -1714,6 +1759,7 @@ private struct HistoryCard: View {
                                     case .ended: hoveredDate = nil
                                     }
                                 }
+                            }
                         }
                     }
                     .overlay(alignment: .topLeading) {
@@ -1748,6 +1794,52 @@ private struct HistoryCard: View {
     }
 }
 
+
+private struct MatrixPoint {
+    let x: CGFloat
+    let y: CGFloat
+    let segment: Int
+}
+
+/// Screen-space rasterization of the same trend, never connecting separate periods.
+private struct DotMatrixPlot: View {
+    let points: [MatrixPoint]
+    let tint: Color
+    var body: some View {
+        Canvas { context, size in
+            let step: CGFloat = 4
+            let radius: CGFloat = 1.15
+            guard size.width > 0, size.height > 0 else { return }
+            for x in stride(from: step / 2, through: size.width, by: step) {
+                var lineY: CGFloat?
+                if let exact = points.min(by: { abs($0.x - x) < abs($1.x - x) }), abs(exact.x - x) <= step / 2 {
+                    lineY = exact.y
+                }
+                if points.count > 1 {
+                    for i in 1..<points.count {
+                        let a = points[i - 1], b = points[i]
+                        if a.segment == b.segment, a.x <= x, x <= b.x, b.x > a.x {
+                            lineY = a.y + (b.y - a.y) * (x - a.x) / (b.x - a.x)
+                            break
+                        }
+                    }
+                }
+                for y in stride(from: step / 2, through: size.height, by: step) {
+                    var opacity = 0.035
+                    if let lineY {
+                        let depth = y - lineY
+                        if abs(depth) <= step * 0.7 { opacity = 0.95 }
+                        else if depth > 0 {
+                            opacity = 0.12 + 0.43 * pow(max(0, 1 - depth / max(1, size.height - lineY)), 1.6)
+                        }
+                    }
+                    let dot = Path(ellipseIn: CGRect(x: x - radius, y: y - radius, width: radius * 2, height: radius * 2))
+                    context.fill(dot, with: .color(tint.opacity(opacity)))
+                }
+            }
+        }.clipped().accessibilityHidden(true)
+    }
+}
 
 private struct ActivityHeatmap: View {
     let accounts: [Account]

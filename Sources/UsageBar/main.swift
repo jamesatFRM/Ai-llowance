@@ -202,6 +202,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
         case .light: appearance = NSAppearance(named: .aqua)
         case .dark: appearance = NSAppearance(named: .darkAqua)
         }
+        window?.isOpaque = !store.menuPreferences.liquidGlass
+        window?.backgroundColor = store.menuPreferences.liquidGlass ? .clear : .windowBackgroundColor
         window?.appearance = appearance
         popover.contentViewController?.view.window?.appearance = appearance
     }

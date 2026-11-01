@@ -71,3 +71,19 @@ import UsageCore
     #expect(loaded.orderedMenuAccounts.map(\.id) == [a.id, b.id])
     await store.shutdown(); await loaded.shutdown()
 }
+
+@MainActor @Test func liquidGlassDefaultsOnAndOpaqueChoiceSurvivesRestart() async throws {
+    #expect(try JSONDecoder().decode(MenuPreferences.self, from: Data("{}".utf8)).liquidGlass)
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent("Glass-\(UUID().uuidString)")
+    try Paths.prepare(root)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let store = AppStore(root: root, monitor: false)
+    #expect(store.menuPreferences.liquidGlass)
+    store.setLiquidGlass(false)
+    let loaded = AppStore(root: root, monitor: false)
+    #expect(!loaded.menuPreferences.liquidGlass)
+    loaded.setLiquidGlass(true)
+    let restored = AppStore(root: root, monitor: false)
+    #expect(restored.menuPreferences.liquidGlass)
+    await store.shutdown(); await loaded.shutdown(); await restored.shutdown()
+}
