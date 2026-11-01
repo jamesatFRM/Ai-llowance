@@ -15,6 +15,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
     private var outsideClickMonitor: Any?
     private var localClickMonitor: Any?
     private var notificationDelegate: AllowanceNotificationDelegate?
+    private var labelUpdateScheduled = false
     private var renderedEntries: [MenuEntry]?
     private var renderedPreferences: MenuPreferences?
     private let store = AppStore(demo: Bundle.main.object(forInfoDictionaryKey: "AILSamplePreview") as? Bool == true || CommandLine.arguments.contains("--demo") || CommandLine.arguments.contains("--preview") || CommandLine.arguments.contains("--export-preview"))
@@ -37,7 +38,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
         popover.delegate = self
         popover.contentViewController = NSHostingController(rootView: Dashboard(store: store) { [weak self] in self?.showAccounts() })
         store.objectWillChange.sink { [weak self] _ in
-            DispatchQueue.main.async { self?.updateLabel() }
+            self?.scheduleLabelUpdate()
         }.store(in: &subscriptions)
         store.$menuPreferences.sink { [weak self] _ in
             DispatchQueue.main.async { self?.applyWindowAppearance() }
@@ -65,6 +66,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
         store.refresh()
         if CommandLine.arguments.contains("--show-menu") {
             DispatchQueue.main.async { [weak self] in self?.togglePopover() }
+        }
+    }
+    private func scheduleLabelUpdate() {
+        guard !labelUpdateScheduled else { return }
+        labelUpdateScheduled = true
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.labelUpdateScheduled = false
+            self.updateLabel()
         }
     }
     private func updateLabel() {
@@ -202,10 +212,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
         case .light: appearance = NSAppearance(named: .aqua)
         case .dark: appearance = NSAppearance(named: .darkAqua)
         }
-        window?.isOpaque = !store.menuPreferences.liquidGlass
-        window?.backgroundColor = store.menuPreferences.liquidGlass ? .clear : .windowBackgroundColor
-        window?.appearance = appearance
-        popover.contentViewController?.view.window?.appearance = appearance
+        for panel in [window, popover.contentViewController?.view.window].compactMap({ $0 }) {
+            let opaque = !store.menuPreferences.liquidGlass
+            if panel.isOpaque != opaque { panel.isOpaque = opaque }
+            let background: NSColor = opaque ? .windowBackgroundColor : .clear
+            if panel.backgroundColor != background { panel.backgroundColor = background }
+            if panel.appearance?.name != appearance?.name { panel.appearance = appearance }
+        }
     }
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool { showAccounts(); return true }
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {

@@ -31,22 +31,31 @@ private extension EnvironmentValues {
         set { self[LiquidGlassPreference.self] = newValue }
     }
 }
+// A decorative native view must never intercept controls or initiate window dragging.
+final class PassiveGlassView: NSVisualEffectView {
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+    override var mouseDownCanMoveWindow: Bool { false }
+    override var acceptsFirstResponder: Bool { false }
+}
+
 private struct DesktopGlass: NSViewRepresentable {
     @Environment(\.colorScheme) private var scheme
     func makeNSView(context: Context) -> NSVisualEffectView {
-        let view = NSVisualEffectView()
+        let view = PassiveGlassView()
         view.material = .hudWindow
         view.blendingMode = .behindWindow
         view.state = .active
         return view
     }
     func updateNSView(_ view: NSVisualEffectView, context: Context) {
-        view.appearance = NSAppearance(named: scheme == .dark ? .darkAqua : .aqua)
+        let name: NSAppearance.Name = scheme == .dark ? .darkAqua : .aqua
+        if view.appearance?.name != name { view.appearance = NSAppearance(named: name) }
     }
 }
 
 // One native material backing; cards use inexpensive translucent fills.
 private struct WorkspaceBackground: View {
+    var transparency: Double = 0.75
     @Environment(\.liquidGlass) private var liquidGlass
     @Environment(\.colorScheme) private var scheme
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
@@ -56,7 +65,7 @@ private struct WorkspaceBackground: View {
                 Color(nsColor: .windowBackgroundColor)
             } else {
                 DesktopGlass()
-                    .overlay(scheme == .dark ? Color.black.opacity(0.24) : Color.white.opacity(0.15))
+                    .overlay(scheme == .dark ? Color.black.opacity(1 - transparency * 0.85) : Color.white.opacity(1 - transparency * 0.9))
             }
             if !reduceTransparency && liquidGlass {
                 RadialGradient(colors: [Color.mint.opacity(scheme == .dark ? 0.10 : 0.06), .clear], center: .topLeading, startRadius: 0, endRadius: 650)
@@ -66,7 +75,7 @@ private struct WorkspaceBackground: View {
                 ? [Color.white.opacity(0.055), Color.white.opacity(0.015), Color.black.opacity(0.10)]
                 : [Color.white.opacity(0.55), Color.white.opacity(0.20), Color.black.opacity(0.025)],
                 startPoint: .topLeading, endPoint: .bottomTrailing)
-        }
+        }.allowsHitTesting(false).accessibilityHidden(true)
     }
 }
 
@@ -157,7 +166,7 @@ struct Dashboard: View {
                 Button { NSApplication.shared.terminate(nil) } label: { Image(systemName: "power").frame(width: 22, height: 22) }
                     .help("Quit Ai-llowance").accessibilityLabel("Quit Ai-llowance")
             }.font(.system(size: 10)).buttonStyle(QuietButtonStyle()).foregroundStyle(.secondary).padding(.horizontal, 9).padding(.bottom, 3)
-        }.padding(7).frame(width: 350).background(WorkspaceBackground()).preferredColorScheme(store.menuPreferences.theme.colorScheme).environment(\.liquidGlass, store.menuPreferences.liquidGlass)
+        }.padding(7).frame(width: 350).background(WorkspaceBackground(transparency: store.menuPreferences.dropdownTransparency)).preferredColorScheme(store.menuPreferences.theme.colorScheme).environment(\.liquidGlass, store.menuPreferences.liquidGlass)
     }
 
     private func manage(_ account: Account) { store.selectedAccountID = account.id; manage() }
@@ -561,7 +570,7 @@ struct AccountsView: View {
                 Text(AppUpdater.versionLabel).foregroundStyle(.tertiary)
                 Button { NSApplication.shared.terminate(nil) } label: { Image(systemName: "power").frame(width: 26, height: 26) }.buttonStyle(QuietButtonStyle()).help("Quit Ai-llowance")
             }.font(.system(size: 10)).padding(.horizontal, 14).padding(.vertical, 6)
-        }.frame(minWidth: 760, minHeight: 480).controlSize(.regular).background { WorkspaceBackground() }.preferredColorScheme(store.menuPreferences.theme.colorScheme).environment(\.liquidGlass, store.menuPreferences.liquidGlass)
+        }.frame(minWidth: 760, minHeight: 480).controlSize(.regular).background { WorkspaceBackground(transparency: store.menuPreferences.dashboardTransparency) }.preferredColorScheme(store.menuPreferences.theme.colorScheme).environment(\.liquidGlass, store.menuPreferences.liquidGlass)
         .background(Color(nsColor: .windowBackgroundColor).opacity(0.001))
         .alert("Remove \(removing?.name ?? "account")?", isPresented: Binding(get: { removing != nil }, set: { if !$0 { removing = nil } })) {
             Button("Cancel", role: .cancel) { removing = nil }
@@ -1310,6 +1319,10 @@ struct AccountsView: View {
         VStack(alignment: .leading, spacing: 16) {
             GroupBox("Dropdown") {
                 VStack(alignment: .leading, spacing: 8) {
+                    TransparencyControl(title: "Dropdown transparency", value: store.menuPreferences.dropdownTransparency, save: store.setDropdownTransparency)
+                        .disabled(!store.menuPreferences.liquidGlass)
+                    Text("Uses Liquid Glass from General. Higher transparency lets more of the desktop show through.").font(.callout).foregroundStyle(.secondary)
+                    Divider()
                     Toggle("Always show individual limits", isOn: Binding(get: { store.menuPreferences.detailedQuotaLabels }, set: { store.setDetailedQuotaLabels($0) }))
                     Text("Show each limit and reset time without expanding an account.")
                         .font(.callout).foregroundStyle(.secondary)
@@ -1352,6 +1365,7 @@ struct AccountsView: View {
                         }
                     }
                 }.padding(10).frame(maxWidth: 350)
+                    .background { WorkspaceBackground(transparency: store.menuPreferences.dropdownTransparency).clipShape(RoundedRectangle(cornerRadius: 18)) }
                     .frame(maxWidth: .infinity)
             }
             Text("Your current accounts and readings. Click an account to preview its expanded details.")
@@ -1372,8 +1386,10 @@ struct AccountsView: View {
                     Divider()
                     Toggle("Liquid Glass", isOn: Binding(get: { store.menuPreferences.liquidGlass }, set: { store.setLiquidGlass($0) }))
                         .toggleStyle(SettingsSwitchStyle())
-                    Text("Let desktop colors show through the dashboard. Turn off for an opaque background. macOS Reduce Transparency takes priority.")
+                    Text("Let desktop colors show through the dashboard and dropdown. Turn off for opaque backgrounds. macOS Reduce Transparency takes priority.")
                         .font(.callout).foregroundStyle(.secondary)
+                    TransparencyControl(title: "Dashboard transparency", value: store.menuPreferences.dashboardTransparency, save: store.setDashboardTransparency)
+                        .disabled(!store.menuPreferences.liquidGlass)
                 }.padding(10)
             }
         .font(.system(size: 13)).disabled(store.demo)
@@ -1757,9 +1773,13 @@ private struct HistoryCard: View {
                                 .onContinuousHover { phase in
                                     switch phase {
                                     case .active(let location):
+                                        // Window/control drags must not trigger chart redraws.
+                                        guard NSEvent.pressedMouseButtons == 0 else { return }
                                         if let plotFrame = proxy.plotFrame {
                                             let frame = geometry[plotFrame]
-                                            hoveredDate = frame.contains(location) ? proxy.value(atX: location.x - frame.minX, as: Date.self) : nil
+                                            let date: Date? = frame.contains(location) ? proxy.value(atX: location.x - frame.minX, as: Date.self) : nil
+                                            let nearest = date.flatMap { date in samples.min { abs($0.timestamp.timeIntervalSince(date)) < abs($1.timestamp.timeIntervalSince(date)) }?.timestamp }
+                                            if hoveredDate != nearest { hoveredDate = nearest }
                                         }
                                     case .ended: hoveredDate = nil
                                     }
@@ -2121,4 +2141,31 @@ private struct UsageOverviewCharts: View {
     let preceding = accounts.prefix { $0.id != account.id }.filter { $0.kind.provider == account.kind.provider }.count
     if preceding == 0 { return providerAccent(account.kind.provider) }
     return [Color.purple, Color.blue, Color.pink][(preceding - 1) % 3]
+}
+
+private struct TransparencyControl: View {
+    let title: String
+    let value: Double
+    let save: (Double) -> Void
+    @ViewState private var draft = 0.75
+    @ViewState private var editing = false
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Text(title)
+                Spacer()
+                Text("\(Int(draft * 100))%").monospacedDigit().foregroundStyle(.secondary)
+            }
+            Slider(value: Binding(get: { draft }, set: {
+                draft = $0
+                if !editing { save($0) }
+            }), in: 0...1, onEditingChanged: { active in
+                editing = active
+                if !active { save(draft) }
+            }).accessibilityLabel(title)
+            HStack { Text("Opaque"); Spacer(); Text("More transparent") }
+                .font(.caption).foregroundStyle(.secondary)
+        }.onAppear { draft = value }
+            .onChange(of: value) { _, updated in if !editing { draft = updated } }
+    }
 }

@@ -113,7 +113,7 @@ func removedClaudeCLIStillAllowsAccountRemovalWithoutLosingStatusLine(userEdited
     try SnapshotCache(root: root).save(setupSnapshot("personal@example.com", at: Date()), for: account)
     let store = AppStore(root: root, monitor: false)
     store.accounts = [account]
-    store.setMenuDisplay(.byAccount) // Persists the fixture settings.
+    store.setMenuDisplay(.byProvider) // Change a preference to persist the fixture settings.
     await store.shutdown()
     let reloaded = AppStore(root: root, monitor: false)
     #expect(reloaded.snapshots[account.id] == nil)

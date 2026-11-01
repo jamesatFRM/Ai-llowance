@@ -87,3 +87,47 @@ import UsageCore
     #expect(restored.menuPreferences.liquidGlass)
     await store.shutdown(); await loaded.shutdown(); await restored.shutdown()
 }
+
+@MainActor @Test func glassLayerDoesNotCaptureClicksOrWindowDrags() {
+    let glass = PassiveGlassView(frame: NSRect(x: 0, y: 0, width: 400, height: 300))
+    #expect(glass.hitTest(NSPoint(x: 100, y: 100)) == nil)
+    #expect(!glass.mouseDownCanMoveWindow)
+    #expect(!glass.acceptsFirstResponder)
+}
+
+@MainActor @Test func transparencyPreferencesAreIndependentAndPersisted() async throws {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent("Transparency-\(UUID().uuidString)")
+    try Paths.prepare(root)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let defaults = try JSONDecoder().decode(MenuPreferences.self, from: Data("{}".utf8))
+    #expect(defaults.dashboardTransparency == 0.75)
+    #expect(defaults.dropdownTransparency == 0.75)
+    let store = AppStore(root: root, monitor: false)
+    store.setDashboardTransparency(0.25)
+    store.setDropdownTransparency(0.9)
+    let loaded = AppStore(root: root, monitor: false)
+    #expect(loaded.menuPreferences.dashboardTransparency == 0.25)
+    #expect(loaded.menuPreferences.dropdownTransparency == 0.9)
+    store.setDashboardTransparency(-1)
+    store.setDropdownTransparency(2)
+    #expect(store.menuPreferences.dashboardTransparency == 0)
+    #expect(store.menuPreferences.dropdownTransparency == 1)
+    store.setDashboardTransparency(.nan)
+    #expect(store.menuPreferences.dashboardTransparency == 0)
+    await store.shutdown(); await loaded.shutdown()
+}
+
+@MainActor @Test func unchangedPreferencesDoNotRewriteSettings() async throws {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent("UnchangedSettings-\(UUID().uuidString)")
+    try Paths.prepare(root)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let store = AppStore(root: root, monitor: false)
+    store.setDashboardTransparency(0.5)
+    let file = root.appendingPathComponent("accounts.json")
+    let before = try FileManager.default.attributesOfItem(atPath: file.path)
+    store.setDashboardTransparency(0.5)
+    let after = try FileManager.default.attributesOfItem(atPath: file.path)
+    #expect(before[.modificationDate] as? Date == after[.modificationDate] as? Date)
+    #expect(before[.systemFileNumber] as? NSNumber == after[.systemFileNumber] as? NSNumber)
+    await store.shutdown()
+}
