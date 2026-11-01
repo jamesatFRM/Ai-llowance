@@ -32,6 +32,7 @@ private extension EnvironmentValues {
     }
 }
 private struct DesktopGlass: NSViewRepresentable {
+    @Environment(\.colorScheme) private var scheme
     func makeNSView(context: Context) -> NSVisualEffectView {
         let view = NSVisualEffectView()
         view.material = .hudWindow
@@ -39,7 +40,9 @@ private struct DesktopGlass: NSViewRepresentable {
         view.state = .active
         return view
     }
-    func updateNSView(_ view: NSVisualEffectView, context: Context) {}
+    func updateNSView(_ view: NSVisualEffectView, context: Context) {
+        view.appearance = NSAppearance(named: scheme == .dark ? .darkAqua : .aqua)
+    }
 }
 
 // One native material backing; cards use inexpensive translucent fills.
@@ -53,6 +56,7 @@ private struct WorkspaceBackground: View {
                 Color(nsColor: .windowBackgroundColor)
             } else {
                 DesktopGlass()
+                    .overlay(scheme == .dark ? Color.black.opacity(0.24) : Color.white.opacity(0.15))
             }
             if !reduceTransparency && liquidGlass {
                 RadialGradient(colors: [Color.mint.opacity(scheme == .dark ? 0.10 : 0.06), .clear], center: .topLeading, startRadius: 0, endRadius: 650)
@@ -1687,7 +1691,7 @@ private struct HistoryCard: View {
                                 PointMark(x: .value("Time", sample.timestamp), y: .value(metric, sample.value))
                                     .foregroundStyle(Color.clear).symbolSize(0)
                             } else if effectiveStyle == .bars {
-                                BarMark(x: .value("Time", sample.timestamp), y: .value(metric, sample.value), width: .ratio(0.65))
+                                BarMark(x: .value("Time", sample.timestamp), y: .value(metric, sample.value), width: .fixed(6))
                                     .foregroundStyle(LinearGradient(colors: [graphTint, graphTint.opacity(0.18)], startPoint: .top, endPoint: .bottom))
                                     .cornerRadius(2)
                             } else if effectiveStyle == .dots {
