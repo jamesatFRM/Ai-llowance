@@ -53,3 +53,21 @@ import UsageCore
     }
     await store.shutdown()
 }
+
+@MainActor @Test func menuOrderPersistsAcrossRestartAndResets() async throws {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent("MenuOrder-\(UUID().uuidString)")
+    try Paths.prepare(root)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let store = AppStore(root: root, monitor: false)
+    let a = Account(name: "Claude", kind: .claudeCode)
+    let b = Account(name: "Codex", kind: .codex)
+    store.accounts = [a, b]
+    store.moveMenuAccount(b.id, offset: -1)
+    let loaded = AppStore(root: root, monitor: false)
+    #expect(loaded.orderedMenuAccounts.map(\.id) == [b.id, a.id])
+    loaded.moveMenuAccount(b.id, offset: -1)
+    #expect(loaded.orderedMenuAccounts.map(\.id) == [b.id, a.id])
+    loaded.resetMenuAccountOrder()
+    #expect(loaded.orderedMenuAccounts.map(\.id) == [a.id, b.id])
+    await store.shutdown(); await loaded.shutdown()
+}

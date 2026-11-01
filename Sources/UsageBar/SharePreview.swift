@@ -1,5 +1,6 @@
 import AppKit
 import SwiftUI
+import UsageCore
 
 /// Shareable artifact rendered from the actual views and a strictly in-memory demo store.
 struct SharePreview: View {
@@ -10,7 +11,7 @@ struct SharePreview: View {
                 ForEach(Array(store.menuEntries.enumerated()), id: \.offset) { _, entry in
                     HStack(spacing: 4) {
                         ProviderMark(provider: entry.provider, size: 13)
-                        Text(entry.remainingPercent.map { "\(Int($0))%" } ?? "0%")
+                        Text(MenuEntryPresentation.title(entry, preferences: store.menuPreferences))
                             .font(.system(size: 12, weight: .medium)).monospacedDigit()
                     }
                 }

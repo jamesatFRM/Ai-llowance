@@ -71,8 +71,9 @@ public struct MenuPreferences: Codable, Equatable, Sendable {
     public var colorByAllowance = false
     public var allAccounts = true
     public var selectedAccountIDs: Set<UUID> = []
+    public var accountOrder: [UUID] = []
     public init() {}
-    private enum CodingKeys: String, CodingKey { case dashboardChartFullScale, dashboardChartStyle, dropdownShowEmails, dropdownShowResets, dropdownShowBars, dropdownShowHeadings, dropdownRoomyRows, sessionMenuLabel, weeklyMenuLabel, showSessionInMenuBar, colorByAllowance, theme, display, aggregation, showAccountNames, detailedQuotaLabels, allAccounts, selectedAccountIDs }
+    private enum CodingKeys: String, CodingKey { case accountOrder, dashboardChartFullScale, dashboardChartStyle, dropdownShowEmails, dropdownShowResets, dropdownShowBars, dropdownShowHeadings, dropdownRoomyRows, sessionMenuLabel, weeklyMenuLabel, showSessionInMenuBar, colorByAllowance, theme, display, aggregation, showAccountNames, detailedQuotaLabels, allAccounts, selectedAccountIDs }
     public init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
         dashboardChartFullScale = try values.decodeIfPresent(Bool.self, forKey: .dashboardChartFullScale) ?? false
@@ -92,6 +93,7 @@ public struct MenuPreferences: Codable, Equatable, Sendable {
         detailedQuotaLabels = try values.decodeIfPresent(Bool.self, forKey: .detailedQuotaLabels) ?? false
         colorByAllowance = try values.decodeIfPresent(Bool.self, forKey: .colorByAllowance) ?? false
         allAccounts = try values.decodeIfPresent(Bool.self, forKey: .allAccounts) ?? true
+        accountOrder = try values.decodeIfPresent([UUID].self, forKey: .accountOrder) ?? []
         selectedAccountIDs = try values.decodeIfPresent(Set<UUID>.self, forKey: .selectedAccountIDs) ?? []
     }
 }
@@ -145,14 +147,24 @@ extension Snapshot {
 }
 
 public enum MenuSummary {
+    /// Preserve the old provider order until customized; new accounts append.
+    public static func orderedAccounts(_ accounts: [Account], preferences: MenuPreferences) -> [Account] {
+        let defaults = MenuProvider.allCases.flatMap { provider in accounts.filter { $0.kind.provider == provider } }
+        var seen = Set<UUID>()
+        let saved = preferences.accountOrder.compactMap { id in
+            accounts.first { $0.id == id }
+        }.filter { seen.insert($0.id).inserted }
+        return saved + defaults.filter { seen.insert($0.id).inserted }
+    }
+
     public static func entries(accounts: [Account], snapshots: [UUID: Snapshot], unavailable: Set<UUID>,
                                preferences: MenuPreferences, now: Date, lastKnown: Set<UUID> = []) -> [MenuEntry] {
         let duplicateIDs = duplicateSubscriptionAccountIDs(in: accounts, snapshots: snapshots)
-        let selected = accounts.filter {
+        let selected = orderedAccounts(accounts, preferences: preferences).filter {
             $0.enabled && (!$0.kind.isAPI || $0.kind.isBalance)
                 && (preferences.allAccounts || preferences.selectedAccountIDs.contains($0.id))
         }
-        func provider(_ account: Account) -> MenuProvider { account.kind.provider }
+
         func identityMatches(_ snapshot: Snapshot, account: Account) -> Bool {
             guard !duplicateIDs.contains(account.id) else { return false }
             guard let expected = CodexIdentity.normalized(account.expectedIdentity) else { return true }
@@ -208,7 +220,7 @@ public enum MenuSummary {
                (!snapshot.isStale(at: now) || lastKnown.contains(account.id)), snapshot.providerRestricted != true {
                 balance = snapshot.balanceUSD
             } else { balance = nil }
-            var result = MenuEntry(provider: provider(account), label: account.name, remainingPercent: nil,
+            var result = MenuEntry(provider: account.kind.provider, label: account.name, remainingPercent: nil,
                              accountCount: 1, balanceUSD: balance, isBalance: true, colorHex: account.menuColorHex)
             result.isLastKnown = lastKnown.contains(account.id) && balance != nil
             return result
@@ -225,16 +237,16 @@ public enum MenuSummary {
             return (allowances.isEmpty ? [] : [entry(allowances, label: "All accounts", icon: nil)])
                 + balanceAccounts().map(balanceEntry)
         case .byProvider:
-            return MenuProvider.allCases.flatMap { icon in
+            var seenProviders = Set<MenuProvider>()
+            let providers = selected.map { $0.kind.provider }.filter { seenProviders.insert($0).inserted }
+            return providers.flatMap { icon in
                 let group = allowanceAccounts(icon)
                 let allowance = group.isEmpty ? [] : [entry(group, label: icon.title, icon: icon)]
                 return allowance + balanceAccounts(icon).map(balanceEntry)
             }
         case .byAccount:
-            return MenuProvider.allCases.flatMap { icon in
-                selected.filter { provider($0) == icon }.map { account in
-                    account.kind.isBalance ? balanceEntry(account) : entry([account], label: account.name, icon: icon)
-                }
+            return selected.map { account in
+                account.kind.isBalance ? balanceEntry(account) : entry([account], label: account.name, icon: account.kind.provider)
             }
         }
     }

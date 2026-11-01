@@ -33,6 +33,10 @@ private struct WorkspaceBackground: View {
             } else {
                 Rectangle().fill(.regularMaterial)
             }
+            if !reduceTransparency {
+                RadialGradient(colors: [Color.mint.opacity(scheme == .dark ? 0.10 : 0.06), .clear], center: .topLeading, startRadius: 0, endRadius: 650)
+                RadialGradient(colors: [Color.purple.opacity(scheme == .dark ? 0.09 : 0.045), .clear], center: .bottomTrailing, startRadius: 0, endRadius: 650)
+            }
             LinearGradient(colors: scheme == .dark
                 ? [Color.white.opacity(0.055), Color.white.opacity(0.015), Color.black.opacity(0.10)]
                 : [Color.white.opacity(0.55), Color.white.opacity(0.20), Color.black.opacity(0.025)],
@@ -80,8 +84,8 @@ private struct QuietButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .foregroundStyle(isEnabled ? Color.secondary : Color.secondary.opacity(0.45))
-            .background(Color.primary.opacity(configuration.isPressed ? 0.10 : 0.035), in: RoundedRectangle(cornerRadius: 6, style: .continuous))
-            .contentShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+            .background(Color.primary.opacity(configuration.isPressed ? 0.10 : 0.035), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .contentShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
     }
 }
 
@@ -382,22 +386,33 @@ private struct SparklineShape: Shape {
 }
 private struct SettingsCard<Content: View>: View {
     @Environment(\.colorScheme) private var scheme
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+    @Environment(\.colorSchemeContrast) private var contrast
     var inset: CGFloat = 14
+    var tint: Color = .clear
     @ViewBuilder let content: Content
     var body: some View {
         content.padding(inset).frame(maxWidth: .infinity, alignment: .leading)
             .background {
-                RoundedRectangle(cornerRadius: 18, style: .continuous)
-                    .fill(LinearGradient(colors: scheme == .dark ? [Color.white.opacity(0.085), Color.white.opacity(0.025)] : [Color.white.opacity(0.78), Color.white.opacity(0.38)], startPoint: .topLeading, endPoint: .bottomTrailing))
+                let shape = RoundedRectangle(cornerRadius: 24, style: .continuous)
+                shape.fill(Color(nsColor: .windowBackgroundColor).opacity(reduceTransparency ? 1 : scheme == .dark ? 0.38 : 0.64))
                     .overlay {
-                        RoundedRectangle(cornerRadius: 18, style: .continuous)
-                            .strokeBorder(LinearGradient(colors: [Color.white.opacity(scheme == .dark ? 0.20 : 0.85), Color.primary.opacity(0.055), Color.primary.opacity(0.10)], startPoint: .topLeading, endPoint: .bottomTrailing), lineWidth: 0.7)
+                        if !reduceTransparency {
+                            shape.fill(LinearGradient(colors: [
+                                Color.white.opacity(scheme == .dark ? 0.14 : 0.75),
+                                tint.opacity(0.045),
+                                Color.white.opacity(scheme == .dark ? 0.025 : 0.28)
+                            ], startPoint: .topLeading, endPoint: .bottomTrailing))
+                        }
                     }
-                    .overlay(alignment: .top) {
-                        RoundedRectangle(cornerRadius: 18, style: .continuous)
-                            .fill(LinearGradient(colors: [Color.white.opacity(0.045), .clear], startPoint: .top, endPoint: .bottom))
-                            .frame(height: 34).clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+                    .overlay {
+                        shape.strokeBorder(LinearGradient(colors: [
+                            Color.white.opacity(scheme == .dark ? 0.38 : 0.95),
+                            Color.primary.opacity(0.07),
+                            Color.white.opacity(scheme == .dark ? 0.14 : 0.60)
+                        ], startPoint: .topLeading, endPoint: .bottomTrailing), lineWidth: contrast == .increased ? 1.5 : 0.8)
                     }
+                    .shadow(color: Color.black.opacity(scheme == .dark ? 0.13 : 0.04), radius: 12, y: 5)
             }
     }
 }
@@ -846,7 +861,7 @@ struct AccountsView: View {
             if store.menuPreferences.dashboardChartStyle == .mixed {
                 if historyWidth >= 850 {
                     HStack(alignment: .top, spacing: 12) {
-                        UsageOverviewCharts(accounts: visibleHistoryAccounts, colorAccounts: store.accounts, histories: histories, now: store.now).frame(width: 360)
+                        UsageOverviewCharts(accounts: visibleHistoryAccounts, colorAccounts: store.accounts, histories: histories, now: store.now).frame(width: max(290, historyWidth * 0.34))
                         ActivityHeatmap(accounts: visibleHistoryAccounts, histories: histories, now: store.now)
                     }
                 } else {
@@ -1404,6 +1419,38 @@ struct AccountsView: View {
                             Text("Selected accounts").tag(false)
                         }.labelsHidden().frame(width: 190)
                     }
+                    Divider()
+                    HStack {
+                        Text("Icon order").fontWeight(.medium)
+                        Spacer()
+                        Button("Reset order") { store.resetMenuAccountOrder() }
+                            .disabled(store.menuPreferences.accountOrder.isEmpty)
+                    }
+                    Text("Top to bottom becomes left to right. Provider groups follow their first account. All together combines subscription icons.")
+                        .font(.callout).foregroundStyle(.secondary)
+                    ForEach(Array(store.orderedMenuAccounts.enumerated()), id: \.element.id) { index, account in
+                        HStack(spacing: 10) {
+                            ProviderMark(provider: account.kind.provider, size: 18)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(account.name)
+                                if let email = account.expectedIdentity {
+                                    Text(email).font(.caption).foregroundStyle(.secondary)
+                                }
+                            }
+                            Spacer()
+                            if !account.enabled || (!store.menuPreferences.allAccounts && !store.menuPreferences.selectedAccountIDs.contains(account.id)) {
+                                Text("Hidden").font(.caption).foregroundStyle(.secondary)
+                            }
+                            Button { store.moveMenuAccount(account.id, offset: -1) } label: {
+                                Image(systemName: "chevron.up").frame(width: 18, height: 18)
+                            }.disabled(index == 0).accessibilityLabel("Move \(account.name) left")
+                                .help("Move left in the menu bar")
+                            Button { store.moveMenuAccount(account.id, offset: 1) } label: {
+                                Image(systemName: "chevron.down").frame(width: 18, height: 18)
+                            }.disabled(index == store.orderedMenuAccounts.count - 1)
+                                .accessibilityLabel("Move \(account.name) right").help("Move right in the menu bar")
+                        }.padding(.vertical, 3)
+                    }
                     if !store.menuPreferences.allAccounts {
                         ForEach(store.accounts.filter { !$0.kind.isAPI || $0.kind.isBalance }) { account in
                             Toggle(account.name, isOn: Binding(get: { store.menuPreferences.selectedAccountIDs.contains(account.id) }, set: { store.setMenuAccount(account, included: $0) })).toggleStyle(.checkbox)
@@ -1537,38 +1584,55 @@ private struct HistoryCard: View {
         guard let window = snapshot.displayWindow(for: account.kind) else { return "Limit not reported" }
         return quotaReset(window.resetsAt)
     }
-    @ViewBuilder private var quotaSummary: some View {
-        HStack(alignment: .top, spacing: 12) {
-            VStack(alignment: .leading, spacing: 4) {
+    private var sessionQuota: QuotaWindow? {
+        guard !account.kind.isAPI, let session = snapshot?.sessionWindow(for: account.kind),
+              session.id != snapshot?.displayWindow(for: account.kind)?.id else { return nil }
+        return session
+    }
+    private var quotaSummary: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            Text(readingValue(snapshot, window: snapshot?.displayWindow(for: account.kind)))
+                .font(.system(size: 32, weight: .semibold, design: .rounded)).monospacedDigit()
+                .foregroundStyle(connection.saved ? Color.secondary : Color.primary)
+                .lineLimit(1).minimumScaleFactor(0.65)
+            HStack {
                 Text(primaryQuotaTitle)
-                    .font(.system(size: 10, weight: .medium)).foregroundStyle(.secondary)
-                Text(readingValue(snapshot, window: snapshot?.displayWindow(for: account.kind)))
-                    .font(.system(size: 25, weight: .semibold, design: .rounded)).monospacedDigit()
-                    .foregroundStyle(connection.saved ? Color.secondary : Color.primary)
-                Text(primaryQuotaDetail)
-                    .font(.system(size: 10)).foregroundStyle(.secondary).lineLimit(1).minimumScaleFactor(0.85)
-            }.frame(maxWidth: .infinity, alignment: .leading)
-            if !account.kind.isAPI, let session = snapshot?.sessionWindow(for: account.kind),
-               session.id != snapshot?.displayWindow(for: account.kind)?.id {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("5-hour allowance").font(.system(size: 10, weight: .medium)).foregroundStyle(.secondary)
-                    Text("\(Int(session.remainingPercent))% left")
-                        .font(.system(size: 18, weight: .semibold, design: .rounded)).monospacedDigit().frame(height: 30, alignment: .leading)
-                        .foregroundStyle(connection.saved ? Color.secondary : session.remainingPercent <= 20 ? Color.orange : Color.primary)
-                    Text(quotaReset(session.resetsAt)).font(.system(size: 10)).foregroundStyle(.secondary).lineLimit(1).minimumScaleFactor(0.85)
-                }.frame(maxWidth: .infinity, alignment: .leading)
+                Spacer(minLength: 4)
+                Text(primaryQuotaDetail).lineLimit(1).minimumScaleFactor(0.8)
+            }.font(.system(size: 10)).foregroundStyle(.secondary)
+        }.padding(.vertical, 5)
+    }
+    private var sessionSummary: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            if let session = sessionQuota {
+                HStack {
+                    Text("5-hour window")
+                    Spacer()
+                    Text("\(Int(session.remainingPercent))% left").monospacedDigit()
+                }.font(.system(size: 11, weight: .medium))
+                GeometryReader { geometry in
+                    Capsule().fill(Color.primary.opacity(0.065))
+                        .overlay(alignment: .leading) {
+                            Capsule().fill(graphTint.opacity(connection.saved ? 0.35 : 0.85))
+                                .frame(width: geometry.size.width * min(100, max(0, session.remainingPercent)) / 100)
+                        }
+                }.frame(height: 5)
+                Text(quotaReset(session.resetsAt)).font(.system(size: 9)).foregroundStyle(.secondary)
+            } else {
+                Label(snapshot?.primaryWeeklyWindow(for: account.kind) != nil ? "Weekly limits only" : "No additional limit reported", systemImage: "info.circle")
+                    .font(.system(size: 10)).foregroundStyle(.secondary)
             }
-        }.padding(.vertical, 2)
+        }.frame(maxWidth: .infinity, minHeight: 42, maxHeight: 42, alignment: .leading)
     }
 
     var body: some View {
         let series = effectiveStyle == .bars ? HistorySeries.barSamples(samples) : effectiveStyle == .dots ? samples : HistorySeries.smoothTrend(samples)
         let segmentCounts = Dictionary(grouping: series, by: \.segment).mapValues(\.count)
-        SettingsCard(inset: 12) {
-            VStack(alignment: .leading, spacing: 5) {
+        SettingsCard(inset: 18, tint: dashboardTint) {
+            VStack(alignment: .leading, spacing: 8) {
                 HStack(spacing: 7) {
-                    ProviderMark(provider: account.kind.provider, size: 16).foregroundStyle(dashboardTint)
-                    Text(account.name).font(.system(size: 12, weight: .semibold)).lineLimit(1)
+                    ProviderMark(provider: account.kind.provider, size: 23).foregroundStyle(dashboardTint)
+                    Text(account.name).font(.system(size: 14, weight: .semibold)).lineLimit(1)
                     Spacer(minLength: 4)
                     Image(systemName: connection.symbol).foregroundStyle(statusColor).help(connection.title)
                 }
@@ -1579,12 +1643,12 @@ private struct HistoryCard: View {
                     CurrentAllowanceChart(percent: snapshot?.displayWindow(for: account.kind)?.remainingPercent,
                                           style: effectiveStyle, tint: graphTint,
                                           saved: cached || error || status.state == .stale || !account.enabled)
-                        .frame(height: 78)
+                        .frame(height: 108)
                     Text("Remaining vs. used · current quota window")
                         .font(.system(size: 10)).foregroundStyle(.secondary).lineLimit(1)
                 } else if plotted.isEmpty {
                     Text("No readings in this range yet. History grows as this Mac refreshes your accounts.")
-                        .font(.system(size: 12)).foregroundStyle(.secondary).frame(maxWidth: .infinity).frame(height: 80)
+                        .font(.system(size: 12)).foregroundStyle(.secondary).frame(maxWidth: .infinity).frame(height: 108)
                 } else {
                     Chart {
                         ForEach(series) { sample in
@@ -1598,17 +1662,17 @@ private struct HistoryCard: View {
                             } else {
                             if effectiveStyle == .area || effectiveStyle == .glow {
                             AreaMark(x: .value("Time", sample.timestamp), yStart: .value("Baseline", plotDomain.lowerBound), yEnd: .value(metric, sample.value), series: .value("Period", "core-" + String(sample.segment)))
-                                .foregroundStyle(LinearGradient(stops: [.init(color: gradientAccent.opacity(0.40), location: 0), .init(color: graphTint.opacity(0.20), location: 0.35), .init(color: graphTint.opacity(0), location: 1)], startPoint: .top, endPoint: .bottom))
+                                .foregroundStyle(LinearGradient(stops: [.init(color: graphTint.opacity(0.44), location: 0), .init(color: graphTint.opacity(0.20), location: 0.35), .init(color: graphTint.opacity(0), location: 1)], startPoint: .top, endPoint: .bottom))
                                 .interpolationMethod(.monotone)
                             }
                             if effectiveStyle == .glow {
                                 LineMark(x: .value("Time", sample.timestamp), y: .value(metric, sample.value), series: .value("Period", "halo-" + String(sample.segment)))
-                                    .foregroundStyle(gradientAccent.opacity(0.12))
+                                    .foregroundStyle(graphTint.opacity(0.13))
                                     .lineStyle(StrokeStyle(lineWidth: 6, lineCap: .round, lineJoin: .round))
                                     .interpolationMethod(.monotone)
                             }
                             LineMark(x: .value("Time", sample.timestamp), y: .value(metric, sample.value), series: .value("Period", "core-" + String(sample.segment)))
-                                .foregroundStyle(LinearGradient(colors: [gradientAccent, graphTint, gradientAccent], startPoint: .leading, endPoint: .trailing))
+                                .foregroundStyle(LinearGradient(colors: [graphTint.opacity(0.75), graphTint, graphTint], startPoint: .leading, endPoint: .trailing))
                                 .lineStyle(StrokeStyle(lineWidth: 2.4, lineCap: .round, lineJoin: .round))
                                 .interpolationMethod(.monotone)
                             if sample.id == series.last?.id || segmentCounts[sample.segment] == 1 {
@@ -1660,7 +1724,7 @@ private struct HistoryCard: View {
                                 .allowsHitTesting(false)
                         }
                     }
-                    .frame(height: 76).padding(.top, 3).padding(.bottom, 2)
+                    .frame(height: 108).padding(.top, 3).padding(.bottom, 2)
                     if let last = plotted.last {
                         HStack {
                             Text(fittedTrend ? String(format: "Smoothed trend · %.0f–%.0f%%", plotDomain.lowerBound, plotDomain.upperBound) : effectiveStyle == .bars ? "Latest reading per time bucket" : historyCaption).lineLimit(1).help(fittedTrend ? "The trend uses a fitted vertical scale and one-hour smoothing. Hover for exact recorded readings. Switch to the full 0–100% scale in the chart menu. Missing intervals and resets are never connected." : "History uses the full scale. Hover for exact recorded readings; missing intervals and resets are not connected.")
@@ -1670,13 +1734,14 @@ private struct HistoryCard: View {
                     }
 
                 }
+                if !account.kind.isAPI { sessionSummary }
                 VStack(alignment: .leading, spacing: 3) {
                     Text(connection.title).font(.system(size: 10, weight: .medium)).foregroundStyle(statusColor)
                     Text(connection.detail).font(.system(size: 10)).foregroundStyle(.secondary).lineLimit(2)
-                }.frame(maxWidth: .infinity, minHeight: 40, maxHeight: 40, alignment: .topLeading)
+                }.frame(maxWidth: .infinity, minHeight: 32, maxHeight: 32, alignment: .topLeading)
                 HStack(spacing: 8) {
-                    Button(action: openUsage) { Label(connection.needsAction ? (needsReconnect ? (account.kind.isAPI ? "Manage API key" : "Reconnect account") : "Connection details") : "Open usage", systemImage: connection.needsAction ? "person.crop.circle.badge.exclamationmark" : "arrow.up.right").frame(maxWidth: .infinity).frame(height: 24) }
-                    Button(action: manage) { Image(systemName: "slider.horizontal.3").frame(width: 28, height: 24) }.help("Name & color").accessibilityLabel("Edit " + account.name)
+                    Button(action: openUsage) { Label(connection.needsAction ? (needsReconnect ? (account.kind.isAPI ? "Manage API key" : "Reconnect account") : "Connection details") : "Open usage", systemImage: connection.needsAction ? "person.crop.circle.badge.exclamationmark" : "arrow.up.right").frame(maxWidth: .infinity).frame(height: 28) }
+                    Button(action: manage) { Image(systemName: "slider.horizontal.3").frame(width: 28, height: 28) }.help("Name & color").accessibilityLabel("Edit " + account.name)
                 }.font(.system(size: 11, weight: .medium)).buttonStyle(QuietButtonStyle())
             }
         }
@@ -1697,14 +1762,14 @@ private struct ActivityHeatmap: View {
             for (hour, value) in hours where hour >= (days.first ?? today) && hour <= now { result[hour, default: 0] += value }
         }
         let peak = buckets.values.max() ?? 0
-        SettingsCard(inset: 10) {
+        SettingsCard(inset: 16) {
             VStack(alignment: .leading, spacing: 6) {
                 HStack {
                     Label("Allowance activity", systemImage: "square.grid.3x3.fill").font(.system(size: 13, weight: .semibold))
                     Spacer()
                     Text("Last 7 days · " + (calendar.timeZone.abbreviation() ?? calendar.timeZone.identifier)).font(.system(size: 10)).foregroundStyle(.secondary)
                 }
-                Grid(horizontalSpacing: 4, verticalSpacing: 1) {
+                Grid(horizontalSpacing: 4, verticalSpacing: 3) {
                     GridRow {
                         Color.clear.frame(width: 62, height: 12)
                         ForEach(0..<24) { hour in
@@ -1873,7 +1938,7 @@ private struct UsageOverviewCharts: View {
         let records = readings
         let totals = eligible.map { account in (account, records.filter { $0.account == account.id }.reduce(0) { $0 + $1.value }) }
         let total = totals.reduce(0) { $0 + $1.1 }
-        SettingsCard(inset: 10) {
+        SettingsCard(inset: 16) {
             VStack(alignment: .leading, spacing: 6) {
                 HStack {
                     Text("Usage mix").font(.system(size: 13, weight: .semibold))
@@ -1886,13 +1951,13 @@ private struct UsageOverviewCharts: View {
                             ForEach(eligible) { account in
                                 let amount = totals.first { $0.0.id == account.id }?.1 ?? 0
                                 if amount > 0 {
-                                    SectorMark(angle: .value("Allowance points", amount), innerRadius: .ratio(0.6), angularInset: 2)
+                                    SectorMark(angle: .value("Allowance points", amount), innerRadius: .ratio(0.68), angularInset: 3)
                                         .foregroundStyle(tint(account).gradient).cornerRadius(3)
                                         .accessibilityLabel(account.name)
                                         .accessibilityValue(String(format: "%.1f allowance points, %.0f percent of observed consumption", amount, amount / total * 100))
                                 }
                             }
-                        }.frame(width: 82, height: 82)
+                        }.frame(width: 94, height: 94)
                             .overlay { VStack(spacing: 1) {
                                 Text(String(format: "%.0f", total)).font(.system(size: 17, weight: .semibold, design: .rounded))
                                 Text("points").font(.system(size: 9)).foregroundStyle(.secondary)

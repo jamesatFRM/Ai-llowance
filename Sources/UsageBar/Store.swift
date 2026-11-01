@@ -218,6 +218,16 @@ final class AppStore: ObservableObject {
         change(&menuPreferences)
         do { try persist() } catch { menuPreferences = previous; notice = "Could not save the menu-bar setting." }
     }
+    var orderedMenuAccounts: [Account] {
+        MenuSummary.orderedAccounts(accounts.filter { !$0.kind.isAPI || $0.kind.isBalance }, preferences: menuPreferences)
+    }
+    func moveMenuAccount(_ id: UUID, offset: Int) {
+        var ids = orderedMenuAccounts.map(\.id)
+        guard let index = ids.firstIndex(of: id), ids.indices.contains(index + offset) else { return }
+        ids.swapAt(index, index + offset)
+        updateMenu { $0.accountOrder = ids }
+    }
+    func resetMenuAccountOrder() { updateMenu { $0.accountOrder = [] } }
     func setDashboardChartFullScale(_ value: Bool) { updateMenu { $0.dashboardChartFullScale = value } }
     func setDashboardChartStyle(_ value: DashboardChartStyle) { updateMenu { $0.dashboardChartStyle = value } }
     func setTheme(_ value: AppTheme) { updateMenu { $0.theme = value } }
@@ -625,7 +635,12 @@ final class AppStore: ObservableObject {
                 claudeSignedIn[account.id] = true
                 if notice?.hasPrefix("Finish Claude’s browser sign-in once.") == true { notice = nil }
                 // Once direct usage works, restore the user's old status line. No bridge is needed.
-                do { if restoredLegacyFeeds.insert(account.id).inserted { try claudeConnection().uninstall(account: account) } }
+                do {
+                    if !restoredLegacyFeeds.contains(account.id) {
+                        try claudeConnection().uninstall(account: account)
+                        restoredLegacyFeeds.insert(account.id)
+                    }
+                }
                 catch { notice = "Usage is connected, but the previous status-line setting could not be restored automatically." }
             }
         } catch is CancellationError { return }
