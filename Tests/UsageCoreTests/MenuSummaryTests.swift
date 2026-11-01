@@ -155,3 +155,19 @@ private func weeklyReading(_ remaining: Double, kind: ConnectionKind, sessionRem
     #expect(entry.isLastKnown)
     #expect(MenuEntryPresentation.value(entry, preferences: MenuPreferences()).hasPrefix("~"))
 }
+
+@Test func customMenuOrderSurvivesEncodingAndHandlesDeletedAndNewAccounts() throws {
+    let a = Account(name: "Claude A", kind: .claudeCode)
+    let b = Account(name: "Codex", kind: .codex)
+    let c = Account(name: "Claude B", kind: .claudeCode)
+    var preferences = MenuPreferences()
+    preferences.accountOrder = [b.id, UUID(), c.id, b.id]
+    preferences = try JSONDecoder().decode(MenuPreferences.self, from: JSONEncoder().encode(preferences))
+    #expect(MenuSummary.orderedAccounts([a, b, c], preferences: preferences).map(\.id) == [b.id, c.id, a.id])
+    let entries = MenuSummary.entries(accounts: [a, b, c], snapshots: [:], unavailable: [], preferences: preferences, now: menuTime)
+    #expect(entries.map(\.label) == ["Codex", "Claude B", "Claude A"])
+    preferences.display = .byProvider
+    #expect(MenuSummary.entries(accounts: [a, b, c], snapshots: [:], unavailable: [], preferences: preferences, now: menuTime).map(\.provider) == [.openAI, .claude])
+    let legacy = try JSONDecoder().decode(MenuPreferences.self, from: Data("{}".utf8))
+    #expect(MenuSummary.orderedAccounts([b, a, c], preferences: legacy).map(\.id) == [a.id, c.id, b.id])
+}

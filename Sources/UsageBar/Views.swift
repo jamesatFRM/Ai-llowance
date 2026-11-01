@@ -1404,6 +1404,38 @@ struct AccountsView: View {
                             Text("Selected accounts").tag(false)
                         }.labelsHidden().frame(width: 190)
                     }
+                    Divider()
+                    HStack {
+                        Text("Icon order").fontWeight(.medium)
+                        Spacer()
+                        Button("Reset order") { store.resetMenuAccountOrder() }
+                            .disabled(store.menuPreferences.accountOrder.isEmpty)
+                    }
+                    Text("Top to bottom becomes left to right. Provider groups follow their first account. All together combines subscription icons.")
+                        .font(.callout).foregroundStyle(.secondary)
+                    ForEach(Array(store.orderedMenuAccounts.enumerated()), id: \.element.id) { index, account in
+                        HStack(spacing: 10) {
+                            ProviderMark(provider: account.kind.provider, size: 18)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(account.name)
+                                if let email = account.expectedIdentity {
+                                    Text(email).font(.caption).foregroundStyle(.secondary)
+                                }
+                            }
+                            Spacer()
+                            if !account.enabled || (!store.menuPreferences.allAccounts && !store.menuPreferences.selectedAccountIDs.contains(account.id)) {
+                                Text("Hidden").font(.caption).foregroundStyle(.secondary)
+                            }
+                            Button { store.moveMenuAccount(account.id, offset: -1) } label: {
+                                Image(systemName: "chevron.up").frame(width: 18, height: 18)
+                            }.disabled(index == 0).accessibilityLabel("Move \(account.name) left")
+                                .help("Move left in the menu bar")
+                            Button { store.moveMenuAccount(account.id, offset: 1) } label: {
+                                Image(systemName: "chevron.down").frame(width: 18, height: 18)
+                            }.disabled(index == store.orderedMenuAccounts.count - 1)
+                                .accessibilityLabel("Move \(account.name) right").help("Move right in the menu bar")
+                        }.padding(.vertical, 3)
+                    }
                     if !store.menuPreferences.allAccounts {
                         ForEach(store.accounts.filter { !$0.kind.isAPI || $0.kind.isBalance }) { account in
                             Toggle(account.name, isOn: Binding(get: { store.menuPreferences.selectedAccountIDs.contains(account.id) }, set: { store.setMenuAccount(account, included: $0) })).toggleStyle(.checkbox)

@@ -218,6 +218,16 @@ final class AppStore: ObservableObject {
         change(&menuPreferences)
         do { try persist() } catch { menuPreferences = previous; notice = "Could not save the menu-bar setting." }
     }
+    var orderedMenuAccounts: [Account] {
+        MenuSummary.orderedAccounts(accounts.filter { !$0.kind.isAPI || $0.kind.isBalance }, preferences: menuPreferences)
+    }
+    func moveMenuAccount(_ id: UUID, offset: Int) {
+        var ids = orderedMenuAccounts.map(\.id)
+        guard let index = ids.firstIndex(of: id), ids.indices.contains(index + offset) else { return }
+        ids.swapAt(index, index + offset)
+        updateMenu { $0.accountOrder = ids }
+    }
+    func resetMenuAccountOrder() { updateMenu { $0.accountOrder = [] } }
     func setDashboardChartFullScale(_ value: Bool) { updateMenu { $0.dashboardChartFullScale = value } }
     func setDashboardChartStyle(_ value: DashboardChartStyle) { updateMenu { $0.dashboardChartStyle = value } }
     func setTheme(_ value: AppTheme) { updateMenu { $0.theme = value } }
