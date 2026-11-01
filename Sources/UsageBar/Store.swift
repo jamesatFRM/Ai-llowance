@@ -871,6 +871,7 @@ final class AppStore: ObservableObject {
         var points = usageHistory[account.id] ?? []
         var point = UsageHistoryPoint(timestamp: snapshot.observedAt, remainingPercent: snapshot.displayWindow(for: account.kind)?.remainingPercent, balanceUSD: snapshot.balanceUSD, costUSD: snapshot.costUSD, windowID: snapshot.displayWindow(for: account.kind)?.id, resetsAt: snapshot.displayWindow(for: account.kind)?.resetsAt)
         let interval = refreshInterval(for: account.kind, visible: interfaceVisible, lowPower: ProcessInfo.processInfo.isLowPowerModeEnabled)
+        point.windowDurationMinutes = snapshot.displayWindow(for: account.kind)?.durationMinutes
         point.sessionRemainingPercent = snapshot.sessionWindow(for: account.kind)?.remainingPercent
         point.sessionResetsAt = snapshot.sessionWindow(for: account.kind)?.resetsAt
         point.continuityInterval = min(4500, max(1800, interval * 1.25))

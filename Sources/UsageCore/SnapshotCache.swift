@@ -22,6 +22,7 @@ public struct UsageHistoryPoint: Codable, Equatable, Identifiable, Sendable {
     public var sessionRemainingPercent: Double?
     public var sessionResetsAt: Date?
     public var continuityInterval: TimeInterval?
+    public var windowDurationMinutes: Int?
     public init(timestamp: Date, remainingPercent: Double? = nil, balanceUSD: Decimal? = nil, costUSD: Decimal? = nil, windowID: String? = nil, resetsAt: Date? = nil) {
         self.timestamp = timestamp; self.remainingPercent = remainingPercent; self.balanceUSD = balanceUSD; self.costUSD = costUSD
         self.windowID = windowID; self.resetsAt = resetsAt
@@ -121,7 +122,7 @@ public struct SnapshotCache: Sendable {
         let duplicates = duplicateSubscriptionAccountIDs(in: accounts)
         return accounts.filter { !duplicates.contains($0.id) }.reduce(into: [:]) { result, account in
             if let record = read(account, now: now) {
-                result[account.id] = (record.usageDays ?? ConsumptionHistory.rebuild(record.history, kind: account.kind))
+                result[account.id] = (record.usageDays.flatMap { $0.isEmpty ? nil : $0 } ?? ConsumptionHistory.rebuild(record.history, kind: account.kind))
                     .filter { $0.day >= HistoryTrends.calendar.startOfDay(for: now).addingTimeInterval(-359 * 86400) }
             }
         }
@@ -137,7 +138,7 @@ public struct SnapshotCache: Sendable {
         // saved value backwards or leave history newer than its snapshot.
         if let existing, existing.snapshot.observedAt > snapshot.observedAt { return existing.history }
         var history = existing?.history ?? []
-        var usageDays = existing?.usageDays ?? ConsumptionHistory.rebuild(history, kind: account.kind)
+        var usageDays = existing?.usageDays.flatMap { $0.isEmpty ? nil : $0 } ?? ConsumptionHistory.rebuild(history, kind: account.kind)
         history.removeAll { snapshot.observedAt.timeIntervalSince($0.timestamp) > Self.retention }
         let status = AllowanceStatus.evaluate(snapshot: snapshot, kind: account.kind, now: snapshot.observedAt)
         if ![.unavailable, .stale, .restricted].contains(status.state) {
@@ -145,6 +146,7 @@ public struct SnapshotCache: Sendable {
                                           balanceUSD: snapshot.balanceUSD, costUSD: snapshot.costUSD,
                                           windowID: snapshot.displayWindow(for: account.kind)?.id,
                                           resetsAt: snapshot.displayWindow(for: account.kind)?.resetsAt)
+            point.windowDurationMinutes = snapshot.displayWindow(for: account.kind)?.durationMinutes
             point.sessionRemainingPercent = snapshot.sessionWindow(for: account.kind)?.remainingPercent
             point.sessionResetsAt = snapshot.sessionWindow(for: account.kind)?.resetsAt
             point.continuityInterval = min(4500, max(1800, interval * 1.25))
