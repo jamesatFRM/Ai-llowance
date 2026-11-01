@@ -81,3 +81,13 @@ private func usagePoint(_ seconds: Double, _ remaining: Double, reset: Double = 
     late.continuityInterval = 4500
     #expect(ConsumptionHistory.rebuild([first, late], kind: .openAIAPI).isEmpty)
 }
+
+@Test func codexWeeklyPrimaryUsesDurationAndMigratesUnambiguousLegacyHistory() {
+    var a = UsageHistoryPoint(timestamp: usageStart, remainingPercent: 90, windowID: "codex.Primary", resetsAt: usageStart.addingTimeInterval(86400))
+    var b = UsageHistoryPoint(timestamp: usageStart.addingTimeInterval(300), remainingPercent: 85, windowID: "codex.Primary", resetsAt: usageStart.addingTimeInterval(86400))
+    #expect(ConsumptionHistory.rebuild([a,b], kind: .codex).first?.weekly?.amount == 5)
+    a.windowDurationMinutes = 300; b.windowDurationMinutes = 300
+    #expect(ConsumptionHistory.rebuild([a,b], kind: .codex).isEmpty)
+    a.windowDurationMinutes = 10080; b.windowDurationMinutes = 10080
+    #expect(ConsumptionHistory.rebuild([a,b], kind: .codex).first?.weekly?.amount == 5)
+}

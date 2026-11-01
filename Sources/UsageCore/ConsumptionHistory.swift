@@ -31,9 +31,13 @@ public struct ConsumptionBucket: Identifiable, Sendable {
 
 /// Deltas from continuous, same-window observations only. Refills, resets and gaps add no usage.
 public enum ConsumptionHistory {
-    private static func weeklyID(_ id: String?) -> Bool {
-        let id = id?.lowercased() ?? ""
-        return id.contains("week") || id.contains("secondary") || id == "7-day"
+    private static func isWeekly(_ point: UsageHistoryPoint) -> Bool {
+        if let duration = point.windowDurationMinutes { return duration == 10080 }
+        let id = point.windowID?.lowercased() ?? ""
+        if id.contains("week") || id == "7-day" { return true }
+        // Legacy Codex records omitted duration. A reset beyond five hours rules
+        // out the short window; do not infer ambiguous near-reset samples.
+        return id.hasPrefix("codex.") && (point.resetsAt?.timeIntervalSince(point.timestamp) ?? 0) > 5 * 3600
     }
     private static func sameReset(_ a: Date?, _ b: Date?) -> Bool {
         switch (a,b) {
@@ -50,7 +54,7 @@ public enum ConsumptionHistory {
             if duration > 0 && duration <= limit {
                 var weekly: Double?, session: Double?, money: Double?
                 if !kind.isAPI {
-                    if weeklyID(previous.windowID), previous.windowID == current.windowID,
+                    if isWeekly(previous), isWeekly(current), previous.windowID == current.windowID,
                        sameReset(previous.resetsAt, current.resetsAt),
                        let a = previous.remainingPercent, let b = current.remainingPercent, a >= b { weekly = a-b }
                     if sameReset(previous.sessionResetsAt, current.sessionResetsAt),
