@@ -20,6 +20,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
     private var renderedPreferences: MenuPreferences?
     private let store = AppStore(demo: Bundle.main.object(forInfoDictionaryKey: "AILSamplePreview") as? Bool == true || CommandLine.arguments.contains("--demo") || CommandLine.arguments.contains("--preview") || CommandLine.arguments.contains("--export-preview"))
     func applicationDidFinishLaunching(_ notification: Notification) {
+        installMainMenu()
         NSApp.setActivationPolicy((UserDefaults.standard.object(forKey: "hideFromDock") as? Bool ?? true) ? .accessory : .regular)
         if let index = CommandLine.arguments.firstIndex(of: "--export-preview"), CommandLine.arguments.count > index + 1 {
             do { try SharePreview.export(store: store, directory: URL(fileURLWithPath: CommandLine.arguments[index + 1])) }
@@ -220,6 +221,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
             if panel.appearance?.name != appearance?.name { panel.appearance = appearance }
         }
     }
+    private func installMainMenu() {
+        let menu = NSMenu()
+        let applicationItem = NSMenuItem(title: "Ai-llowance", action: nil, keyEquivalent: "")
+        let applicationMenu = NSMenu(title: "Ai-llowance")
+        applicationMenu.addItem(withTitle: "Quit Ai-llowance", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+        applicationItem.submenu = applicationMenu
+        menu.addItem(applicationItem)
+        let editItem = NSMenuItem(title: "Edit", action: nil, keyEquivalent: "")
+        let edit = NSMenu(title: "Edit")
+        for (title, action, key) in [("Undo", "undo:", "z"), ("Redo", "redo:", "Z"), ("Cut", "cut:", "x"), ("Copy", "copy:", "c"), ("Paste", "paste:", "v"), ("Select All", "selectAll:", "a")] {
+            edit.addItem(withTitle: title, action: Selector(action), keyEquivalent: key)
+        }
+        editItem.submenu = edit
+        menu.addItem(editItem)
+        NSApp.mainMenu = menu
+    }
+
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool { showAccounts(); return true }
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         removeClickMonitors()

@@ -804,6 +804,7 @@ struct AccountsView: View {
                         }.buttonStyle(.plain).help(account.expectedIdentity ?? account.name)
                     }
                 }
+                Spacer(minLength: 0)
                 HStack {
                     if let recommended {
                         Button(kind == .claudeCode ? "Open Claude Code" : "Open Codex") { store.useAccount(recommended) }.controlSize(.small).disabled(store.demo)
@@ -817,7 +818,7 @@ struct AccountsView: View {
                     }
                 }
 
-            }
+            }.frame(height: CGFloat(max(120, 64 + 32 * (serviceKinds.map { kind in store.accounts.filter { $0.kind == kind }.count }.max() ?? 0))), alignment: .topLeading)
         }
     }
     private func connectService(_ kind: ConnectionKind) {
@@ -1823,6 +1824,7 @@ private struct HistoryCard: View {
 
                 }
                 if !account.kind.isAPI { sessionSummary }
+                else { Color.clear.frame(height: 42).accessibilityHidden(true) }
                 VStack(alignment: .leading, spacing: 3) {
                     Text(connection.title).font(.system(size: 10, weight: .medium)).foregroundStyle(statusColor)
                     Text(connection.detail).font(.system(size: 10)).foregroundStyle(.secondary).lineLimit(2)
