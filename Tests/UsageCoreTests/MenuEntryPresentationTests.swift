@@ -69,11 +69,13 @@ import Testing
     preferences.dropdownShowEmails = true
     preferences.dropdownShowResets = false
     preferences.dropdownShowBars = false
+    preferences.dropdownShowRecentUsage = true
     preferences.dropdownShowHeadings = false
     preferences.dropdownRoomyRows = true
     let restored = try JSONDecoder().decode(MenuPreferences.self, from: JSONEncoder().encode(preferences))
     #expect(restored == preferences)
     let legacy = try JSONDecoder().decode(MenuPreferences.self, from: Data("{}".utf8))
+    #expect(!legacy.dropdownShowRecentUsage)
     #expect(!legacy.dropdownShowEmails && legacy.dropdownShowResets && legacy.dropdownShowBars && legacy.dropdownShowHeadings && !legacy.dropdownRoomyRows)
     #expect(restored.showSessionInMenuBar && !restored.detailedQuotaLabels)
 }

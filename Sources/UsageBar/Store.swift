@@ -113,8 +113,10 @@ final class AppStore: ObservableObject {
                 usageHistory[account.id] = (0...48).map { sample in
                     let progress = Double(sample) / 48
                     let used = (1 - cos(progress * .pi)) / 2
-                    return UsageHistoryPoint(timestamp: now.addingTimeInterval(Double(sample - 48) * 1800 - (index == 2 ? 480 : 0)),
+                    var point = UsageHistoryPoint(timestamp: now.addingTimeInterval(Double(sample - 48) * 1800 - (index == 2 ? 480 : 0)),
                         remainingPercent: 100 - (100 - remaining) * used, windowID: windows[0].id, resetsAt: windows[0].resetsAt)
+                    point.windowDurationMinutes = windows[0].durationMinutes
+                    return point
                 }
                 if (CommandLine.arguments.contains("--history") || Bundle.main.object(forInfoDictionaryKey: "AILHistoryPreview") as? Bool == true) {
                     let older = (2...359).reversed().map { day -> UsageHistoryPoint in
@@ -259,6 +261,7 @@ final class AppStore: ObservableObject {
     func setShowSessionInMenuBar(_ value: Bool) { updateMenu { $0.showSessionInMenuBar = value } }
     func setDropdownShowEmails(_ value: Bool) { updateMenu { $0.dropdownShowEmails = value } }
     func setDropdownShowResets(_ value: Bool) { updateMenu { $0.dropdownShowResets = value } }
+    func setDropdownShowRecentUsage(_ value: Bool) { updateMenu { $0.dropdownShowRecentUsage = value } }
     func setDropdownShowBars(_ value: Bool) { updateMenu { $0.dropdownShowBars = value } }
     func setDropdownShowHeadings(_ value: Bool) { updateMenu { $0.dropdownShowHeadings = value } }
     func setDropdownRoomyRows(_ value: Bool) { updateMenu { $0.dropdownRoomyRows = value } }
