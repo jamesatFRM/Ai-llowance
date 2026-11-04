@@ -6,6 +6,11 @@ import UsageCore
 // Explicit wrapper alias avoids the newer SDK State macro; remains compatible with macOS 14.
 private typealias ViewState<Value> = SwiftUI.State<Value>
 
+private struct DropdownContentHeight: PreferenceKey {
+    static let defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = max(value, nextValue()) }
+}
+
 // One native material layer, with inexpensive fills above it. No animated effects or extra polling.
 private struct PanelBackground: View {
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
@@ -129,6 +134,7 @@ struct Dashboard: View {
     var maximumHeight: CGFloat = 620
     var manage: () -> Void
     @ViewState private var expandedAccountID: UUID?
+    @ViewState private var providerContentHeight: CGFloat = 500
 
     var body: some View {
         VStack(alignment: .leading, spacing: 9) {
@@ -151,8 +157,15 @@ struct Dashboard: View {
             } else if renderForSharing {
                 providerContent
             } else {
-                ScrollView { providerContent }
-                    .scrollIndicators(.hidden).fixedSize(horizontal: false, vertical: true).frame(maxHeight: max(40, min(500, maximumHeight - 100)))
+                ScrollView {
+                    providerContent.background(GeometryReader { geometry in
+                        Color.clear.preference(key: DropdownContentHeight.self, value: geometry.size.height)
+                    })
+                }
+                .scrollIndicators(.automatic)
+                .frame(height: min(providerContentHeight, max(40, min(500, maximumHeight - 100))))
+                .clipped()
+                .onPreferenceChange(DropdownContentHeight.self) { providerContentHeight = $0 }
             }
             HStack(spacing: 5) {
                 Button(action: manage) { Label("Dashboard", systemImage: "square.grid.2x2").padding(.horizontal, 5).frame(height: 22) }
@@ -541,32 +554,36 @@ struct AccountsView: View {
                         }.padding(.horizontal, 22).padding(.bottom, 10)
                     }
                     Divider().opacity(0.4)
-                    ScrollViewReader { proxy in
-                        ScrollView {
-                            VStack(alignment: .leading, spacing: 16) {
-                                switch section {
-                                case .overview: overviewContent
-                                case .connection: connectionPage
-                                case .history: historyContent
-                                case .trends: HistoryTrendsView(store: store)
-                                case .accounts: accountsContent
-                                case .settings: selectedTabContent.frame(maxWidth: settingsSection == .dropdown ? 1000 : 640).frame(maxWidth: .infinity, alignment: .top)
-                                }
-                            }.padding(12)
-                        }
-                        .onAppear {
-                            if handledAccountNavigationVersion != store.accountNavigationVersion {
-                                handledAccountNavigationVersion = store.accountNavigationVersion
-                                section = .accounts
+                    GeometryReader { viewport in
+                        ScrollViewReader { proxy in
+                            ScrollView {
+                                VStack(alignment: .leading, spacing: 16) {
+                                    switch section {
+                                    case .overview: overviewContent
+                                    case .connection: connectionPage
+                                    case .history: historyContent
+                                    case .trends: HistoryTrendsView(store: store)
+                                    case .accounts: accountsContent
+                                    case .settings: selectedTabContent.frame(maxWidth: settingsSection == .dropdown ? 1000 : 640).frame(maxWidth: .infinity, alignment: .top)
+                                    }
+                                }.frame(width: max(0, viewport.size.width - 24)).padding(12)
                             }
-                            if store.accounts.isEmpty { section = .overview }
-                            if (CommandLine.arguments.contains("--history") || Bundle.main.object(forInfoDictionaryKey: "AILHistoryPreview") as? Bool == true) { section = .trends }
-                            store.rediscoverTools(); scrollToSelected(proxy)
-                        }
-                        .onChange(of: store.accountNavigationVersion) { _, _ in
-                            handledAccountNavigationVersion = store.accountNavigationVersion
-                            if section != .connection { section = .accounts }
-                            scrollToSelected(proxy)
+                            .onAppear { historyWidth = max(0, viewport.size.width - 24) }
+                            .onChange(of: viewport.size.width) { _, width in historyWidth = max(0, width - 24) }
+                            .onAppear {
+                                if handledAccountNavigationVersion != store.accountNavigationVersion {
+                                    handledAccountNavigationVersion = store.accountNavigationVersion
+                                    section = .accounts
+                                }
+                                if store.accounts.isEmpty { section = .overview }
+                                if (CommandLine.arguments.contains("--history") || Bundle.main.object(forInfoDictionaryKey: "AILHistoryPreview") as? Bool == true) { section = .trends }
+                                store.rediscoverTools(); scrollToSelected(proxy)
+                            }
+                            .onChange(of: store.accountNavigationVersion) { _, _ in
+                                handledAccountNavigationVersion = store.accountNavigationVersion
+                                if section != .connection { section = .accounts }
+                                scrollToSelected(proxy)
+                            }
                         }
                     }
                 }.frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -609,13 +626,15 @@ struct AccountsView: View {
     }
     private var dashboardNavigation: some View {
         HStack(spacing: 6) {
-            BrandIcon(size: 23)
-            Text("Ai-llowance").font(.system(size: 12, weight: .semibold)).padding(.trailing, 6)
+            if historyWidth >= 860 {
+                BrandIcon(size: 23)
+                Text("Ai-llowance").font(.system(size: 12, weight: .semibold)).padding(.trailing, 6).fixedSize()
+            }
             ForEach([DashboardSection.history, .trends, .overview, .settings]) { item in
                 Button { section = item } label: {
                     Label(item == .history ? "Usage" : item == .trends ? "History" : item == .overview ? "Accounts" : "Settings",
                           systemImage: item == .history ? "chart.xyaxis.line" : item == .trends ? "clock.arrow.circlepath" : item == .overview ? "square.grid.2x2" : "gearshape")
-                        .font(.system(size: 11, weight: .medium))
+                        .font(.system(size: 11, weight: .medium)).fixedSize()
                         .padding(.horizontal, 8).frame(height: 28)
                         .foregroundStyle(section == item || (item == .overview && (section == .accounts || section == .connection)) ? Color.primary : .secondary)
                         .background(section == item || (item == .overview && (section == .accounts || section == .connection)) ? Color.primary.opacity(0.10) : .clear, in: RoundedRectangle(cornerRadius: 8))
@@ -887,10 +906,12 @@ struct AccountsView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @ViewState private var historyWidth: CGFloat = 800
     private var visibleHistoryAccounts: [Account] { store.accounts.filter { historyAccountID == nil || $0.id == historyAccountID } }
+    private var accountGrid: AccountGridLayout { AccountGridLayout(count: visibleHistoryAccounts.count, width: historyWidth) }
     private var historyRows: [[Account]] {
-        let columns = max(1, min(4, visibleHistoryAccounts.count, Int((historyWidth + 12) / 232)))
-        return stride(from: 0, to: visibleHistoryAccounts.count, by: columns).map {
-            Array(visibleHistoryAccounts[$0..<min($0 + columns, visibleHistoryAccounts.count)])
+        var offset = 0
+        return accountGrid.rowCounts.map { count in
+            defer { offset += count }
+            return Array(visibleHistoryAccounts[offset..<(offset + count)])
         }
     }
     private var historyContent: some View {
@@ -904,9 +925,9 @@ struct AccountsView: View {
                                     error: store.errors[account.id] != nil, cached: store.isCached(account), needsReconnect: store.needsSignIn(account), connection: store.connectionState(account), now: store.now, historyHours: historyHours, chartStyle: store.menuPreferences.dashboardChartStyle, fullScale: store.menuPreferences.dashboardChartFullScale,
                                     overviewTint: store.menuPreferences.dashboardChartStyle == .mixed ? overviewAccountTint(account, accounts: store.accounts) : nil,
                                     openUsage: { if store.connectionState(account).needsAction { store.selectedAccountID = account.id; section = .accounts } else { store.openUsage(account) } }, manage: { renaming = account })
-                            .frame(maxWidth: .infinity)
+                            .frame(width: accountGrid.cardWidth)
                     }
-                }
+                }.frame(maxWidth: .infinity, alignment: .center)
             }
             let histories = Dictionary(uniqueKeysWithValues: visibleHistoryAccounts.map { ($0.id, store.history(for: $0).filter { $0.timestamp >= store.now.addingTimeInterval(-7 * 86400) }) })
             if store.menuPreferences.dashboardChartStyle == .mixed {
@@ -924,10 +945,7 @@ struct AccountsView: View {
             }
         }.animation(reduceMotion ? nil : .easeInOut(duration: 0.25), value: historyAccountID)
         .animation(reduceMotion ? nil : .easeInOut(duration: 0.25), value: visibleHistoryAccounts.map(\.id))
-        .background(GeometryReader { geometry in
-            Color.clear.onAppear { historyWidth = geometry.size.width }
-                .onChange(of: geometry.size.width) { _, width in historyWidth = width }
-        }).onChange(of: store.accounts.map(\.id)) { _, ids in
+        .onChange(of: store.accounts.map(\.id)) { _, ids in
             if let selected = historyAccountID, !ids.contains(selected) { historyAccountID = nil }
         }
     }

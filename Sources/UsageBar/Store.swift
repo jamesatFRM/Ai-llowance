@@ -92,7 +92,7 @@ final class AppStore: ObservableObject {
         var rememberedTools: [String: RememberedExecutable]?
     }
 
-    init(demo: Bool = false, root: URL = Paths.root, monitor: Bool = true,
+    init(demo: Bool = false, demoAccountCount: Int = 4, root: URL = Paths.root, monitor: Bool = true,
          fetch: (@Sendable (Account, Date) async throws -> Snapshot)? = nil,
          requestNotificationAuthorization: @escaping @Sendable () async throws -> Bool = {
              try await UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound])
@@ -103,9 +103,14 @@ final class AppStore: ObservableObject {
         if demo {
             accounts = [Account(name: "Personal", kind: .claudeCode), Account(name: "Work", kind: .claudeCode),
                         Account(name: "Personal", kind: .codex), Account(name: "Work", kind: .codex)]
+            let count = min(10, max(1, demoAccountCount))
+            if count < accounts.count { accounts = Array(accounts.prefix(count)) }
+            while accounts.count < count {
+                accounts.append(Account(name: "Account \(accounts.count + 1)", kind: accounts.count % 3 == 1 ? .grokSubscription : .codex))
+            }
             for (index, account) in accounts.enumerated() {
                 let claude = account.kind == .claudeCode
-                let remaining = [72.0, 24.0, 58.0, 16.0][index]
+                let remaining = [72.0, 24.0, 58.0, 16.0][index % 4]
                 var windows = [try! QuotaWindow(id: claude ? "week.all models" : "codex.Secondary", label: "Week · 7d", usedPercent: 100 - remaining,
                     resetsAt: now.addingTimeInterval(Double(index + 2) * 86400), durationMinutes: 10_080)]
                 do { windows.append(try! QuotaWindow(id: claude ? "session" : "codex.Primary", label: "Session · 5h", usedPercent: index == 1 ? 100 : 18,
