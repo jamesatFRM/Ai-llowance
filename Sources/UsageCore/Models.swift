@@ -2,7 +2,7 @@ import Foundation
 import Darwin
 
 public enum ConnectionKind: String, Codable, CaseIterable, Identifiable, Sendable {
-    case codex, claudeCode, openAIAPI, claudeAPI, copilot, openRouter, vercelGateway, xai
+    case codex, claudeCode, openAIAPI, claudeAPI, copilot, openRouter, vercelGateway, xai, grokSubscription
     public var id: String { rawValue }
     public var title: String {
         switch self {
@@ -10,6 +10,7 @@ public enum ConnectionKind: String, Codable, CaseIterable, Identifiable, Sendabl
         case .claudeCode: "Claude · Code subscription"
         case .openAIAPI: "OpenAI · API spending"
         case .claudeAPI: "Claude · API spending"
+        case .grokSubscription: "Grok · shared subscription"
         case .copilot: "GitHub · Copilot allowance"
         case .openRouter: "OpenRouter · key budget"
         case .vercelGateway: "Vercel AI Gateway · API credits"
@@ -26,6 +27,7 @@ public enum ConnectionKind: String, Codable, CaseIterable, Identifiable, Sendabl
         case .openRouter: .openRouter
         case .vercelGateway: .vercelGateway
         case .xai: .xai
+        case .grokSubscription: .grok
         }
     }
     public func refreshInterval(visible: Bool, lowPower: Bool = false) -> TimeInterval {
@@ -40,6 +42,7 @@ public enum ConnectionKind: String, Codable, CaseIterable, Identifiable, Sendabl
         case .claudeCode: "Reads plan limits directly through Claude Code’s built-in /usage command, without a conversation. Requires a version that reports plan limits in print mode (verified with 2.1.294) and a subscription sign-in. Missing data stays unavailable."
         case .openAIAPI: "Organization API cost this UTC month. Requires an OpenAI Admin API key. A ChatGPT subscription or ordinary project key does not provide this report."
         case .claudeAPI: "Organization API cost this UTC month. Requires an Anthropic Admin API key. Excludes Priority Tier costs; this is not Claude subscription usage."
+        case .grokSubscription: "Reads the unified shared allowance for Grok, Grok Bot, and Cursor using your existing Grok CLI sign-in. Legacy Bot plans are not supported. No API key or copied session token is needed."
         case .copilot: "Reads account quota buckets through the installed GitHub Copilot CLI and its existing sign-in. This is not a count of all GitHub activity."
         case .openRouter: "Reads the API spending budget available to your OpenRouter key. This endpoint does not report total account credits or model subscription allowance."
         case .vercelGateway: "Reads your Vercel AI Gateway API credit balance. This is separate from Vercel hosting usage."
@@ -52,6 +55,7 @@ public enum ConnectionKind: String, Codable, CaseIterable, Identifiable, Sendabl
         case .claudeCode: "https://claude.ai/settings/usage"
         case .openAIAPI: "https://platform.openai.com/usage"
         case .claudeAPI: "https://platform.claude.com/usage"
+        case .grokSubscription: "https://grok.com/dashboard/usage"
         case .copilot: "https://github.com/settings/copilot"
         case .openRouter: "https://openrouter.ai/settings/credits"
         case .vercelGateway: "https://vercel.com/dashboard"
@@ -65,6 +69,7 @@ public enum ConnectionKind: String, Codable, CaseIterable, Identifiable, Sendabl
         case .claudeCode: "https://code.claude.com/docs/en/statusline"
         case .openAIAPI: "https://platform.openai.com/docs/api-reference/usage"
         case .claudeAPI: "https://platform.claude.com/docs/en/manage-claude/usage-cost-api"
+        case .grokSubscription: "https://docs.x.ai/x-subscription/grok-bot"
         case .copilot: "https://docs.github.com/en/copilot/how-tos/copilot-sdk/features/usage-and-billing"
         case .openRouter: "https://openrouter.ai/docs/api-reference/credits/get-credits"
         case .vercelGateway: "https://vercel.com/docs/ai-gateway"

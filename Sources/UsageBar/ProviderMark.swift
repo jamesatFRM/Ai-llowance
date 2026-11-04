@@ -69,6 +69,7 @@ enum ProviderImages {
         case .copilot: NSImage(systemSymbolName: "terminal", accessibilityDescription: "GitHub Copilot")
         case .openRouter: NSImage(systemSymbolName: "arrow.triangle.branch", accessibilityDescription: "OpenRouter")
         case .vercelGateway: NSImage(systemSymbolName: "triangle", accessibilityDescription: "Vercel AI Gateway")
+        case .grok: NSImage(systemSymbolName: "sparkle", accessibilityDescription: "Grok")
         case .xai: NSImage(systemSymbolName: "sparkle", accessibilityDescription: "xAI")
         case nil: Brand.menuMark()
         }

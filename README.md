@@ -162,3 +162,11 @@ Provider logos belong to their respective owners and are excluded from the MIT l
 Pushes to `main` run privacy, test, universal-build, and DMG checks. When automated publishing is enabled, the publish job runs after those checks and uses the encrypted `SPARKLE_PRIVATE_KEY` repository secret to publish a new preview release and its signed update feed. Pull requests cannot access the signing key or publish releases. Each CI run has a higher build number, including when the display version stays the same. Increment `VERSION` for named releases. The exact Sparkle dependency and packaging tools are pinned.
 
 Update archives and the feed use Ed25519 signatures. The app verifies the feed and archive before extraction; no unsigned fallback or system profiling is enabled. The signing key stays in the maintainer's Keychain. Automated publishing additionally requires approval to store it in an encrypted GitHub Actions secret; the key is never in source or downloads. See [release maintenance](docs/releases.md).
+
+### Grok and Grok Bot shared allowance (preview)
+
+Choose **Grok & Grok Bot** in Accounts, then **Connect account**. Install the official [Grok CLI](https://github.com/xai-org/grok-build) if needed and run `grok login` with the same account as Grok Bot. The connection uses the CLI's existing sign-in; Ai-llowance never requests or copies a session token. Use **Sign in to Grok…** and **Check sign-in** to recover an expired login.
+
+This reports one **unified shared allowance** covering Grok, Grok Bot, and Cursor, not three independent balances. It is separate from the existing xAI API credits provider. Legacy Bot billing is unsupported and missing usage remains unavailable. The CLI may report whole percentages while Bot rounds a more precise figure differently. Compare your first reading and reset date with [Grok Usage](https://grok.com/dashboard/usage).
+
+The connection binds to your email and workspace. Changing the CLI account or workspace requires returning to the original sign-in or removing and reconnecting the Grok connection; old readings are never silently reassigned. CLI compatibility was verified with Grok 1.0.70. The adapter only initializes ACP, checks non-secret account information, and reads billing; it never creates a conversation or executes model/tool requests.

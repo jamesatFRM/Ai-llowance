@@ -33,7 +33,7 @@ Drag Ai-llowance into Applications, then open it there.
 
 $distribution_note
 
-Install the relevant provider CLI for Claude, Codex, or Copilot readings.
+Install the relevant provider CLI for Claude, Codex, Copilot, or Grok readings.
 Settings includes Check for Updates. Updates preserve your connected accounts.
 TXT
 PYTHONPATH="$tooling" python3 -m dmgbuild -s "$project_dir/scripts/dmg-settings.py" -D "app=$app_dir" -D "readme=$build_dir/Read me.txt" -D "background=$build_dir/dmg-background.png" "Ai-llowance $version" "$output_dir/$basename.dmg"
