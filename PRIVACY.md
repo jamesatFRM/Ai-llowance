@@ -4,7 +4,9 @@ Ai-llowance runs locally on your Mac. There is no Ai-llowance backend, analytics
 
 ## What leaves your Mac
 
-Subscription checks use the installed Claude Code, Codex, and Copilot CLIs, which contact their providers. Optional API spending, credit, and budget checks send your key directly to the selected provider's fixed official HTTPS endpoint. xAI requests also include the team ID you enter. Login and dashboard links open provider pages in your browser. These services have their own privacy and retention policies.
+Subscription checks use the installed Claude Code, Codex, Copilot, and Grok CLIs, which contact their providers. Optional API spending, credit, and budget checks send your key directly to the selected provider's fixed official HTTPS endpoint. xAI requests also include the team ID you enter. Login and dashboard links open provider pages in your browser. These services have their own privacy and retention policies.
+
+Grok checks use only CLI initialization, non-secret account information, and unified billing. The connection stores the email and workspace ID to detect account changes. Grok manages its own credentials, caches, logs, and startup behavior; Ai-llowance does not read or copy its tokens.
 
 Ai-llowance requests no model responses or conversation history. Claude's local `/usage` command may itself inspect local activity to prepare its report; Ai-llowance keeps only recognized plan limits and rejects reports with model turns or model cost. This is a version-dependent CLI integration.
 

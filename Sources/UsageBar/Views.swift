@@ -87,7 +87,7 @@ private func providerAccent(_ provider: MenuProvider) -> Color {
     case .copilot: Brand.violet
     case .openRouter: Color(red: 0.78, green: 0.54, blue: 0.98)
     case .vercelGateway: Brand.cyan
-    case .xai: Color(red: 0.86, green: 0.72, blue: 0.40)
+    case .grok, .xai: Color(red: 0.86, green: 0.72, blue: 0.40)
     }
 }
 
@@ -711,7 +711,7 @@ struct AccountsView: View {
                 simpleConnectOptions
             }
     }
-    private var serviceKinds: [ConnectionKind] { [.claudeCode, .codex, .copilot, .openAIAPI, .claudeAPI, .openRouter, .vercelGateway, .xai] }
+    private var serviceKinds: [ConnectionKind] { [.claudeCode, .codex, .copilot, .openAIAPI, .claudeAPI, .openRouter, .vercelGateway, .xai, .grokSubscription] }
     private var overviewContent: some View {
         VStack(alignment: .leading, spacing: 18) {
             HStack {
@@ -762,6 +762,7 @@ struct AccountsView: View {
         case .openRouter: "OpenRouter"
         case .vercelGateway: "Vercel AI Gateway"
         case .xai: "xAI"
+        case .grokSubscription: "Grok & Grok Bot"
         }
     }
     private func connectionTile(_ kind: ConnectionKind) -> some View {
@@ -776,6 +777,7 @@ struct AccountsView: View {
         case .openRouter: "OpenRouter"
         case .vercelGateway: "Vercel AI Gateway"
         case .xai: "xAI"
+        case .grokSubscription: "Grok & Grok Bot"
         }
         let detail = kind.isBalance ? "Credits & balance" : kind.isAPI ? "API spending" : "Subscription allowance"
         return SettingsCard(inset: 12) {
@@ -849,6 +851,10 @@ struct AccountsView: View {
                         setupExistingIDs = Set(store.accounts.map(\.id)); setupStarted = true
                         if selectedKind == .claudeCode { store.connectClaude(existing: !existing) }
                         else { store.connectOpenAI(existing: !existing) }
+                    } else if selectedKind == .grokSubscription {
+                        guard executable(for: .grokSubscription) != nil else { NSWorkspace.shared.open(installationURL(.grokSubscription)); return }
+                        setupExistingIDs = []; setupStarted = true
+                        store.connectGrok()
                     } else if selectedKind == .copilot {
                         guard executable(for: .copilot) != nil else { NSWorkspace.shared.open(installationURL(.copilot)); return }
                         setupExistingIDs = []; setupStarted = true
@@ -1042,6 +1048,7 @@ struct AccountsView: View {
         switch selectedKind {
         case .claudeCode: store.connectClaude(existing: existing)
         case .codex: store.connectOpenAI(existing: existing)
+        case .grokSubscription: store.connectGrok()
         case .copilot: store.connectCopilot()
         default: break
         }
@@ -1073,6 +1080,12 @@ struct AccountsView: View {
                         Button("Use existing Codex sign-in") { startManualConnection(existing: true) }.disabled(store.accounts.contains { $0.usesExistingCodex })
                         Button("Add another account") { startManualConnection(existing: false) }
                     }.controlSize(.small).disabled(busyConnecting)
+                } else if selectedKind == .grokSubscription {
+                    HStack {
+                        Button("Connect Grok shared allowance") { startManualConnection(existing: true) }.disabled(busyConnecting)
+                        Button("Sign in to Grok…") { store.openGrokSignIn() }
+                    }.controlSize(.small)
+                    Text(selectedKind.explanation).font(.system(size: 10)).foregroundStyle(.secondary)
                 } else if selectedKind == .copilot {
                     HStack {
                         Button("Connect Copilot (preview)") { startManualConnection(existing: true) }.disabled(busyConnecting || store.accounts.contains { $0.kind == .copilot })
@@ -1124,15 +1137,16 @@ struct AccountsView: View {
         }
     }
     private func executable(for kind: ConnectionKind) -> URL? {
-        switch kind { case .claudeCode: store.claudeExecutable; case .codex: store.executable; case .copilot: store.copilotExecutable; default: nil }
+        switch kind { case .claudeCode: store.claudeExecutable; case .codex: store.executable; case .grokSubscription: store.grokExecutable; case .copilot: store.copilotExecutable; default: nil }
     }
     private func chooseExecutable(_ kind: ConnectionKind) {
-        switch kind { case .claudeCode: store.chooseClaudeExecutable(); case .codex: store.chooseExecutable(); case .copilot: store.chooseCopilotExecutable(); default: break }
+        switch kind { case .claudeCode: store.chooseClaudeExecutable(); case .codex: store.chooseExecutable(); case .grokSubscription: store.chooseGrokExecutable(); case .copilot: store.chooseCopilotExecutable(); default: break }
     }
-    private func cliName(_ kind: ConnectionKind) -> String { kind == .claudeCode ? "Claude Code" : kind == .copilot ? "Copilot CLI" : "Codex CLI" }
+    private func cliName(_ kind: ConnectionKind) -> String { kind == .grokSubscription ? "Grok CLI" : kind == .claudeCode ? "Claude Code" : kind == .copilot ? "Copilot CLI" : "Codex CLI" }
     private func installationURL(_ kind: ConnectionKind) -> URL {
         switch kind {
         case .claudeCode: URL(string: "https://code.claude.com/docs/en/setup")!
+        case .grokSubscription: URL(string: "https://github.com/xai-org/grok-build")!
         case .copilot: URL(string: "https://docs.github.com/en/copilot/how-tos/copilot-cli/install-copilot-cli")!
         default: URL(string: "https://developers.openai.com/codex/cli")!
         }
@@ -1228,7 +1242,10 @@ struct AccountsView: View {
                     if account.kind.isAPI { Button("Replace key") { replacement = ""; keyAccount = account } }
                     else if account.kind == .claudeCode { Button("Reconnect account") { store.openClaude(account, login: true) } }
                     else if account.kind == .codex && !account.usesExistingCodex { Button("Sign in with this account") { store.signIn(account, openBrowser: false) }.disabled(busyConnecting) }
-                    else if account.kind == .copilot {
+                    else if account.kind == .grokSubscription {
+                        Button("Sign in to Grok…") { store.openGrokSignIn() }
+                        Button("Check sign-in") { store.retryConnection(account) }
+                    } else if account.kind == .copilot {
                         Button("Sign in to Copilot…") { store.openCopilotSignIn() }
                         Button("Check sign-in") { store.retryConnection(account) }
                     } else { Button("Check Codex sign-in") { store.retryConnection(account) }.help("Sign in through Codex CLI, then check again.") }

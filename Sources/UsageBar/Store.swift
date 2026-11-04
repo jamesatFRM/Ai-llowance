@@ -51,6 +51,7 @@ final class AppStore: ObservableObject {
     @Published private(set) var usageHistory: [UUID: [UsageHistoryPoint]] = [:]
     @Published var executable = CodexAdapter.findExecutable()
     @Published var claudeExecutable = ClaudeConnection.findExecutable()
+    @Published var grokExecutable = GrokAdapter.findExecutable()
     @Published var copilotExecutable = CopilotAdapter.findExecutable()
     private var interfaceVisible = false
     private var browserChoices: [String: String] = [:]
@@ -709,6 +710,9 @@ final class AppStore: ObservableObject {
         switch account.kind {
         case .openAIAPI, .claudeAPI: adapter = costs
         case .openRouter, .vercelGateway, .xai: adapter = balances
+        case .grokSubscription:
+            guard let grokExecutable else { throw UsageError.unavailable("Install Grok CLI and run grok login, then choose Check again in Settings.") }
+            adapter = GrokAdapter(executable: grokExecutable)
         case .copilot:
             guard let copilotExecutable else { throw UsageError.unavailable("Install Copilot CLI, then choose Check again in Settings.") }
             adapter = CopilotAdapter(executable: copilotExecutable)
@@ -773,6 +777,7 @@ final class AppStore: ObservableObject {
     }
     func chooseExecutable() { chooseTool(.codex) }
     func chooseClaudeExecutable() { chooseTool(.claudeCode) }
+    func chooseGrokExecutable() { chooseTool(.grokSubscription) }
     func chooseCopilotExecutable() { chooseTool(.copilot) }
     private func chooseTool(_ kind: ConnectionKind) {
         let panel = NSOpenPanel(); panel.canChooseDirectories = false; panel.allowsMultipleSelection = false
@@ -783,6 +788,7 @@ final class AppStore: ObservableObject {
               let record = RememberedExecutable(url: url) else { return }
         if kind == .codex { executable = url }
         else if kind == .claudeCode { claudeExecutable = url }
+        else if kind == .grokSubscription { grokExecutable = url }
         else { copilotExecutable = url }
         rememberedTools[kind.rawValue] = remember.state == .on ? record : nil
         do { try persist() } catch { notice = "Could not remember the CLI location." }
@@ -801,6 +807,7 @@ final class AppStore: ObservableObject {
         }
         executable = detected(.codex, current: executable, discover: CodexAdapter.findExecutable)
         claudeExecutable = detected(.claudeCode, current: claudeExecutable, discover: ClaudeConnection.findExecutable)
+        grokExecutable = detected(.grokSubscription, current: grokExecutable, discover: GrokAdapter.findExecutable)
         copilotExecutable = detected(.copilot, current: copilotExecutable, discover: CopilotAdapter.findExecutable)
         browserProfiles = BrowserProfile.discover()
         launchAtLogin = SMAppService.mainApp.status == .enabled
@@ -847,6 +854,25 @@ final class AppStore: ObservableObject {
             }
         }
         return max(1, delay)
+    }
+    func connectGrok() {
+        guard !demo, !readOnly, !removing else { return }
+        rediscoverTools()
+        guard grokExecutable != nil else { notice = "Install Grok CLI, then click Check again."; return }
+        if let existing = accounts.first(where: { $0.kind == .grokSubscription }) {
+            selectedAccountID = existing.id; retryConnection(existing); return
+        }
+        do {
+            let account = try add(name: "Grok", kind: .grokSubscription, secret: "", existing: true)
+            selectedAccountID = account.id
+        } catch { notice = safeMessage(error) }
+    }
+    func openGrokSignIn() {
+        guard !demo, let grokExecutable else { return }
+        let file = root.appendingPathComponent("Grok/Sign in.command")
+        let script = "#!/bin/zsh\nexport PATH=/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin\nunset XAI_API_KEY GROK_API_KEY GROK_HOME\n" + ShellQuote.argument(grokExecutable.path) + " login\nprintf '%s\n' 'Return to Ai-llowance and click Check sign-in.'\n"
+        do { try Paths.writePrivate(Data(script.utf8), to: file, executable: true); _ = openExternal(file) }
+        catch { notice = safeMessage(error) }
     }
     func connectCopilot() {
         guard !demo, !readOnly, !removing else { return }

@@ -106,7 +106,7 @@ public struct MenuPreferences: Codable, Equatable, Sendable {
     }
 }
 public enum MenuProvider: String, CaseIterable, Codable, Sendable {
-    case claude, openAI, copilot, openRouter, vercelGateway, xai
+    case claude, openAI, copilot, openRouter, vercelGateway, xai, grok
     public var title: String {
         switch self {
         case .openAI: "OpenAI"
@@ -115,6 +115,7 @@ public enum MenuProvider: String, CaseIterable, Codable, Sendable {
         case .openRouter: "OpenRouter"
         case .vercelGateway: "AI Gateway"
         case .xai: "xAI"
+        case .grok: "Grok"
         }
     }
 }
@@ -148,6 +149,7 @@ extension Snapshot {
         case .codex:
             if let codex = weeklyWindows.first(where: { $0.id.lowercased().hasPrefix("codex.") || $0.label.lowercased().hasPrefix("codex ·") }) { return codex }
             return weeklyWindows.count == 1 ? weeklyWindows.first : nil
+        case .grokSubscription: return windows.first
         case .copilot: return windows.min { $0.remainingPercent < $1.remainingPercent }
         case .openAIAPI, .claudeAPI, .openRouter, .vercelGateway, .xai: return nil
         }

@@ -9,7 +9,7 @@ extension Snapshot {
         case .codex:
             let named = windows.filter { $0.id.lowercased().hasPrefix("codex.") || $0.label.lowercased().hasPrefix("codex ·") }
             return named.isEmpty ? [sessionWindow(for: kind), primaryWeeklyWindow(for: kind)].compactMap { $0 } : named
-        case .copilot: return windows
+        case .copilot, .grokSubscription: return windows
         case .openRouter: return windows // A budget reset also expires its cached dollar balance.
         case .openAIAPI, .claudeAPI, .vercelGateway, .xai: return []
         }
