@@ -18,7 +18,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
     private var labelUpdateScheduled = false
     private var renderedEntries: [MenuEntry]?
     private var renderedPreferences: MenuPreferences?
-    private let store = AppStore(demo: Bundle.main.object(forInfoDictionaryKey: "AILSamplePreview") as? Bool == true || CommandLine.arguments.contains("--demo") || CommandLine.arguments.contains("--preview") || CommandLine.arguments.contains("--export-preview"))
+    private let store = AppStore(demo: Bundle.main.object(forInfoDictionaryKey: "AILSamplePreview") as? Bool == true || CommandLine.arguments.contains("--demo") || CommandLine.arguments.contains("--preview") || CommandLine.arguments.contains("--export-preview"), demoAccountCount: Bundle.main.object(forInfoDictionaryKey: "AILSampleAccountCount") as? Int ?? 4)
     func applicationDidFinishLaunching(_ notification: Notification) {
         installMainMenu()
         NSApp.setActivationPolicy((UserDefaults.standard.object(forKey: "hideFromDock") as? Bool ?? true) ? .accessory : .regular)

@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.5.6
+
+- Keep dropdown headers and footer controls clear while scrolling and expanding accounts.
+- Balance dashboard layouts for 1–10 accounts, including equal-width 3+2 layouts for five accounts.
+- Fit dashboard cards and navigation to the available window width.
+
 ## 0.3.1 — Reliability and visual polish (pending notarized release)
 
 - Refine the native glass, borders, type hierarchy, and compact controls while preserving the 350px dashboard and dense account rows.
