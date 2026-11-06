@@ -33,7 +33,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
             button.imagePosition = .imageLeading
             button.title = " Usage"
             button.target = self; button.action = #selector(togglePopover)
-            button.toolTip = "Remaining allowance for your selected accounts. Open for limits and resets."
+            // Native status-item tooltips can remain above other apps after
+            // background title updates. Details belong in the dropdown and AX label.
+            button.toolTip = nil
+            button.setAccessibilityLabel("Ai-llowance. Open for account limits and reset times.")
         }
         popover.behavior = .transient
         popover.delegate = self
@@ -87,7 +90,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
             button.attributedTitle = NSAttributedString(string: "")
             button.image = Brand.menuMark()
             button.title = " Usage"
-            button.toolTip = "Ai-llowance · Choose accounts in Settings"
+            button.toolTip = nil
+            button.setAccessibilityLabel("Ai-llowance. Choose accounts in Settings.")
             return
         }
         button.image = nil
@@ -119,7 +123,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
         }
         title.addAttributes([.font: menuFont], range: NSRange(location: 0, length: title.length))
         button.attributedTitle = title
-        button.toolTip = descriptions.joined(separator: "\n") + "\n\(store.menuPreferences.aggregation.title); each account has its own allowance. ~ marks a last-known reading awaiting refresh."
+        button.toolTip = nil
         button.setAccessibilityLabel("Ai-llowance. " + descriptions.joined(separator: ". ") + (store.menuEntries.contains(where: \.isLastKnown) ? ". Last-known readings are awaiting refresh." : ""))
     }
     @objc private func togglePopover() {
