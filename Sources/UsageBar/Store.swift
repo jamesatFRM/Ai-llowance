@@ -268,6 +268,9 @@ final class AppStore: ObservableObject {
         updateMenu { $0.accountOrder = ids }
     }
     func resetMenuAccountOrder() { updateMenu { $0.accountOrder = [] } }
+    func setResetRemindersEnabled(_ value: Bool) { updateMenu { $0.resetRemindersEnabled = value } }
+    func setResetReminderLeadHours(_ value: Int) { guard [1,6,12,24,48].contains(value) else { return }; updateMenu { $0.resetReminderLeadHours = value } }
+    func setResetReminderMinimumPercent(_ value: Int) { guard [10,25,50,75].contains(value) else { return }; updateMenu { $0.resetReminderMinimumPercent = value } }
     func setDashboardChartFullScale(_ value: Bool) { updateMenu { $0.dashboardChartFullScale = value } }
     func setDashboardChartStyle(_ value: DashboardChartStyle) { updateMenu { $0.dashboardChartStyle = value } }
     func setDashboardTransparency(_ value: Double) { guard value.isFinite else { return }; updateMenu { $0.dashboardTransparency = min(1, max(0, value)) } }
@@ -961,6 +964,11 @@ final class AppStore: ObservableObject {
     private func processAlert(_ snapshot: Snapshot, account: Account) {
         if let alert = alerts.observe(account: account, snapshot: snapshot, now: Date()), notificationsEnabled {
             pendingAlerts.append(alert)
+        }
+        if notificationsEnabled, menuPreferences.resetRemindersEnabled,
+           let reminder = alerts.observeResetReminder(account: account, snapshot: snapshot, now: Date(),
+                leadHours: menuPreferences.resetReminderLeadHours, minimumRemaining: menuPreferences.resetReminderMinimumPercent) {
+            pendingAlerts.append(reminder)
         }
     }
     private func deliverAlerts() {

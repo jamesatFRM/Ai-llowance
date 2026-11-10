@@ -1334,6 +1334,26 @@ struct AccountsView: View {
                     Text("Provider limits and power-saving mode may delay refreshes.").font(.callout).foregroundStyle(.secondary).frame(maxWidth: .infinity, alignment: .leading)
                     Divider()
                     Toggle("Allowance notifications", isOn: Binding(get: { store.notificationsEnabled }, set: { store.setNotificationsEnabled($0) }))
+                    Divider()
+                    Toggle("Remind me before weekly resets", isOn: Binding(get: { store.menuPreferences.resetRemindersEnabled }, set: { store.setResetRemindersEnabled($0) }))
+                        .disabled(!store.notificationsEnabled)
+                    HStack {
+                        Text("Remind me")
+                        Spacer()
+                        Picker("Reminder lead time", selection: Binding(get: { store.menuPreferences.resetReminderLeadHours }, set: { store.setResetReminderLeadHours($0) })) {
+                            Text("1 hour before").tag(1); Text("6 hours before").tag(6); Text("12 hours before").tag(12)
+                            Text("1 day before").tag(24); Text("2 days before").tag(48)
+                        }.labelsHidden().frame(width: 170)
+                    }.disabled(!store.notificationsEnabled || !store.menuPreferences.resetRemindersEnabled)
+                    HStack {
+                        Text("When at least this much remains")
+                        Spacer()
+                        Picker("Minimum remaining allowance", selection: Binding(get: { store.menuPreferences.resetReminderMinimumPercent }, set: { store.setResetReminderMinimumPercent($0) })) {
+                            ForEach([10,25,50,75], id: \.self) { Text("\($0)%").tag($0) }
+                        }.labelsHidden().frame(width: 100)
+                    }.disabled(!store.notificationsEnabled || !store.menuPreferences.resetRemindersEnabled)
+                    Text("One reminder per account and weekly reset, based on fresh readings while Ai-llowance is running. Enable allowance notifications above first.")
+                        .font(.callout).foregroundStyle(.secondary).frame(maxWidth: .infinity, alignment: .leading)
                 }.padding(10)
             }
         }.font(.system(size: 13)).toggleStyle(SettingsSwitchStyle()).controlSize(.regular).disabled(store.demo)
