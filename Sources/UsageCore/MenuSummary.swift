@@ -76,8 +76,9 @@ public struct MenuPreferences: Codable, Equatable, Sendable {
     public var allAccounts = true
     public var selectedAccountIDs: Set<UUID> = []
     public var accountOrder: [UUID] = []
+    public var dashboardAccountOrder: [UUID] = []
     public init() {}
-    private enum CodingKeys: String, CodingKey { case dropdownShowRecentUsage, dashboardTransparency, dropdownTransparency, liquidGlass, accountOrder, dashboardChartFullScale, dashboardChartStyle, dropdownShowEmails, dropdownShowResets, dropdownShowBars, dropdownShowHeadings, dropdownRoomyRows, sessionMenuLabel, weeklyMenuLabel, showSessionInMenuBar, colorByAllowance, theme, display, aggregation, showAccountNames, detailedQuotaLabels, allAccounts, selectedAccountIDs }
+    private enum CodingKeys: String, CodingKey { case dashboardAccountOrder, dropdownShowRecentUsage, dashboardTransparency, dropdownTransparency, liquidGlass, accountOrder, dashboardChartFullScale, dashboardChartStyle, dropdownShowEmails, dropdownShowResets, dropdownShowBars, dropdownShowHeadings, dropdownRoomyRows, sessionMenuLabel, weeklyMenuLabel, showSessionInMenuBar, colorByAllowance, theme, display, aggregation, showAccountNames, detailedQuotaLabels, allAccounts, selectedAccountIDs }
     public init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
         dashboardChartFullScale = try values.decodeIfPresent(Bool.self, forKey: .dashboardChartFullScale) ?? false
@@ -101,6 +102,7 @@ public struct MenuPreferences: Codable, Equatable, Sendable {
         detailedQuotaLabels = try values.decodeIfPresent(Bool.self, forKey: .detailedQuotaLabels) ?? false
         colorByAllowance = try values.decodeIfPresent(Bool.self, forKey: .colorByAllowance) ?? false
         allAccounts = try values.decodeIfPresent(Bool.self, forKey: .allAccounts) ?? true
+        dashboardAccountOrder = try values.decodeIfPresent([UUID].self, forKey: .dashboardAccountOrder) ?? []
         accountOrder = try values.decodeIfPresent([UUID].self, forKey: .accountOrder) ?? []
         selectedAccountIDs = try values.decodeIfPresent(Set<UUID>.self, forKey: .selectedAccountIDs) ?? []
     }
@@ -192,9 +194,8 @@ public enum MenuSummary {
                 guard (!unavailable.contains(account.id) || lastKnown.contains(account.id)), let snapshot = snapshots[account.id],
                       identityMatches(snapshot, account: account), snapshot.providerRestricted != true,
                       (try? snapshot.validated()) != nil else { return nil }
-                let applicable = snapshot.applicableWindows(for: account.kind)
                 guard let window = snapshot.displayWindow(for: account.kind),
-                      (!snapshot.isStale(at: now, windows: applicable) || lastKnown.contains(account.id)) else { return nil }
+                      (!snapshot.isStale(at: now, windows: [window]) || lastKnown.contains(account.id)) else { return nil }
                 return window.remainingPercent
             }
             // Incomplete groups stay unavailable; silently dropping a depleted/unread account is misleading.
@@ -206,8 +207,9 @@ public enum MenuSummary {
                 guard (!unavailable.contains(account.id) || lastKnown.contains(account.id)), let snapshot = snapshots[account.id],
                       identityMatches(snapshot, account: account), snapshot.providerRestricted != true,
                       (try? snapshot.validated()) != nil,
-                      (!snapshot.isStale(at: now, windows: snapshot.applicableWindows(for: account.kind)) || lastKnown.contains(account.id)) else { return nil }
-                return snapshot.sessionWindow(for: account.kind)?.remainingPercent
+                      let session = snapshot.sessionWindow(for: account.kind),
+                      (!snapshot.isStale(at: now, windows: [session]) || lastKnown.contains(account.id)) else { return nil }
+                return session.remainingPercent
             }
             let sessionValue = sessions.count == group.count && !sessions.isEmpty
                 ? (preferences.aggregation == .lowest ? sessions.min() : sessions.reduce(0, +) / Double(sessions.count)) : nil

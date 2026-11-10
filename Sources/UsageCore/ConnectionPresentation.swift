@@ -40,7 +40,7 @@ public struct ConnectionPresentation: Equatable, Sendable {
             default: return state("Refresh failed", age + " · " + retry, "arrow.clockwise")
             }
         }
-        if cached || snapshot?.isStale(at: now) == true { return state("Saved reading", age + " · awaiting refresh", "clock") }
+        if cached || snapshot?.isStale(at: now, windows: snapshot?.applicableWindows(for: kind)) == true { return state("Saved reading", age + " · awaiting refresh", "clock") }
         guard snapshot != nil else { return state("Waiting for reading", "Usage appears after the first successful check", "clock") }
         let status = AllowanceStatus.evaluate(snapshot: snapshot, kind: kind, now: now)
         if status.state == .exhausted, let session = snapshot?.sessionWindow(for: kind), session.remainingPercent <= 0,

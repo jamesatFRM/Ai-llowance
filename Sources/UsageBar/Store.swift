@@ -234,7 +234,7 @@ final class AppStore: ObservableObject {
             guard !authenticationRequired.contains(account.id), let snapshot = snapshots[account.id],
                   snapshot.observedAt <= now.addingTimeInterval(60),
                   now.timeIntervalSince(snapshot.observedAt) <= 7 * 86400 else { return nil }
-            return offline || cachedAccounts.contains(account.id) || errors[account.id] != nil || snapshot.isStale(at: now) ? account.id : nil
+            return offline || cachedAccounts.contains(account.id) || errors[account.id] != nil || snapshot.isStale(at: now, windows: account.kind.isAPI ? snapshot.applicableWindows(for: account.kind) : [snapshot.displayWindow(for: account.kind)].compactMap { $0 }) ? account.id : nil
         })
         return MenuSummary.entries(accounts: accounts, snapshots: snapshots, unavailable: Set(errors.keys).union(authenticationRequired), preferences: menuPreferences, now: now, lastKnown: lastKnown)
     }
@@ -246,6 +246,18 @@ final class AppStore: ObservableObject {
         menuPreferences = next
         do { try persist() } catch { menuPreferences = previous; notice = "Could not save the menu-bar setting." }
     }
+    var orderedDashboardAccounts: [Account] {
+        var seen = Set<UUID>()
+        let saved = menuPreferences.dashboardAccountOrder.compactMap { id in accounts.first { $0.id == id } }.filter { seen.insert($0.id).inserted }
+        return saved + accounts.filter { seen.insert($0.id).inserted }
+    }
+    func moveDashboardAccount(_ id: UUID, offset: Int) {
+        var ids = orderedDashboardAccounts.map(\.id)
+        guard let index = ids.firstIndex(of: id), ids.indices.contains(index + offset) else { return }
+        ids.swapAt(index, index + offset)
+        updateMenu { $0.dashboardAccountOrder = ids }
+    }
+    func resetDashboardAccountOrder() { updateMenu { $0.dashboardAccountOrder = [] } }
     var orderedMenuAccounts: [Account] {
         MenuSummary.orderedAccounts(accounts.filter { !$0.kind.isAPI || $0.kind.isBalance }, preferences: menuPreferences)
     }

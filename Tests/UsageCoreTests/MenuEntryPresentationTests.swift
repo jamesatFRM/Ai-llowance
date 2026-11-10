@@ -99,3 +99,26 @@ import Testing
     let entry = MenuEntry(provider: .claude, label: "Claude", remainingPercent: nil, accountCount: 1, primaryPeriod: "Quota")
     #expect(MenuEntryPresentation.value(entry, preferences: MenuPreferences()) == "—")
 }
+
+@Test func expiredSessionDoesNotHideFreshWeeklyMenuReading() throws {
+    let now = Date()
+    let account = Account(name: "Claude", kind: .claudeCode)
+    let snapshot = Snapshot(observedAt: now, windows: [
+        try QuotaWindow(id: "week.all models", label: "Week", usedPercent: 25, resetsAt: now.addingTimeInterval(86400), durationMinutes: 10080),
+        try QuotaWindow(id: "session", label: "5h", usedPercent: 100, resetsAt: now.addingTimeInterval(-1), durationMinutes: 300)
+    ], source: "Fixture")
+    let entry = try #require(MenuSummary.entries(accounts: [account], snapshots: [account.id:snapshot], unavailable: [], preferences: MenuPreferences(), now: now).first)
+    #expect(entry.remainingPercent == 75)
+    #expect(entry.sessionRemainingPercent == nil)
+}
+
+@Test func expiredModelLimitDoesNotHideClaudeAccountReset() throws {
+    let now = Date()
+    let snapshot = Snapshot(observedAt: now, windows: [
+        try QuotaWindow(id: "week.all models", label: "Week", usedPercent: 25, resetsAt: now.addingTimeInterval(86400), durationMinutes: 10080),
+        try QuotaWindow(id: "week.Fable", label: "Fable", usedPercent: 0, resetsAt: now.addingTimeInterval(-1), durationMinutes: 10080)
+    ], source: "Fixture")
+    let connection = ConnectionPresentation.make(snapshot: snapshot, kind: .claudeCode, now: now)
+    #expect(!connection.saved)
+    #expect(connection.title == "Available")
+}

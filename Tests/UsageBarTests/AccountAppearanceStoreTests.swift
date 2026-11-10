@@ -131,3 +131,24 @@ import UsageCore
     #expect(before[.systemFileNumber] as? NSNumber == after[.systemFileNumber] as? NSNumber)
     await store.shutdown()
 }
+
+@MainActor @Test func dashboardOrderPersistsIndependentlyAndSurvivesAccountChanges() async throws {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    try Paths.prepare(root); defer { try? FileManager.default.removeItem(at: root) }
+    let store = AppStore(root: root, monitor: false)
+    let a = Account(name: "Claude", kind: .claudeCode), b = Account(name: "API", kind: .vercelGateway)
+    store.accounts = [a,b]
+    store.moveDashboardAccount(b.id, offset: -1)
+    let loaded = AppStore(root: root, monitor: false)
+    #expect(loaded.orderedDashboardAccounts.map(\.id) == [b.id,a.id])
+    #expect(loaded.menuPreferences.accountOrder.isEmpty)
+    loaded.moveDashboardAccount(b.id, offset: -1)
+    #expect(loaded.orderedDashboardAccounts.map(\.id) == [b.id,a.id])
+    loaded.accounts.removeAll { $0.id == b.id }
+    let c = Account(name: "New", kind: .codex); loaded.accounts.append(c)
+    #expect(loaded.orderedDashboardAccounts.map(\.id) == [a.id,c.id])
+    loaded.resetDashboardAccountOrder()
+    #expect(loaded.menuPreferences.dashboardAccountOrder.isEmpty)
+    #expect(try JSONDecoder().decode(MenuPreferences.self, from: Data("{}".utf8)).dashboardAccountOrder.isEmpty)
+    await store.shutdown(); await loaded.shutdown()
+}

@@ -28,7 +28,7 @@ private func usefulReading(_ remaining: Double, at date: Date = usefulNow, reset
     #expect(mixed.first?.isUnlimited == false && mixed.first?.remainingPercent == nil)
 }
 
-@Test func menuShowsWeeklyAndExhaustedSessionAndExpiresAfterReset() throws {
+@Test func menuExpiresEachReportedWindowIndependently() throws {
     let account = usefulAccount()
     var report = try usefulReading(0)
     report.windows.append(try QuotaWindow(id: "week.all models", label: "Week", usedPercent: 20,
@@ -38,7 +38,10 @@ private func usefulReading(_ remaining: Double, at date: Date = usefulNow, reset
     #expect(entries.first?.sessionRemainingPercent == 0)
     #expect(AllowanceStatus.evaluate(snapshot: report, kind: .claudeCode, now: usefulNow).state == .exhausted)
     report.windows[0].resetsAt = usefulNow
-    #expect(MenuSummary.entries(accounts: [account], snapshots: [account.id: report], unavailable: [], preferences: MenuPreferences(), now: usefulNow).first?.remainingPercent == nil)
+    let afterReset = MenuSummary.entries(accounts: [account], snapshots: [account.id: report], unavailable: [], preferences: MenuPreferences(), now: usefulNow).first
+    #expect(afterReset?.remainingPercent == 80)
+    #expect(afterReset?.sessionRemainingPercent == nil)
+    #expect(AllowanceStatus.evaluate(snapshot: report, kind: account.kind, now: usefulNow).state == .stale)
 }
 
 @Test func providerSchedulesKeepCostQueriesSlowAndManualThrottlingCorrect() {
