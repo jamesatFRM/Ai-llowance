@@ -152,3 +152,16 @@ import UsageCore
     #expect(try JSONDecoder().decode(MenuPreferences.self, from: Data("{}".utf8)).dashboardAccountOrder.isEmpty)
     await store.shutdown(); await loaded.shutdown()
 }
+
+@MainActor @Test func twoResetReminderSlidersPersistCustomValues() async throws {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    try Paths.prepare(root); defer { try? FileManager.default.removeItem(at: root) }
+    let store = AppStore(root: root, monitor: false)
+    store.setResetRemindersEnabled(true); store.setResetReminderMinimumPercent(37); store.setResetReminderLeadHours(48)
+    store.setSecondResetReminderEnabled(true); store.setSecondResetReminderMinimumPercent(83); store.setSecondResetReminderLeadHours(72)
+    let loaded = AppStore(root: root, monitor: false)
+    #expect(loaded.menuPreferences.resetReminderMinimumPercent == 37 && loaded.menuPreferences.resetReminderLeadHours == 48)
+    #expect(loaded.menuPreferences.secondResetReminderEnabled)
+    #expect(loaded.menuPreferences.secondResetReminderMinimumPercent == 83 && loaded.menuPreferences.secondResetReminderLeadHours == 72)
+    await store.shutdown(); await loaded.shutdown()
+}

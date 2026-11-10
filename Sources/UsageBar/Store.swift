@@ -269,8 +269,11 @@ final class AppStore: ObservableObject {
     }
     func resetMenuAccountOrder() { updateMenu { $0.accountOrder = [] } }
     func setResetRemindersEnabled(_ value: Bool) { updateMenu { $0.resetRemindersEnabled = value } }
-    func setResetReminderLeadHours(_ value: Int) { guard [1,6,12,24,48].contains(value) else { return }; updateMenu { $0.resetReminderLeadHours = value } }
-    func setResetReminderMinimumPercent(_ value: Int) { guard [10,25,50,75].contains(value) else { return }; updateMenu { $0.resetReminderMinimumPercent = value } }
+    func setSecondResetReminderEnabled(_ value: Bool) { updateMenu { $0.secondResetReminderEnabled = value } }
+    func setSecondResetReminderLeadHours(_ value: Int) { guard (1...168).contains(value) else { return }; updateMenu { $0.secondResetReminderLeadHours = value } }
+    func setSecondResetReminderMinimumPercent(_ value: Int) { guard (0...100).contains(value) else { return }; updateMenu { $0.secondResetReminderMinimumPercent = value } }
+    func setResetReminderLeadHours(_ value: Int) { guard (1...168).contains(value) else { return }; updateMenu { $0.resetReminderLeadHours = value } }
+    func setResetReminderMinimumPercent(_ value: Int) { guard (0...100).contains(value) else { return }; updateMenu { $0.resetReminderMinimumPercent = value } }
     func setDashboardChartFullScale(_ value: Bool) { updateMenu { $0.dashboardChartFullScale = value } }
     func setDashboardChartStyle(_ value: DashboardChartStyle) { updateMenu { $0.dashboardChartStyle = value } }
     func setDashboardTransparency(_ value: Double) { guard value.isFinite else { return }; updateMenu { $0.dashboardTransparency = min(1, max(0, value)) } }
@@ -968,6 +971,11 @@ final class AppStore: ObservableObject {
         if notificationsEnabled, menuPreferences.resetRemindersEnabled,
            let reminder = alerts.observeResetReminder(account: account, snapshot: snapshot, now: Date(),
                 leadHours: menuPreferences.resetReminderLeadHours, minimumRemaining: menuPreferences.resetReminderMinimumPercent) {
+            pendingAlerts.append(reminder)
+        }
+        if notificationsEnabled, menuPreferences.resetRemindersEnabled, menuPreferences.secondResetReminderEnabled,
+           let reminder = alerts.observeResetReminder(account: account, snapshot: snapshot, now: Date(),
+                leadHours: menuPreferences.secondResetReminderLeadHours, minimumRemaining: menuPreferences.secondResetReminderMinimumPercent, rule: 1) {
             pendingAlerts.append(reminder)
         }
     }

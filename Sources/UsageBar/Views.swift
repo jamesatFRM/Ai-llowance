@@ -1337,26 +1337,34 @@ struct AccountsView: View {
                     Divider()
                     Toggle("Remind me before weekly resets", isOn: Binding(get: { store.menuPreferences.resetRemindersEnabled }, set: { store.setResetRemindersEnabled($0) }))
                         .disabled(!store.notificationsEnabled)
-                    HStack {
-                        Text("Remind me")
-                        Spacer()
-                        Picker("Reminder lead time", selection: Binding(get: { store.menuPreferences.resetReminderLeadHours }, set: { store.setResetReminderLeadHours($0) })) {
-                            Text("1 hour before").tag(1); Text("6 hours before").tag(6); Text("12 hours before").tag(12)
-                            Text("1 day before").tag(24); Text("2 days before").tag(48)
-                        }.labelsHidden().frame(width: 170)
-                    }.disabled(!store.notificationsEnabled || !store.menuPreferences.resetRemindersEnabled)
-                    HStack {
-                        Text("When at least this much remains")
-                        Spacer()
-                        Picker("Minimum remaining allowance", selection: Binding(get: { store.menuPreferences.resetReminderMinimumPercent }, set: { store.setResetReminderMinimumPercent($0) })) {
-                            ForEach([10,25,50,75], id: \.self) { Text("\($0)%").tag($0) }
-                        }.labelsHidden().frame(width: 100)
-                    }.disabled(!store.notificationsEnabled || !store.menuPreferences.resetRemindersEnabled)
-                    Text("One reminder per account and weekly reset, based on fresh readings while Ai-llowance is running. Enable allowance notifications above first.")
+                    resetReminderControls(second: false)
+                    Toggle("Add a second reminder", isOn: Binding(get: { store.menuPreferences.secondResetReminderEnabled }, set: { store.setSecondResetReminderEnabled($0) }))
+                        .disabled(!store.notificationsEnabled || !store.menuPreferences.resetRemindersEnabled)
+                    if store.menuPreferences.secondResetReminderEnabled { resetReminderControls(second: true) }
+                    Text("Each reminder can alert once per account and weekly reset, using fresh readings while Ai-llowance is running. Percentages mean at least that much remains.")
                         .font(.callout).foregroundStyle(.secondary).frame(maxWidth: .infinity, alignment: .leading)
                 }.padding(10)
             }
         }.font(.system(size: 13)).toggleStyle(SettingsSwitchStyle()).controlSize(.regular).disabled(store.demo)
+    }
+    private func resetReminderControls(second: Bool) -> some View {
+        let percent = second ? store.menuPreferences.secondResetReminderMinimumPercent : store.menuPreferences.resetReminderMinimumPercent
+        let hours = second ? store.menuPreferences.secondResetReminderLeadHours : store.menuPreferences.resetReminderLeadHours
+        let time = hours < 24 ? "\(hours)h" : "\(hours / 24)d" + (hours % 24 == 0 ? "" : " \(hours % 24)h")
+        return VStack(alignment: .leading, spacing: 8) {
+            Text(second ? "Reminder 2" : "Reminder 1").font(.system(size: 12, weight: .semibold))
+            HStack { Text("At least this much remaining"); Spacer(); Text("\(percent)%").monospacedDigit() }
+            Slider(value: Binding(get: { Double(percent) }, set: { value in
+                if second { store.setSecondResetReminderMinimumPercent(Int(value.rounded())) }
+                else { store.setResetReminderMinimumPercent(Int(value.rounded())) }
+            }), in: 0...100, step: 1).accessibilityLabel(second ? "Reminder 2 remaining percentage" : "Reminder 1 remaining percentage")
+            HStack { Text("Before the weekly reset"); Spacer(); Text(time).monospacedDigit() }
+            Slider(value: Binding(get: { Double(hours) }, set: { value in
+                if second { store.setSecondResetReminderLeadHours(Int(value.rounded())) }
+                else { store.setResetReminderLeadHours(Int(value.rounded())) }
+            }), in: 1...168, step: 1).accessibilityLabel(second ? "Reminder 2 lead time in hours" : "Reminder 1 lead time in hours")
+        }.padding(10).background(Color.primary.opacity(0.035), in: RoundedRectangle(cornerRadius: 8))
+            .disabled(!store.notificationsEnabled || !store.menuPreferences.resetRemindersEnabled)
     }
     private var moreConnections: some View {
         VStack(alignment: .leading, spacing: 16) {

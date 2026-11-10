@@ -66,3 +66,33 @@ private func reminderReading(at now: Date = reminderNow, remaining: Double = 75,
     let result13 = legacy.observeResetReminder(account: reminderAccount(), snapshot: try reminderReading(), now: reminderNow, leadHours: 24, minimumRemaining: 25)
     #expect(result13 != nil)
 }
+
+@Test func twoResetReminderRulesHaveIndependentTimesThresholdsAndPersistentDeduplication() throws {
+    var tracker = AlertTracker(); let account = reminderAccount()
+    let early = try reminderReading(remaining: 80, resetHours: 72)
+    let reminder2 = tracker.observeResetReminder(account: account, snapshot: early, now: reminderNow, leadHours: 72, minimumRemaining: 75, rule: 1)
+    let notYet = tracker.observeResetReminder(account: account, snapshot: early, now: reminderNow, leadHours: 48, minimumRemaining: 50)
+    #expect(reminder2 != nil && notYet == nil)
+    var restored = try JSONDecoder().decode(AlertTracker.self, from: JSONEncoder().encode(tracker))
+    let later = reminderNow.addingTimeInterval(86400)
+    let reading = try reminderReading(at: later, remaining: 60, resetHours: 48)
+    let reminder1 = restored.observeResetReminder(account: account, snapshot: reading, now: later, leadHours: 48, minimumRemaining: 50)
+    #expect(reminder1 != nil)
+    let repeat1 = restored.observeResetReminder(account: account, snapshot: reading, now: later, leadHours: 48, minimumRemaining: 50)
+    let repeat2 = restored.observeResetReminder(account: account, snapshot: early, now: reminderNow, leadHours: 72, minimumRemaining: 75, rule: 1)
+    #expect(repeat1 == nil && repeat2 == nil)
+    restored.remove(account.id)
+    let removed = restored.observeResetReminder(account: account, snapshot: reading, now: later, leadHours: 48, minimumRemaining: 50)
+    #expect(removed != nil)
+}
+
+@Test func arbitraryReminderPercentageAndBothSettingsPersist() throws {
+    var preferences = MenuPreferences()
+    preferences.resetRemindersEnabled = true; preferences.resetReminderMinimumPercent = 37; preferences.resetReminderLeadHours = 48
+    preferences.secondResetReminderEnabled = true; preferences.secondResetReminderMinimumPercent = 83; preferences.secondResetReminderLeadHours = 72
+    #expect(try JSONDecoder().decode(MenuPreferences.self, from: JSONEncoder().encode(preferences)) == preferences)
+    var tracker = AlertTracker(); let account = reminderAccount()
+    let below = tracker.observeResetReminder(account: account, snapshot: try reminderReading(remaining: 36), now: reminderNow, leadHours: 24, minimumRemaining: 37)
+    let exact = tracker.observeResetReminder(account: account, snapshot: try reminderReading(remaining: 37), now: reminderNow, leadHours: 24, minimumRemaining: 37)
+    #expect(below == nil && exact != nil)
+}
