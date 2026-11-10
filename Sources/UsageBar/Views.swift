@@ -133,6 +133,9 @@ struct Dashboard: View {
     var renderForSharing = false
     var maximumHeight: CGFloat = 620
     var manage: () -> Void
+    var moveEarlier: (() -> Void)? = nil
+    var moveLater: (() -> Void)? = nil
+    var resetOrder: (() -> Void)? = nil
     @ViewState private var expandedAccountID: UUID?
     @ViewState private var providerContentHeight: CGFloat = 500
 
@@ -905,7 +908,20 @@ struct AccountsView: View {
     }
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @ViewState private var historyWidth: CGFloat = 800
-    private var visibleHistoryAccounts: [Account] { store.accounts.filter { historyAccountID == nil || $0.id == historyAccountID } }
+    private func dashboardCard(_ account: Account) -> some View {
+        let earlier: (() -> Void)? = store.orderedDashboardAccounts.first?.id == account.id ? nil : { store.moveDashboardAccount(account.id, offset: -1) }
+        let later: (() -> Void)? = store.orderedDashboardAccounts.last?.id == account.id ? nil : { store.moveDashboardAccount(account.id, offset: 1) }
+                        let points = store.history(for: account).filter { $0.timestamp >= store.now.addingTimeInterval(-Double(historyHours) * 3600) && $0.timestamp <= store.now }
+                        return HistoryCard(account: account, points: points, snapshot: store.snapshots[account.id],
+                                    error: store.errors[account.id] != nil, cached: store.isCached(account), needsReconnect: store.needsSignIn(account), connection: store.connectionState(account), now: store.now, historyHours: historyHours, chartStyle: store.menuPreferences.dashboardChartStyle, fullScale: store.menuPreferences.dashboardChartFullScale,
+                                    overviewTint: store.menuPreferences.dashboardChartStyle == .mixed ? overviewAccountTint(account, accounts: store.accounts) : nil,
+                                    openUsage: { if store.connectionState(account).needsAction { store.selectedAccountID = account.id; section = .accounts } else { store.openUsage(account) } }, manage: { renaming = account },
+                                    moveEarlier: earlier,
+                                    moveLater: later,
+                                    resetOrder: { store.resetDashboardAccountOrder() })
+                            .frame(width: accountGrid.cardWidth)
+    }
+    private var visibleHistoryAccounts: [Account] { store.orderedDashboardAccounts.filter { historyAccountID == nil || $0.id == historyAccountID } }
     private var accountGrid: AccountGridLayout { AccountGridLayout(count: visibleHistoryAccounts.count, width: historyWidth) }
     private var historyRows: [[Account]] {
         var offset = 0
@@ -920,12 +936,7 @@ struct AccountsView: View {
             ForEach(historyRows, id: \.first?.id) { row in
                 HStack(alignment: .top, spacing: 12) {
                     ForEach(row) { account in
-                        let points = store.history(for: account).filter { $0.timestamp >= store.now.addingTimeInterval(-Double(historyHours) * 3600) && $0.timestamp <= store.now }
-                        HistoryCard(account: account, points: points, snapshot: store.snapshots[account.id],
-                                    error: store.errors[account.id] != nil, cached: store.isCached(account), needsReconnect: store.needsSignIn(account), connection: store.connectionState(account), now: store.now, historyHours: historyHours, chartStyle: store.menuPreferences.dashboardChartStyle, fullScale: store.menuPreferences.dashboardChartFullScale,
-                                    overviewTint: store.menuPreferences.dashboardChartStyle == .mixed ? overviewAccountTint(account, accounts: store.accounts) : nil,
-                                    openUsage: { if store.connectionState(account).needsAction { store.selectedAccountID = account.id; section = .accounts } else { store.openUsage(account) } }, manage: { renaming = account })
-                            .frame(width: accountGrid.cardWidth)
+                        dashboardCard(account)
                     }
                 }.frame(maxWidth: .infinity, alignment: .center)
             }
@@ -1625,6 +1636,9 @@ private struct HistoryCard: View {
     }
     var openUsage: () -> Void
     var manage: () -> Void
+    var moveEarlier: (() -> Void)? = nil
+    var moveLater: (() -> Void)? = nil
+    var resetOrder: (() -> Void)? = nil
     private var status: AllowanceStatus { AllowanceStatus.evaluate(snapshot: snapshot, kind: account.kind, now: now, hasError: error) }
     private var statusColor: Color {
         if !account.enabled || cached || connection.saved { return .secondary }
@@ -1866,7 +1880,14 @@ private struct HistoryCard: View {
                 }.frame(maxWidth: .infinity, minHeight: 32, maxHeight: 32, alignment: .topLeading)
                 HStack(spacing: 8) {
                     Button(action: openUsage) { Label(connection.needsAction ? (needsReconnect ? (account.kind.isAPI ? "Manage API key" : "Reconnect account") : "Connection details") : "Open usage", systemImage: connection.needsAction ? "person.crop.circle.badge.exclamationmark" : "arrow.up.right").frame(maxWidth: .infinity).frame(height: 28) }
-                    Button(action: manage) { Image(systemName: "slider.horizontal.3").frame(width: 28, height: 28) }.help("Name & color").accessibilityLabel("Edit " + account.name)
+                    Menu {
+                        Button("Name & color…", action: manage)
+                        Divider()
+                        Button("Move earlier") { moveEarlier?() }.disabled(moveEarlier == nil)
+                        Button("Move later") { moveLater?() }.disabled(moveLater == nil)
+                        Button("Reset dashboard order") { resetOrder?() }.disabled(resetOrder == nil)
+                    } label: { Image(systemName: "slider.horizontal.3").frame(width: 28, height: 28) }
+                    .menuStyle(.borderlessButton).fixedSize().help("Name, color & dashboard order").accessibilityLabel("Options for " + account.name)
                 }.font(.system(size: 11, weight: .medium)).buttonStyle(QuietButtonStyle())
             }
         }

@@ -24,7 +24,7 @@ private func weeklyReading(_ remaining: Double, kind: ConnectionKind, sessionRem
     #expect(snapshots[claude1.id]?.sessionWindow(for: .claudeCode)?.remainingPercent == 2)
 }
 
-@Test func expiredSessionCannotBeIgnoredToShowHealthyWeeklyAllowance() throws {
+@Test func expiredSessionKeepsWeeklyNumberButDoesNotReportAccountReady() throws {
     for kind in [ConnectionKind.claudeCode, .codex] {
         let account = Account(name: "Example", kind: kind)
         var snapshot = try weeklyReading(90, kind: kind, sessionRemaining: 0)
@@ -32,7 +32,9 @@ private func weeklyReading(_ remaining: Double, kind: ConnectionKind, sessionRem
         for mode in MenuDisplay.allCases {
             var preferences = MenuPreferences(); preferences.display = mode
             let entries = MenuSummary.entries(accounts: [account], snapshots: [account.id: snapshot], unavailable: [], preferences: preferences, now: menuTime)
-            #expect(entries.first?.remainingPercent == nil)
+            #expect(entries.first?.remainingPercent == 90)
+            #expect(entries.first?.sessionRemainingPercent == nil)
+            #expect(AllowanceStatus.evaluate(snapshot: snapshot, kind: kind, now: menuTime).state == .stale)
             #expect(entries.first?.isUnlimited == false)
         }
     }
