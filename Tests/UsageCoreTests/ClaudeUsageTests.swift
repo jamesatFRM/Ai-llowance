@@ -220,3 +220,20 @@ private func envelope(_ text: String, turns: Int = 0, cost: Double = 0) throws -
     #expect(restored?.displayWindow(for: .claudeCode)?.remainingPercent == 19)
     #expect(cache.loadHistory(accounts: [account], now: later)[account.id]?.count == 2)
 }
+
+@Test func claudeResetAcceptsClockAndWeekdayFormatsWithoutInventingDates() throws {
+    let now = try #require(ISO8601DateFormatter().date(from: "2026-11-10T16:00:00Z"))
+    let expected = try #require(ISO8601DateFormatter().date(from: "2026-11-11T17:30:00Z"))
+    for text in ["Nov 11 at 10:30AM (America/Denver)", "Nov 11 at 10:30 AM (America/Denver)", "Wed at 10:30am (America/Denver)", "Wednesday at 10:30AM (America/Denver)", "2026-11-11T17:30:00Z"] {
+        #expect(ClaudeUsageReport.resetDate(text, now: now) == expected)
+    }
+    #expect(ClaudeUsageReport.resetDate("10:30am (America/Denver)", now: now) == now.addingTimeInterval(5400))
+    #expect(ClaudeUsageReport.resetDate("unknown", now: now) == nil)
+    #expect(ClaudeUsageReport.resetDate("Nov 11 at 10am (Invalid/Zone)", now: now) == nil)
+}
+
+@Test func claudeWeekdayResetSurvivesTheFullUsageReport() throws {
+    let text = planText.replacingOccurrences(of: "Oct 13 at 10am", with: "Tue at 10 am")
+    let snapshot = try ClaudeUsageReport.parse(envelope(text), at: checkTime)
+    #expect(snapshot.primaryWeeklyWindow(for: .claudeCode)?.resetsAt == ISO8601DateFormatter().date(from: "2026-10-13T16:00:00Z"))
+}

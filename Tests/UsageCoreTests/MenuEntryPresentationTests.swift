@@ -94,3 +94,8 @@ import Testing
     #expect(try JSONDecoder().decode(MenuPreferences.self, from: Data(#"{"dashboardChartStyle":"future-style"}"#.utf8)).dashboardChartStyle == .mixed)
     #expect(DashboardChartStyle.allCases.filter(\.isCurrentAllowance) == [.ring, .pie, .gauge])
 }
+
+@Test func unavailableMenuReadingDoesNotInventQuotaLabel() {
+    let entry = MenuEntry(provider: .claude, label: "Claude", remainingPercent: nil, accountCount: 1, primaryPeriod: "Quota")
+    #expect(MenuEntryPresentation.value(entry, preferences: MenuPreferences()) == "—")
+}

@@ -96,17 +96,43 @@ public enum ClaudeUsageReport {
     }
 
     static func resetDate(_ value: String, now: Date) -> Date? {
-        guard let start = value.lastIndex(of: "("), value.hasSuffix(")"),
-              let zone = TimeZone(identifier: String(value[value.index(after: start)..<value.index(before: value.endIndex)])) else { return nil }
-        let raw = String(value[..<start]).trimmingCharacters(in: .whitespaces)
+        let input = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        var zone = TimeZone.current
+        var raw = input
+        if let start = input.lastIndex(of: "("), input.hasSuffix(")") {
+            let name = String(input[input.index(after: start)..<input.index(before: input.endIndex)])
+            guard let reportedZone = TimeZone(identifier: name) ?? TimeZone(abbreviation: name) else { return nil }
+            zone = reportedZone
+            raw = String(input[..<start]).trimmingCharacters(in: .whitespaces)
+        }
+        func valid(_ date: Date?) -> Date? {
+            guard let date, date > now.addingTimeInterval(-60), date < now.addingTimeInterval(8 * 86400) else { return nil }
+            return date
+        }
+        if let iso = valid(ISO8601DateFormatter().date(from: raw)) { return iso }
         var calendar = Calendar(identifier: .gregorian); calendar.timeZone = zone
         let year = calendar.component(.year, from: now)
         let formatter = DateFormatter(); formatter.locale = Locale(identifier: "en_US_POSIX")
         formatter.timeZone = zone; formatter.isLenient = false
         for candidateYear in [year, year + 1] {
-            for format in ["yyyy MMM d 'at' h:mma", "yyyy MMM d 'at' ha"] {
+            for format in ["yyyy MMM d 'at' h:mma", "yyyy MMM d 'at' ha", "yyyy MMM d 'at' h:mm a", "yyyy MMM d 'at' h a", "yyyy MMM d 'at' HH:mm"] {
                 formatter.dateFormat = format
-                if let date = formatter.date(from: "\(candidateYear) \(raw)"), date > now.addingTimeInterval(-60), date < now.addingTimeInterval(8 * 86400) { return date }
+                if let date = valid(formatter.date(from: "\(candidateYear) \(raw)")) { return date }
+            }
+        }
+        // CLI output also uses weekday-only and time-only resets in its local zone.
+        for offset in 0...7 {
+            guard let day = calendar.date(byAdding: .day, value: offset, to: now) else { continue }
+            formatter.dateFormat = "yyyy-MM-dd"
+            let prefix = formatter.string(from: day)
+            for format in ["h:mma", "ha", "h:mm a", "h a", "HH:mm"] {
+                for weekday in ["", "EEE 'at' ", "EEEE 'at' "] {
+                    formatter.dateFormat = "yyyy-MM-dd " + weekday + format
+                    guard let date = valid(formatter.date(from: prefix + " " + raw)) else { continue }
+                    // DateFormatter may ignore a contradictory weekday; require a round trip.
+                    formatter.dateFormat = weekday + format
+                    if formatter.string(from: date).lowercased() == raw.lowercased() { return date }
+                }
             }
         }
         return nil

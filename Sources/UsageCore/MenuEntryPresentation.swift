@@ -7,6 +7,7 @@ public enum MenuEntryPresentation {
     }
     private static func currentValue(_ entry: MenuEntry, preferences: MenuPreferences) -> String {
         if entry.isBalance { return entry.balanceUSD?.formatted(.currency(code: "USD").precision(.fractionLength(0...2))) ?? "—" }
+        if !entry.isUnlimited && entry.remainingPercent == nil { return "—" }
         var value = entry.isUnlimited ? "∞" : entry.remainingPercent.map { "\(Int($0))%" } ?? "—"
         if !entry.isUnlimited, let period = entry.primaryPeriod {
             if period == "Week" {
