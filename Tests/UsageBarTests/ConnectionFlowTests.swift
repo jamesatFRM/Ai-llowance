@@ -30,6 +30,19 @@ private actor FetchGate {
     }
     func finish(_ value: Snapshot) { continuation?.resume(returning: value); continuation = nil }
 }
+private actor QueuedSetupGate {
+    var waiting: [UUID: CheckedContinuation<Snapshot, Never>] = [:]
+    var targetRequests: [Account] = []
+    func hold(_ account: Account) async -> Snapshot {
+        await withCheckedContinuation { waiting[account.id] = $0 }
+    }
+    var heldCount: Int { waiting.count }
+    func record(_ account: Account) { targetRequests.append(account) }
+    func finish() {
+        for continuation in waiting.values { continuation.resume(returning: Snapshot(observedAt: Date(), source: "Fixture", balanceUSD: 10)) }
+        waiting.removeAll()
+    }
+}
 
 @Test @MainActor func newClaudeConnectionDoesNotReuseDesktopOrGlobalSignIn() async throws {
     let root = try fixtureRoot(); defer { try? FileManager.default.removeItem(at: root) }
@@ -37,7 +50,7 @@ private actor FetchGate {
     let store = AppStore(root: root, monitor: false, openExternal: { _ in opened = true; return true })
     store.existingClaudeConfig = root.appendingPathComponent("existing")
     store.claudeExecutable = try cli(root, "printf 'not-json'; exit 1")
-    store.connectClaude(existing: true)
+    store.connectSubscription(.claudeCode)
     try await settle { !store.connectingClaude }
     #expect(opened)
     let account = try #require(store.accounts.first)
@@ -199,6 +212,134 @@ private actor FetchGate {
     #expect(store.errors[account.id]?.contains("cancelled") == true)
     #expect(store.needsSignIn(account))
     #expect(store.codexSignInURL == nil)
+}
+
+@Test @MainActor func basicCodexSetupKeepsEachSignInSeparateAndCanContinueInBrowser() async throws {
+    let root = try fixtureRoot(); defer { try? FileManager.default.removeItem(at: root) }
+    var opened: [URL] = []
+    let store = AppStore(root: root, monitor: false, openExternal: { opened.append($0); return true })
+    store.paused = true
+    store.executable = try cli(root, """
+    while IFS= read -r line; do
+      case "$line" in
+        *'"method":"initialize"'*) printf '%s\\n' '{"id":1,"result":{}}' ;;
+        *'account/login/start'*) printf '%s\\n' '{"id":2,"result":{"authUrl":"https://auth.openai.com/fixture","loginId":"one"}}' ;;
+      esac
+    done
+    """)
+    store.openCodexSignInLink()
+    #expect(opened.isEmpty)
+    store.connectSubscription(.codex)
+    try await settle { store.codexSignInURL != nil }
+    let first = try #require(store.accounts.first)
+    #expect(!first.usesExistingCodex)
+    #expect(FileManager.default.fileExists(atPath: Paths.profile(first.id, root: root).path))
+    #expect(opened.count == 1)
+    store.connectSubscription(.codex)
+    #expect(store.accounts.count == 1)
+    store.cancelSignIn(); try await settle { store.signingIn == nil }
+
+    store.connectSubscription(.codex)
+    try await settle { store.codexSignInURL != nil }
+    let second = try #require(store.accounts.last)
+    #expect(second.id != first.id && !second.usesExistingCodex)
+    #expect(opened.count == 1) // A second account waits for an explicit browser choice.
+    store.openCodexSignInLink()
+    #expect(opened.count == 2 && opened.last?.host == "auth.openai.com")
+    store.cancelSignIn(); try await settle { store.signingIn == nil }
+    store.openCodexSignInLink()
+    #expect(opened.count == 2 && store.codexSignInURL == nil)
+    await store.shutdown()
+}
+
+@Test @MainActor func failedContinueInBrowserKeepsThePendingLinkForRecovery() async throws {
+    let root = try fixtureRoot(); defer { try? FileManager.default.removeItem(at: root) }
+    let store = AppStore(root: root, monitor: false, openExternal: { _ in false })
+    store.paused = true
+    store.executable = try cli(root, """
+    while IFS= read -r line; do
+      case "$line" in
+        *'"method":"initialize"'*) printf '%s\\n' '{"id":1,"result":{}}' ;;
+        *'account/login/start'*) printf '%s\\n' '{"id":2,"result":{"authUrl":"https://auth.openai.com/fixture","loginId":"one"}}' ;;
+      esac
+    done
+    """)
+    let account = try store.add(name: "Codex", kind: .codex, secret: "", existing: false, refreshAfter: false)
+    store.signIn(account, openBrowser: false)
+    try await settle { store.codexSignInURL != nil }
+    store.openCodexSignInLink()
+    #expect(store.notice?.contains("Copy the sign-in link") == true)
+    #expect(store.signingIn == account.id && store.codexSignInURL != nil)
+    store.cancelSignIn(); try await settle { store.signingIn == nil }
+    await store.shutdown()
+}
+
+@Test @MainActor func incompleteAPISetupFailsBeforeSavingCredentialsOrAddingAnAccount() throws {
+    let root = try fixtureRoot(); defer { try? FileManager.default.removeItem(at: root) }
+    let store = AppStore(root: root, monitor: false)
+    #expect(throws: UsageError.invalidData) {
+        try store.add(name: "API", kind: .xai, secret: "fixture", existing: false, scopeID: String(repeating: "x", count: 4097))
+    }
+    #expect(throws: (any Error).self) { try store.add(name: "API", kind: .xai, secret: "fixture", existing: false) }
+    #expect(throws: UsageError.missingCredential) { try store.add(name: "API", kind: .vercelGateway, secret: "  ", existing: false) }
+    #expect(store.accounts.isEmpty)
+    #expect(!FileManager.default.fileExists(atPath: root.appendingPathComponent("accounts.json").path))
+}
+
+@Test @MainActor func invalidKeyRetryKeepsTheSameAccountScopeAndVerifiedReading() throws {
+    let root = try fixtureRoot(); defer { try? FileManager.default.removeItem(at: root) }
+    let account = Account(name: "API", kind: .xai, scopeID: "original-team")
+    let store = AppStore(root: root, monitor: false)
+    store.accounts = [account]
+    let reading = Snapshot(observedAt: Date(), source: "Fixture", balanceUSD: 12)
+    store.snapshots[account.id] = reading
+    for key in ["   ", "first\nsecond", "first\rsecond"] {
+        #expect(throws: UsageError.missingCredential) { try store.replaceKey(account, secret: key, scopeID: "new-team") }
+        #expect(store.accounts == [account])
+        #expect(store.snapshots[account.id] == reading)
+    }
+}
+
+@Test @MainActor func failedKeyRetryPersistenceRollsBackScopeAndKeepsTheSameAccount() throws {
+    let root = try fixtureRoot(); defer { try? FileManager.default.removeItem(at: root) }
+    let account = Account(name: "API", kind: .xai, scopeID: "original-team")
+    let store = AppStore(root: root, monitor: false)
+    store.accounts = [account]
+    // Make settings unwritable before Keychain can be touched.
+    try FileManager.default.createDirectory(at: root.appendingPathComponent("accounts.json"), withIntermediateDirectories: false)
+    #expect(throws: UsageError.storage) { try store.replaceKey(account, secret: "fixture", scopeID: "corrected-team") }
+    #expect(store.accounts == [account])
+    #expect(!store.refreshing)
+}
+
+@Test @MainActor func correctingAnAPIAccountDiscardsQueuedRequestsForItsPreviousTeam() async throws {
+    let root = try fixtureRoot(); defer { try? FileManager.default.removeItem(at: root) }
+    let gate = QueuedSetupGate()
+    let first = Account(name: "First", kind: .xai, scopeID: "first-team"), second = Account(name: "Second", kind: .xai, scopeID: "second-team")
+    let target = Account(name: "Target", kind: .xai, scopeID: "previous-team")
+    let store = AppStore(root: root, monitor: false, fetch: { account, date in
+        if account.id != target.id { return await gate.hold(account) }
+        await gate.record(account)
+        return Snapshot(observedAt: date, source: "Fixture", balanceUSD: 20)
+    })
+    store.accounts = [first, second, target]
+    store.refresh()
+    let deadline = Date().addingTimeInterval(5)
+    while await gate.heldCount != 2 {
+        guard Date() < deadline else { throw UsageError.timeout }
+        try await Task.sleep(for: .milliseconds(10))
+    }
+    var corrected = target
+    corrected.scopeID = "corrected-team"; corrected.credentialRevision = UUID()
+    store.accounts[2] = corrected
+    store.retryConnection(corrected)
+    await gate.finish()
+    try await settle { !store.refreshing && store.snapshots[target.id] != nil }
+    let requests = await gate.targetRequests
+    #expect(requests.count == 1)
+    #expect(requests.first?.scopeID == "corrected-team")
+    #expect(store.snapshots[target.id]?.balanceUSD == 20)
+    await store.shutdown()
 }
 
 @Test @MainActor func corruptSettingsArePreservedAndAddingAccountsFailsClosed() throws {
