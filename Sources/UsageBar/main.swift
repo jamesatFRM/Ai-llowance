@@ -186,19 +186,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
     private var hasVisibleSettings: Bool {
         window?.isVisible == true && window?.isMiniaturized != true && !NSApp.isHidden
     }
-    func applicationDidHide(_ notification: Notification) { closePopover() }
-    func applicationDidUnhide(_ notification: Notification) { store.setInterfaceVisible(popover.isShown || hasVisibleSettings) }
-    func windowDidMiniaturize(_ notification: Notification) { store.setInterfaceVisible(popover.isShown || hasVisibleSettings) }
-    func windowDidDeminiaturize(_ notification: Notification) { store.setInterfaceVisible(popover.isShown || hasVisibleSettings) }
+    func applicationDidHide(_ notification: Notification) { closePopover(); store.setDashboardVisible(false) }
+    func applicationDidUnhide(_ notification: Notification) { updateWindowVisibility() }
+    func windowDidMiniaturize(_ notification: Notification) { updateWindowVisibility() }
+    func windowDidDeminiaturize(_ notification: Notification) { updateWindowVisibility() }
+    private func updateWindowVisibility() {
+        store.setDashboardVisible(hasVisibleSettings)
+        store.setInterfaceVisible(popover.isShown || hasVisibleSettings)
+    }
     func applicationDidResignActive(_ notification: Notification) { closePopover() }
     func applicationDidBecomeActive(_ notification: Notification) { store.rediscoverTools(); store.refresh() }
-    func windowWillClose(_ notification: Notification) { store.setInterfaceVisible(popover.isShown) }
+    func windowWillClose(_ notification: Notification) { store.setDashboardVisible(false); store.setInterfaceVisible(popover.isShown) }
     private func showAccounts() {
         closePopover()
+        store.setDashboardVisible(true)
         store.setInterfaceVisible(true)
         if window == nil {
             let controller = NSHostingController(rootView: AccountsView(store: store) { [weak self] in
                 self?.window?.orderOut(nil)
+                self?.store.setDashboardVisible(false)
                 self?.togglePopover()
             })
             let created = NSWindow(contentViewController: controller)
@@ -229,9 +235,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
         let menu = NSMenu()
         let applicationItem = NSMenuItem(title: "Ai-llowance", action: nil, keyEquivalent: "")
         let applicationMenu = NSMenu(title: "Ai-llowance")
+        applicationMenu.addItem(withTitle: "About Ai-llowance", action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)), keyEquivalent: "")
+        applicationMenu.addItem(.separator())
+        let settings = applicationMenu.addItem(withTitle: "Settings…", action: #selector(showSettings), keyEquivalent: ",")
+        settings.target = self
+        applicationMenu.addItem(.separator())
         applicationMenu.addItem(withTitle: "Quit Ai-llowance", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         applicationItem.submenu = applicationMenu
         menu.addItem(applicationItem)
+        let fileItem = NSMenuItem(title: "File", action: nil, keyEquivalent: "")
+        let fileMenu = NSMenu(title: "File")
+        fileMenu.addItem(withTitle: "Close Window", action: #selector(NSWindow.performClose(_:)), keyEquivalent: "w")
+        fileItem.submenu = fileMenu
+        menu.addItem(fileItem)
         let editItem = NSMenuItem(title: "Edit", action: nil, keyEquivalent: "")
         let edit = NSMenu(title: "Edit")
         for (title, action, key) in [("Undo", "undo:", "z"), ("Redo", "redo:", "Z"), ("Cut", "cut:", "x"), ("Copy", "copy:", "c"), ("Paste", "paste:", "v"), ("Select All", "selectAll:", "a")] {
@@ -239,8 +255,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
         }
         editItem.submenu = edit
         menu.addItem(editItem)
+        let windowItem = NSMenuItem(title: "Window", action: nil, keyEquivalent: "")
+        let windowMenu = NSMenu(title: "Window")
+        windowMenu.addItem(withTitle: "Minimize", action: #selector(NSWindow.performMiniaturize(_:)), keyEquivalent: "m")
+        windowMenu.addItem(withTitle: "Zoom", action: #selector(NSWindow.performZoom(_:)), keyEquivalent: "")
+        windowMenu.addItem(.separator())
+        windowMenu.addItem(withTitle: "Bring All to Front", action: #selector(NSApplication.arrangeInFront(_:)), keyEquivalent: "")
+        windowItem.submenu = windowMenu
+        menu.addItem(windowItem)
         NSApp.mainMenu = menu
+        NSApp.windowsMenu = windowMenu
     }
+    @objc private func showSettings() { store.requestSettings(); showAccounts() }
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool { showAccounts(); return true }
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {

@@ -38,6 +38,8 @@ final class AppStore: ObservableObject {
     @Published var paused = false
     @Published var offline = false
     @Published var now = Date()
+    @Published private(set) var dashboardVisible = false
+    @Published private(set) var settingsNavigationVersion: UInt64 = 0
     @Published private(set) var menuPreferences = MenuPreferences()
     @Published private(set) var accountNavigationVersion: UInt64 = 0
     @Published var selectedAccountID: UUID? {
@@ -71,6 +73,7 @@ final class AppStore: ObservableObject {
     private var refreshTask: Task<Void, Never>?
     private var loginTask: Task<Void, Never>?
     private var connectionTask: Task<Void, Never>?
+    private var diagnosticsTask: Task<[DiagnosticTool], Never>?
     private var heartbeat: DispatchSourceTimer?
     private var pendingManualRefresh = false
     private var pendingAccountRetries: Set<UUID> = []
@@ -101,8 +104,12 @@ final class AppStore: ObservableObject {
         self.demo = demo; self.root = root; self.fetchOverride = fetch; self.openExternal = openExternal
         self.requestNotificationAuthorization = requestNotificationAuthorization
         if demo {
+            dashboardVisible = true
+            if Bundle.main.object(forInfoDictionaryKey: "AILSetupPreview") as? Bool == true { return }
+            let qualityPreview = Bundle.main.object(forInfoDictionaryKey: "AILQualityPreview") as? Bool == true
             accounts = [Account(name: "Personal", kind: .claudeCode), Account(name: "Work", kind: .claudeCode),
                         Account(name: "Personal", kind: .codex), Account(name: "Work", kind: .codex)]
+            if qualityPreview { accounts[3].kind = .vercelGateway; accounts[3].name = "AI Gateway" }
             let count = min(10, max(1, demoAccountCount))
             if count < accounts.count { accounts = Array(accounts.prefix(count)) }
             while accounts.count < count {
@@ -110,10 +117,10 @@ final class AppStore: ObservableObject {
             }
             for (index, account) in accounts.enumerated() {
                 let claude = account.kind == .claudeCode
-                let remaining = [72.0, 24.0, 58.0, 16.0][index % 4]
+                let remaining = [72.0, qualityPreview ? 16.0 : 24.0, 58.0, 16.0][index % 4]
                 var windows = [try! QuotaWindow(id: claude ? "week.all models" : "codex.Secondary", label: "Week · 7d", usedPercent: 100 - remaining,
                     resetsAt: now.addingTimeInterval(Double(index + 2) * 86400), durationMinutes: 10_080)]
-                do { windows.append(try! QuotaWindow(id: claude ? "session" : "codex.Primary", label: "Session · 5h", usedPercent: index == 1 ? 100 : 18,
+                if !qualityPreview || index != 1 { windows.append(try! QuotaWindow(id: claude ? "session" : "codex.Primary", label: "Session · 5h", usedPercent: index == 1 ? 100 : 18,
                     resetsAt: now.addingTimeInterval(7200), durationMinutes: 300)) }
                 snapshots[account.id] = Snapshot(observedAt: now, windows: windows, identity: index % 2 == 0 ? "alex@example.com" : "work@example.com", source: "Sample data")
                 usageHistory[account.id] = (0...48).map { sample in
@@ -124,7 +131,7 @@ final class AppStore: ObservableObject {
                     point.windowDurationMinutes = windows[0].durationMinutes
                     return point
                 }
-                if (CommandLine.arguments.contains("--history") || Bundle.main.object(forInfoDictionaryKey: "AILHistoryPreview") as? Bool == true) {
+                if (qualityPreview || CommandLine.arguments.contains("--history") || Bundle.main.object(forInfoDictionaryKey: "AILHistoryPreview") as? Bool == true) {
                     let older = (2...359).reversed().map { day -> UsageHistoryPoint in
                         let date = now.addingTimeInterval(-Double(day) * 86400)
                         var point = UsageHistoryPoint(timestamp: date, remainingPercent: max(4, 97 - Double((day + index * 2) % 7) * (8 + Double(index))), windowID: windows[0].id, resetsAt: date.addingTimeInterval(Double(day % 7 + 1) * 86400))
@@ -143,6 +150,15 @@ final class AppStore: ObservableObject {
                     errors[account.id] = UsageError.timeout.localizedDescription
                     refreshFailures[account.id] = .timeout
                     var schedule = PollState(); schedule.failed(UsageError.timeout, at: now); schedules[account.id] = schedule
+                }
+                if account.kind.isBalance {
+                    snapshots[account.id] = Snapshot(observedAt: now, source: "Sample data", balanceUSD: 20.20, balanceLabel: "Team credits")
+                    usageHistory[account.id] = (0...48).map { sample in
+                        UsageHistoryPoint(timestamp: now.addingTimeInterval(Double(sample - 48) * 1800), balanceUSD: 25 - Decimal(sample) / 10)
+                    }
+                    usageDays[account.id] = (0...359).reversed().map { day in
+                        UsageDay(day: HistoryTrends.calendar.startOfDay(for: now).addingTimeInterval(-Double(day) * 86400), money: .init(amount: 1.2, seconds: 85000))
+                    }
                 }
             }
             menuPreferences.display = .byAccount; menuPreferences.showAccountNames = false
@@ -164,10 +180,14 @@ final class AppStore: ObservableObject {
         if !readOnly {
             let cache = SnapshotCache(root: root)
             let isolatedAccounts = accounts.filter { !($0.kind == .claudeCode && $0.usesExistingClaude == true) }
-            snapshots = cache.load(accounts: isolatedAccounts, now: now)
+            let savedState = cache.loadState(accounts: isolatedAccounts, now: now)
+            snapshots = savedState.snapshots
             cachedAccounts = Set(snapshots.keys)
-            usageHistory = cache.loadHistory(accounts: isolatedAccounts, now: now)
-            usageDays = cache.loadUsage(accounts: isolatedAccounts, now: now)
+            usageHistory = savedState.history
+            usageDays = savedState.usage
+            if savedState.unreadableRecords > 0 {
+                notice = "Some saved history could not be read. A private recovery copy will be kept before saving new readings. Current usage can still refresh; diagnostics can help troubleshoot."
+            }
             for account in accounts where account.kind == .claudeCode && account.usesExistingClaude == true {
                 authenticationRequired.insert(account.id)
                 errors[account.id] = UsageError.claudeDedicatedSignInRequired.localizedDescription
@@ -215,6 +235,51 @@ final class AppStore: ObservableObject {
             reconnect: needsSignIn(account), cached: cachedAccounts.contains(account.id),
             failed: errors[account.id] != nil, networkFailure: networkFailures.contains(account.id), failure: refreshFailures[account.id], retryAt: schedules[account.id]?.nextAttempt)
     }
+    func recoveryAction(_ account: Account) -> AccountRecoveryAction {
+        let limited: Bool
+        if case .rateLimited = refreshFailures[account.id], let next = schedules[account.id]?.nextAttempt, next > now { limited = true }
+        else { limited = false }
+        return .make(kind: account.kind, enabled: account.enabled,
+            signingIn: signingIn == account.id || waitingForClaude[account.id] != nil,
+            reconnect: needsSignIn(account),
+            sharedSignIn: account.kind == .copilot || account.kind == .grokSubscription || (account.kind == .codex && account.usesExistingCodex),
+            failed: errors[account.id] != nil || connectionState(account).saved || snapshots[account.id] == nil,
+            blocked: offline || paused || refreshingAccounts.contains(account.id) || limited)
+    }
+    func diagnosticReport() async throws -> String {
+        guard diagnosticsTask == nil, !shuttingDown else { throw CancellationError() }
+        let installed: [(ConnectionKind, URL?)] = [(.claudeCode, claudeExecutable), (.codex, executable), (.copilot, copilotExecutable), (.grokSubscription, grokExecutable)]
+        let demo = demo
+        let task = Task { () -> [DiagnosticTool] in
+            var tools: [DiagnosticTool] = []
+            // Probe sequentially, only on request. No additional background work.
+            for (kind, url) in installed {
+                if Task.isCancelled { break }
+                let version = if let url, !demo { await ToolVersionProbe.read(executable: url) } else { nil as String? }
+                tools.append(DiagnosticTool(provider: kind, installed: url != nil, version: version))
+            }
+            return tools
+        }
+        diagnosticsTask = task
+        let tools = await task.value
+        diagnosticsTask = nil
+        guard !shuttingDown, !task.isCancelled, !Task.isCancelled else { throw CancellationError() }
+        let date = Date(), os = ProcessInfo.processInfo.operatingSystemVersion
+        return try DiagnosticReport(appVersion: AppUpdater.version,
+            build: Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "development",
+            macOS: "\(os.majorVersion).\(os.minorVersion).\(os.patchVersion)", preview: AppUpdater.isPreview,
+            offline: offline, paused: paused, settingsReadable: !readOnly, automaticUpdates: updater.automaticChecks,
+            tools: tools, accounts: accounts.map { account in
+                DiagnosticAccount(account: account, snapshot: snapshots[account.id], saved: connectionState(account).saved,
+                    failure: refreshFailures[account.id], retryAt: schedules[account.id]?.nextAttempt,
+                    historyPoints: usageHistory[account.id]?.count ?? 0, summaryDays: usageDays[account.id]?.count ?? 0, now: date)
+            }).text()
+    }
+    func setDashboardVisible(_ visible: Bool) {
+        guard dashboardVisible != visible else { return }
+        dashboardVisible = visible
+    }
+    func requestSettings() { settingsNavigationVersion &+= 1 }
     var refreshSummary: String {
         if demo { return "Sample data" }
         if paused { return "Paused" }
@@ -234,7 +299,7 @@ final class AppStore: ObservableObject {
             guard !authenticationRequired.contains(account.id), let snapshot = snapshots[account.id],
                   snapshot.observedAt <= now.addingTimeInterval(60),
                   now.timeIntervalSince(snapshot.observedAt) <= 7 * 86400 else { return nil }
-            return offline || cachedAccounts.contains(account.id) || errors[account.id] != nil || snapshot.isStale(at: now, windows: account.kind.isAPI ? snapshot.applicableWindows(for: account.kind) : [snapshot.displayWindow(for: account.kind)].compactMap { $0 }) ? account.id : nil
+            return paused || offline || cachedAccounts.contains(account.id) || errors[account.id] != nil || snapshot.isStale(at: now, windows: snapshot.applicableWindows(for: account.kind)) ? account.id : nil
         })
         return MenuSummary.entries(accounts: accounts, snapshots: snapshots, unavailable: Set(errors.keys).union(authenticationRequired), preferences: menuPreferences, now: now, lastKnown: lastKnown)
     }
@@ -316,7 +381,11 @@ final class AppStore: ObservableObject {
     @discardableResult
     func add(name: String, kind: ConnectionKind, secret: String, existing: Bool, refreshAfter: Bool = true, scopeID: String? = nil) throws -> Account {
         guard !demo, !readOnly else { throw UsageError.storage }
-        guard accounts.count < 1000, name.utf8.count <= 4096, !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { throw UsageError.invalidData }
+        guard accounts.count < 1000, name.utf8.count <= 4096, (scopeID?.utf8.count ?? 0) <= 4096,
+              !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { throw UsageError.invalidData }
+        if kind == .xai && (scopeID?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true) {
+            throw UsageError.unavailable("Enter the xAI team ID shown in your team settings.")
+        }
         if kind == .codex && existing && accounts.contains(where: { $0.usesExistingCodex }) {
             throw UsageError.unavailable("The existing Codex CLI profile is already connected.")
         }
@@ -337,12 +406,23 @@ final class AppStore: ObservableObject {
     }
     func connectOpenAI(existing: Bool = false) {
         guard !demo, !readOnly, !removing, signingIn == nil, waitingForClaude.isEmpty else { return }
-        guard executable != nil else { notice = "Install Codex CLI once, then click Connect OpenAI. If it is already installed, use Choose Codex CLI below."; return }
+        guard executable != nil else { notice = "Install Codex CLI once, then return to Accounts → Codex. If it is already installed, choose its location under More options."; return }
         do {
             let account = try add(name: automaticName("OpenAI", kind: .codex), kind: .codex, secret: "", existing: existing, refreshAfter: false)
             selectedAccountID = account.id
             if existing { refresh(force: true) } else { signIn(account, openBrowser: accounts.filter { $0.kind == .codex }.count == 1) }
         } catch { notice = safeMessage(error) }
+    }
+    /// The basic setup always gives subscription accounts their own sign-in.
+    /// Reusing a CLI profile is an explicit advanced choice for Codex only.
+    func connectSubscription(_ kind: ConnectionKind) {
+        switch kind {
+        case .claudeCode: connectClaude(existing: false)
+        case .codex: connectOpenAI(existing: false)
+        case .grokSubscription: connectGrok()
+        case .copilot: connectCopilot()
+        default: break
+        }
     }
     func recommendedAccount(for kind: ConnectionKind) -> Account? {
         AccountRecommendation.best(kind: kind, accounts: accounts, snapshots: snapshots,
@@ -423,7 +503,7 @@ final class AppStore: ObservableObject {
         } catch { notice = safeMessage(error) }
     }
     private func claudeConnection() throws -> ClaudeConnection {
-        guard let claudeExecutable else { throw UsageError.unavailable("Install Claude Code once, then click Connect Claude. If it is installed elsewhere, use Choose Claude CLI below.") }
+        guard let claudeExecutable else { throw UsageError.unavailable("Install Claude Code once, then return to Accounts → Claude. If it is already installed, choose its location under More options.") }
         return ClaudeConnection(root: root, executable: claudeExecutable,
             bundledBridge: Bundle.main.bundleURL.appendingPathComponent("Contents/MacOS/UsageBridge"), existingConfig: existingClaudeConfig)
     }
@@ -535,7 +615,7 @@ final class AppStore: ObservableObject {
     }
     func setAccountAppearance(_ account: Account, name: String, menu: String?, dashboard: String?, graph: String?) -> Bool {
         let name = name.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !demo, !readOnly, !name.isEmpty, name.utf8.count <= 4096,
+        guard !readOnly, !name.isEmpty, name.utf8.count <= 4096,
               [menu, dashboard, graph].compactMap({ $0 }).allSatisfy({ $0.range(of: "^[0-9A-Fa-f]{6}$", options: .regularExpression) != nil }),
               let index = accounts.firstIndex(where: { $0.id == account.id }) else { return false }
         let old = accounts[index]
@@ -550,21 +630,34 @@ final class AppStore: ObservableObject {
         accounts[index].name = name.trimmingCharacters(in: .whitespacesAndNewlines)
         do { try persist() } catch { accounts[index].name = old; notice = "Could not save the account name." }
     }
-    func replaceKey(_ account: Account, secret: String) throws {
+    func replaceKey(_ account: Account, secret: String, scopeID: String? = nil) throws {
         guard !demo, !readOnly, account.kind.isAPI, accounts.contains(where: { $0.id == account.id }) else { throw UsageError.storage }
-        guard !refreshing, !removing else { throw UsageError.unavailable("Wait for the current refresh to finish, then save the key.") }
+        guard !refreshingAccounts.contains(account.id), !removing else { throw UsageError.unavailable("Wait for this account’s refresh to finish, then save the key.") }
+        let secret = secret.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !secret.isEmpty, !secret.contains("\n"), !secret.contains("\r") else { throw UsageError.missingCredential }
         guard let index = accounts.firstIndex(where: { $0.id == account.id }) else { throw UsageError.storage }
-        let oldRevision = accounts[index].credentialRevision
+        let previous = accounts[index]
+        if let scopeID {
+            guard account.kind == .xai, !scopeID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, scopeID.utf8.count <= 4096 else { throw UsageError.invalidData }
+            accounts[index].scopeID = scopeID.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
         accounts[index].credentialRevision = UUID()
         // Persist the generation before changing Keychain. A crash or a delayed cache
         // write must never restore readings made with the previous key.
         do { try persist() }
-        catch { accounts[index].credentialRevision = oldRevision; throw error }
-        try keychain.save(secret.trimmingCharacters(in: .whitespacesAndNewlines), for: account.id)
+        catch { accounts[index] = previous; throw error }
+        do { try keychain.save(secret, for: account.id) }
+        catch {
+            // Keep the new generation invalidating old disk readings, but don't
+            // apply a new team scope when its credential could not be saved.
+            accounts[index].scopeID = previous.scopeID
+            try? persist()
+            throw error
+        }
         connectionVersions[account.id] = UUID()
         clearCachedReading(account)
         schedules[account.id] = PollState(); snapshots[account.id] = nil; errors[account.id] = nil
-        refresh(force: true)
+        retryConnection(accounts[index])
     }
     func toggle(_ account: Account) {
         guard let index = accounts.firstIndex(where: { $0.id == account.id }) else { return }
@@ -665,6 +758,9 @@ final class AppStore: ObservableObject {
     }
     private func refreshAccount(_ account: Account) async {
         guard !Task.isCancelled, !shuttingDown else { return }
+        // A queued request may predate a key/team correction. Its account copy
+        // must not read the new key using the previous team's scope.
+        guard accounts.contains(where: { $0.id == account.id && $0.credentialRevision == account.credentialRevision }) else { return }
         refreshingAccounts.insert(account.id)
         defer { refreshingAccounts.remove(account.id); now = Date() }
         if Task.isCancelled || paused || sleeping || offline { return }
@@ -786,6 +882,13 @@ final class AppStore: ObservableObject {
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(url.absoluteString, forType: .string)
     }
+    func openCodexSignInLink() {
+        guard !demo, !shuttingDown, let id = signingIn, let url = codexSignInURL,
+              let account = accounts.first(where: { $0.id == id }) else { return }
+        if !openLink(url, for: account) {
+            notice = "Could not open your browser. Copy the sign-in link and open it in the browser you use for this account."
+        }
+    }
     func cancelSignIn() { loginTask?.cancel() }
     func shutdown() async {
         shuttingDown = true
@@ -793,9 +896,11 @@ final class AppStore: ObservableObject {
         for observer in workspaceObservers { NSWorkspace.shared.notificationCenter.removeObserver(observer) }
         workspaceObservers = []
         refreshTask?.cancel(); loginTask?.cancel(); connectionTask?.cancel()
+        diagnosticsTask?.cancel()
         await refreshTask?.value
         await loginTask?.value
         await connectionTask?.value
+        await diagnosticsTask?.value
         await cacheTask?.value
     }
     func chooseExecutable() { chooseTool(.codex) }

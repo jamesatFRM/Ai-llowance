@@ -9,7 +9,7 @@ struct HistoryTrendsView: View {
     @AppStorage("historyRangeDays") private var days = 30
     @HistoryViewState private var accountID: UUID?
     @AppStorage("historyQuotaSession") private var session = false
-    private var accounts: [Account] { store.accounts.filter { accountID == nil || $0.id == accountID } }
+    private var accounts: [Account] { store.orderedDashboardAccounts.filter { accountID == nil || $0.id == accountID } }
     private var start: Date { HistoryTrends.calendar.date(byAdding: .day, value: 1 - days, to: HistoryTrends.calendar.startOfDay(for: store.now))! }
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {
@@ -21,7 +21,7 @@ struct HistoryTrendsView: View {
                 Spacer()
                 Picker("Account", selection: $accountID) {
                     Text("All accounts").tag(nil as UUID?)
-                    ForEach(store.accounts) { Text($0.name + " · " + $0.kind.provider.title).tag(Optional($0.id)) }
+                    ForEach(store.accounts) { Text($0.pickerLabel).tag(Optional($0.id)) }
                 }.labelsHidden().frame(width: 180)
             }
             HStack(spacing: 16) {
@@ -32,7 +32,7 @@ struct HistoryTrendsView: View {
                 Picker("Quota window", selection: $session) {
                     Text("Weekly").tag(false)
                     Text("5-hour").tag(true)
-                }.pickerStyle(.segmented).labelsHidden().frame(width: 164).help("Quota window for subscription accounts. API accounts always show dollars.")
+                }.pickerStyle(.segmented).labelsHidden().frame(width: 164).disabled(accounts.allSatisfy { $0.kind.isAPI }).help("Quota window for subscription accounts. API accounts always show dollars.")
             }
             if accounts.isEmpty {
                 ContentUnavailableView("No accounts yet", systemImage: "chart.bar.xaxis", description: Text("Connect an account to start building your history."))
@@ -40,19 +40,24 @@ struct HistoryTrendsView: View {
             ForEach(accounts) { account in
                 let recorded = store.usageDays[account.id] ?? []
                 let samples = ConsumptionHistory.buckets(recorded, kind: account.kind, session: session, since: start, now: store.now, weekly: days >= 60)
-                HistoryTrendPanel(account: account, samples: samples, firstRecorded: recorded.first(where: { account.kind.isAPI ? $0.money != nil : session ? $0.session != nil : $0.weekly != nil })?.day, start: start, end: store.now, days: days, session: session)
+                let summary = ConsumptionSummary(days: recorded, kind: account.kind, session: session, since: start, now: store.now)
+                HistoryTrendPanel(account: account, samples: samples, summary: summary, firstRecorded: recorded.first(where: { account.kind.isAPI ? $0.money != nil : session ? $0.session != nil : $0.weekly != nil })?.day, start: start, end: store.now, days: days, session: session)
             }
-            Label("Stored on this Mac · 7 days of detail, up to 360 days of usage summaries (UTC)", systemImage: "lock.shield")
+            Label("Stored on this Mac · 7 days of detail, 366-day retention for daily summaries (UTC)", systemImage: "lock.shield")
                 .font(.system(size: 11)).foregroundStyle(.secondary)
-            Text("Bars show observed consumption, excluding refills and resets. Faded bars have incomplete coverage; gaps are unmeasured. Subscription usage is measured in allowance points, not tokens. Weekly and 5-hour usage stay separate.")
+            Text("Bars show observed consumption, excluding refills and resets. Faded bars have incomplete coverage; gaps are unmeasured. One allowance point is 1% of that account’s limit. Different plans have different capacities; points are not comparable tokens or dollars. Weekly and 5-hour usage stay separate. Usage is never projected into unmeasured time.")
                 .font(.system(size: 11)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
         }.padding(8).environment(\.calendar, HistoryTrends.calendar).environment(\.timeZone, HistoryTrends.calendar.timeZone)
+            .onChange(of: store.accounts.map(\.id)) { _, ids in
+                if let accountID, !ids.contains(accountID) { self.accountID = nil }
+            }
     }
 }
 
 private struct HistoryTrendPanel: View {
     let account: Account
     let samples: [ConsumptionBucket]
+    let summary: ConsumptionSummary
     let firstRecorded: Date?
     let start: Date
     let end: Date
@@ -86,7 +91,8 @@ private struct HistoryTrendPanel: View {
                 Spacer()
                 VStack(alignment: .trailing, spacing: 4) {
                     Text(metric).font(.system(size: 12, weight: .medium)).foregroundStyle(tint)
-                    Text(samples.contains(where: \.partial) ? "Observed usage · incomplete coverage" : "Observed usage").font(.system(size: 11)).foregroundStyle(.secondary)
+                    Text(samples.isEmpty ? "No measured intervals" : String(format: "%.1f %@ observed", summary.amount, account.kind.isAPI ? "USD" : "points"))
+                        .font(.system(size: 11)).monospacedDigit().foregroundStyle(.secondary)
                 }
             }
             if samples.isEmpty {
@@ -101,6 +107,13 @@ private struct HistoryTrendPanel: View {
                         RectangleMark(xStart: .value("Start", sample.start.addingTimeInterval(sample.end.timeIntervalSince(sample.start) * 0.14)), xEnd: .value("End", sample.end.addingTimeInterval(-sample.end.timeIntervalSince(sample.start) * 0.14)), yStart: .value("Baseline", 0), yEnd: .value(metric, sample.amount))
                             .foregroundStyle(LinearGradient(colors: [tint.opacity(sample.partial ? 0.48 : 0.85), tint.opacity(0.14)], startPoint: .top, endPoint: .bottom))
                             .cornerRadius(3)
+                            .accessibilityLabel(dateText(sample.start))
+                            .accessibilityValue(value(sample) + String(format: ", %.0f percent time coverage", sample.coverage(at: end) * 100))
+                        if sample.amount == 0 {
+                            PointMark(x: .value("Period", sample.midpoint), y: .value(metric, 0))
+                                .symbolSize(12).foregroundStyle(tint.opacity(0.65))
+                                .accessibilityLabel("Measured zero usage on " + dateText(sample.start))
+                        }
                         if days >= 60 && sample.end <= end {
                             LineMark(x: .value("Period", sample.midpoint), y: .value("Three-week average", sample.trend), series: .value("Segment", sample.segment))
                                 .foregroundStyle(tint).lineStyle(StrokeStyle(lineWidth: 2.5, lineCap: .round))
@@ -131,11 +144,21 @@ private struct HistoryTrendPanel: View {
                     }
                 }.frame(height: 160)
                 HStack {
-                    if let selected { Text(dateText(selected.start) + " · " + value(selected) + (selected.partial ? " · partial coverage" : "")) }
+                    if let selected { Text(dateText(selected.start) + " · " + value(selected) + String(format: " · %.0f%% coverage", selected.coverage(at: end) * 100)) }
                     else { Text(days >= 60 ? "Weekly totals · line: 3-week average" : "Daily observed usage · hover to inspect") }
                     Spacer()
                     if let firstRecorded { Text("Available since " + dateText(firstRecorded)) }
                 }.font(.system(size: 10)).foregroundStyle(.secondary).monospacedDigit()
+                HStack(spacing: 10) {
+                    GeometryReader { geometry in
+                        Capsule().fill(Color.primary.opacity(0.06))
+                            .overlay(alignment: .leading) { Capsule().fill(tint.opacity(0.65)).frame(width: geometry.size.width * summary.coverage) }
+                    }.frame(width: 70, height: 4).accessibilityHidden(true)
+                    Text(String(format: "%.0f%% of selected time measured", summary.coverage * 100))
+                    Spacer()
+                    Text("\(summary.measuredDays) days with readings")
+                }.font(.system(size: 10)).foregroundStyle(.secondary)
+                    .help("Coverage is the time between consecutive usable readings. Zero means measured zero; gaps have no reading. Totals are not estimates for the entire range.")
             }
         }.padding(18).background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 20))
             .overlay(RoundedRectangle(cornerRadius: 20).strokeBorder(.primary.opacity(0.08)))

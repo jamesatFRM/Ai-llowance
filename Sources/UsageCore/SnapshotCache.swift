@@ -32,7 +32,15 @@ public struct UsageHistoryPoint: Codable, Equatable, Identifiable, Sendable {
 /// Private, bounded readings, never credentials. Cached timestamps and reset dates are preserved.
 public struct SnapshotCache: Sendable {
     public static let maximumPoints = 4096
-    public static let retention: TimeInterval = 360 * 86400
+    public static let retentionDays = 366
+    public static let retention: TimeInterval = Double(retentionDays) * 86400
+
+    public struct State: Sendable {
+        public var snapshots: [UUID: Snapshot] = [:]
+        public var history: [UUID: [UsageHistoryPoint]] = [:]
+        public var usage: [UUID: [UsageDay]] = [:]
+        public var unreadableRecords = 0
+    }
 
     /// Keep recent detail, then one actual closing observation per UTC day.
     public static func compact(_ points: [UsageHistoryPoint], now: Date) -> [UsageHistoryPoint] {
@@ -97,7 +105,7 @@ public struct SnapshotCache: Sendable {
                 && point.costUSD.map { !$0.isNaN && $0 >= 0 && $0 <= moneyLimit } != false
         }), zip(record.history, record.history.dropFirst()).allSatisfy({ $0.0.timestamp < $0.1.timestamp }) else { return nil }
         if let days = record.usageDays {
-            guard days.count <= 361, Set(days.map(\.day)).count == days.count,
+            guard days.count <= Self.retentionDays + 1, Set(days.map(\.day)).count == days.count,
                   days.allSatisfy({ day in
                       day.day <= record.snapshot.observedAt && [day.weekly, day.session, day.money].compactMap { $0 }.allSatisfy {
                           $0.amount.isFinite && $0.amount >= 0 && $0.seconds.isFinite && (0...86401).contains($0.seconds)
@@ -105,6 +113,26 @@ public struct SnapshotCache: Sendable {
                   }) else { return nil }
         }
         return record
+    }
+    /// Decode and validate each private account file once at startup, rather than
+    /// once each for its reading, detailed history and daily summaries.
+    public func loadState(accounts: [Account], now: Date = Date()) -> State {
+        let duplicates = duplicateSubscriptionAccountIDs(in: accounts)
+        let cutoff = HistoryTrends.calendar.startOfDay(for: now).addingTimeInterval(-Double(Self.retentionDays - 1) * 86400)
+        var state = State()
+        for account in accounts.prefix(1000) where !duplicates.contains(account.id) {
+            guard let record = read(account, now: now) else {
+                if FileManager.default.fileExists(atPath: file(account).path) { state.unreadableRecords += 1 }
+                continue
+            }
+            if record.snapshotUsable != false, now.timeIntervalSince(record.snapshot.observedAt) <= 7 * 86400 {
+                state.snapshots[account.id] = record.snapshot
+            }
+            state.history[account.id] = Self.compact(record.history, now: now)
+            state.usage[account.id] = (record.usageDays.flatMap { $0.isEmpty ? nil : $0 } ?? ConsumptionHistory.rebuild(record.history, kind: account.kind))
+                .filter { $0.day >= cutoff }
+        }
+        return state
     }
     public func load(accounts: [Account], now: Date = Date()) -> [UUID: Snapshot] {
         let duplicates = duplicateSubscriptionAccountIDs(in: accounts)
@@ -123,7 +151,7 @@ public struct SnapshotCache: Sendable {
         return accounts.filter { !duplicates.contains($0.id) }.reduce(into: [:]) { result, account in
             if let record = read(account, now: now) {
                 result[account.id] = (record.usageDays.flatMap { $0.isEmpty ? nil : $0 } ?? ConsumptionHistory.rebuild(record.history, kind: account.kind))
-                    .filter { $0.day >= HistoryTrends.calendar.startOfDay(for: now).addingTimeInterval(-359 * 86400) }
+                    .filter { $0.day >= HistoryTrends.calendar.startOfDay(for: now).addingTimeInterval(-Double(Self.retentionDays - 1) * 86400) }
             }
         }
     }
@@ -161,6 +189,12 @@ public struct SnapshotCache: Sendable {
             }
             history = Self.compact(history, now: snapshot.observedAt)
         }
+        if existing == nil, FileManager.default.fileExists(atPath: file(account).path) {
+            // Preserve one bounded private recovery copy before replacing a
+            // file we could not validate. Never silently destroy unreadable history.
+            let data = try Paths.readData(file(account), limit: 2_097_152)
+            try Paths.writePrivate(data, to: recoveryFile(account))
+        }
         try Paths.write(Record(accountID: account.id, kind: account.kind, scopeID: account.scopeID, credentialRevision: account.credentialRevision,
                                identity: identity, claudeProfileIsolated: account.kind == .claudeCode ? account.usesExistingClaude != true : nil, snapshot: snapshot, history: history, usageDays: usageDays), to: file(account))
         return history
@@ -174,5 +208,10 @@ public struct SnapshotCache: Sendable {
     public func remove(_ account: Account) throws {
         let url = file(account)
         if FileManager.default.fileExists(atPath: url.path) { try FileManager.default.removeItem(at: url) }
+        let recovery = recoveryFile(account)
+        if FileManager.default.fileExists(atPath: recovery.path) { try FileManager.default.removeItem(at: recovery) }
+    }
+    private func recoveryFile(_ account: Account) -> URL {
+        directory.appendingPathComponent("Recovery/\(account.id.uuidString).json")
     }
 }

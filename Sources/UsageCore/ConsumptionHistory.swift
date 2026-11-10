@@ -27,6 +27,21 @@ public struct ConsumptionBucket: Identifiable, Sendable {
     public var segment: Int
     public var trend: Double
     public var midpoint: Date { start.addingTimeInterval(end.timeIntervalSince(start) / 2) }
+    public func coverage(at now: Date) -> Double { min(1, max(0, coveredSeconds / max(1, min(end, now).timeIntervalSince(start)))) }
+}
+
+public struct ConsumptionSummary: Equatable, Sendable {
+    public let amount: Double
+    public let coverage: Double
+    public let measuredDays: Int
+    public init(days: [UsageDay], kind: ConnectionKind, session: Bool, since: Date, now: Date) {
+        let values = days.filter { $0.day >= since && $0.day <= now }.compactMap {
+            kind.isAPI ? $0.money : session ? $0.session : $0.weekly
+        }
+        amount = values.reduce(0) { $0 + $1.amount }
+        measuredDays = values.count
+        coverage = min(1, max(0, values.reduce(0) { $0 + $1.seconds } / max(1, now.timeIntervalSince(since))))
+    }
 }
 
 /// Deltas from continuous, same-window observations only. Refills, resets and gaps add no usage.
@@ -81,7 +96,7 @@ public enum ConsumptionHistory {
                 }
             }
         }
-        let cutoff = HistoryTrends.calendar.startOfDay(for: current.timestamp).addingTimeInterval(-359 * 86400)
+        let cutoff = HistoryTrends.calendar.startOfDay(for: current.timestamp).addingTimeInterval(-Double(SnapshotCache.retentionDays - 1) * 86400)
         return days.values.filter { $0.day >= cutoff && $0.day <= current.timestamp }.sorted { $0.day < $1.day }
     }
     public static func rebuild(_ points: [UsageHistoryPoint], kind: ConnectionKind) -> [UsageDay] {

@@ -9,7 +9,9 @@ public struct AccountGridLayout: Equatable, Sendable {
     public init(count: Int, width: Double) {
         let width = width.isFinite ? max(0, width) : 0
         guard count > 0 else { rowCounts = []; cardWidth = 0; return }
-        let capacity = max(1, min(4, Int((width + Self.spacing) / 280)))
+        // Four readable 244-point cards fit the default dashboard, rather than
+        // wrapping to two rows just below an arbitrary 1,120-point threshold.
+        let capacity = max(1, min(4, Int((width + Self.spacing) / (244 + Self.spacing))))
         let rows = (count + capacity - 1) / capacity
         let columns = (count + rows - 1) / rows
         rowCounts = (0..<rows).map { count / rows + ($0 < count % rows ? 1 : 0) }

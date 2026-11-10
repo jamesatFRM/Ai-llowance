@@ -9,6 +9,22 @@ public struct HistorySample: Identifiable, Sendable {
 
 /// Lines connect only nearby observations from the same known reporting period.
 public enum HistorySeries {
+    /// Bound chart work independently of retained history. Select only actual
+    /// observations, keeping local extrema and segment IDs; hover stays exact.
+    public static func plotSamples(_ samples: [HistorySample], maximum: Int = 360) -> [HistorySample] {
+        guard maximum >= 4, samples.count > maximum else { return samples }
+        let bucketCount = maximum / 4
+        let size = Int(ceil(Double(samples.count) / Double(bucketCount)))
+        var indices = Set<Int>()
+        for start in stride(from: 0, to: samples.count, by: size) {
+            let end = min(samples.count, start + size)
+            let range = start..<end
+            indices.insert(start); indices.insert(end - 1)
+            if let low = range.min(by: { samples[$0].value < samples[$1].value }) { indices.insert(low) }
+            if let high = range.max(by: { samples[$0].value < samples[$1].value }) { indices.insert(high) }
+        }
+        return indices.sorted().map { samples[$0] }
+    }
     /// A labeled detail scale for percentage trends; bars retain a zero baseline.
     public static func allowanceTrendDomain(_ values: [Double]) -> ClosedRange<Double> {
         let finite = values.filter { $0.isFinite && (0...100).contains($0) }

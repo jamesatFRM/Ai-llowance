@@ -18,8 +18,9 @@ For processes it starts, Ai-llowance sets Claude's `DISABLE_TELEMETRY=1` and `DI
 |---|---|
 | Account nicknames, connection choices, preferences | Private files under `~/Library/Application Support/UsageBar` |
 | Expected subscription identity | Saved privately with connection settings to detect account changes and duplicate accounts |
-| Latest signed-in identity and reading | Private cache, bounded to 128 KiB per account; original observation time is preserved |
-| Recent quota, credits, or spending history | Private cache; at most 96 samples per account, no older than seven days, minimum five minutes between samples |
+| Latest signed-in identity and reading | Private cache, bounded to 2 MiB per account including history; original observation time is preserved |
+| Allowance, credits, or spending history | At most 4,096 observations per account: seven days of detail, then actual daily closing readings. Daily consumption summaries are retained for 366 days. Normal samples are at least five minutes apart; window changes may add samples earlier. Updates keep this storage in place. |
+| Unreadable-history recovery | At most one private recovery copy per account, at most 2 MiB, before replacing an unreadable cache. Kept locally for troubleshooting and removed with the account. |
 | Notification deduplication state | Private alert state; no chats or credentials |
 | Browser profile choice and custom CLI location | Private preferences; remembered CLI metadata includes path, size, modification time, and inode |
 | API reporting and balance keys | Non-synchronizing, device-only macOS Keychain items |
@@ -38,9 +39,11 @@ The app is not sandboxed: it needs to launch installed provider CLIs. Select onl
 
 ## Screenshots and reports
 
-Ordinary screenshots can reveal email addresses, nicknames and usage. Hiding names in the menu bar saves space; hover and accessibility labels still identify accounts. It is not a privacy mode.
+Ordinary screenshots can reveal email addresses, nicknames and usage. Hiding names in the menu bar saves space; accessibility labels and the dropdown can still identify accounts. It is not a privacy mode.
 
 Use the documented `--export-preview` command for share images. It creates fictional accounts before reading settings and cannot export live account data. The README screenshots use reserved example email addresses and invented readings.
+
+The optional **Settings → Advanced → Review diagnostics** report is generated locally only when requested. It includes numeric app, macOS and detected CLI versions, provider types, connection/error categories, reading age, reset availability and history counts. It excludes account names, emails, IDs, usage amounts, credential values, file paths, raw errors and raw provider output. Review the report before explicitly copying it; the app does not submit it. Version probes use only `--version`, with bounded output and a deadline.
 
 Connection probes print success metadata, not emails, credentials or quota amounts. Do not include account files, profile directories, raw provider output or unredacted screenshots in public bug reports. Security reports belong in [private vulnerability reporting](https://github.com/jamesatFRM/Ai-llowance/security/advisories/new).
 
