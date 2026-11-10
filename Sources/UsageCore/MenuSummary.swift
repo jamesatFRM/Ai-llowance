@@ -76,9 +76,15 @@ public struct MenuPreferences: Codable, Equatable, Sendable {
     public var allAccounts = true
     public var selectedAccountIDs: Set<UUID> = []
     public var accountOrder: [UUID] = []
+    public var resetRemindersEnabled = false
+    public var secondResetReminderEnabled = false
+    public var secondResetReminderLeadHours = 72
+    public var secondResetReminderMinimumPercent = 75
+    public var resetReminderLeadHours = 24
+    public var resetReminderMinimumPercent = 25
     public var dashboardAccountOrder: [UUID] = []
     public init() {}
-    private enum CodingKeys: String, CodingKey { case dashboardAccountOrder, dropdownShowRecentUsage, dashboardTransparency, dropdownTransparency, liquidGlass, accountOrder, dashboardChartFullScale, dashboardChartStyle, dropdownShowEmails, dropdownShowResets, dropdownShowBars, dropdownShowHeadings, dropdownRoomyRows, sessionMenuLabel, weeklyMenuLabel, showSessionInMenuBar, colorByAllowance, theme, display, aggregation, showAccountNames, detailedQuotaLabels, allAccounts, selectedAccountIDs }
+    private enum CodingKeys: String, CodingKey { case secondResetReminderEnabled, secondResetReminderLeadHours, secondResetReminderMinimumPercent, resetRemindersEnabled, resetReminderLeadHours, resetReminderMinimumPercent, dashboardAccountOrder, dropdownShowRecentUsage, dashboardTransparency, dropdownTransparency, liquidGlass, accountOrder, dashboardChartFullScale, dashboardChartStyle, dropdownShowEmails, dropdownShowResets, dropdownShowBars, dropdownShowHeadings, dropdownRoomyRows, sessionMenuLabel, weeklyMenuLabel, showSessionInMenuBar, colorByAllowance, theme, display, aggregation, showAccountNames, detailedQuotaLabels, allAccounts, selectedAccountIDs }
     public init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
         dashboardChartFullScale = try values.decodeIfPresent(Bool.self, forKey: .dashboardChartFullScale) ?? false
@@ -102,6 +108,12 @@ public struct MenuPreferences: Codable, Equatable, Sendable {
         detailedQuotaLabels = try values.decodeIfPresent(Bool.self, forKey: .detailedQuotaLabels) ?? false
         colorByAllowance = try values.decodeIfPresent(Bool.self, forKey: .colorByAllowance) ?? false
         allAccounts = try values.decodeIfPresent(Bool.self, forKey: .allAccounts) ?? true
+        secondResetReminderEnabled = try values.decodeIfPresent(Bool.self, forKey: .secondResetReminderEnabled) ?? false
+        secondResetReminderLeadHours = min(168, max(1, try values.decodeIfPresent(Int.self, forKey: .secondResetReminderLeadHours) ?? 72))
+        secondResetReminderMinimumPercent = min(100, max(0, try values.decodeIfPresent(Int.self, forKey: .secondResetReminderMinimumPercent) ?? 75))
+        resetRemindersEnabled = try values.decodeIfPresent(Bool.self, forKey: .resetRemindersEnabled) ?? false
+        resetReminderLeadHours = min(168, max(1, try values.decodeIfPresent(Int.self, forKey: .resetReminderLeadHours) ?? 24))
+        resetReminderMinimumPercent = min(100, max(0, try values.decodeIfPresent(Int.self, forKey: .resetReminderMinimumPercent) ?? 25))
         dashboardAccountOrder = try values.decodeIfPresent([UUID].self, forKey: .dashboardAccountOrder) ?? []
         accountOrder = try values.decodeIfPresent([UUID].self, forKey: .accountOrder) ?? []
         selectedAccountIDs = try values.decodeIfPresent(Set<UUID>.self, forKey: .selectedAccountIDs) ?? []
