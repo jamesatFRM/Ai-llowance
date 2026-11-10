@@ -6,6 +6,7 @@ import Sparkle
 final class AppUpdater: ObservableObject {
     @Published private(set) var canCheck = false
     @Published private(set) var automaticChecks = false
+    @Published private(set) var lastChecked: Date?
     private var controller: SPUStandardUpdaterController?
     private var started = false
     static var version: String { Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "Development" }
@@ -21,7 +22,13 @@ final class AppUpdater: ObservableObject {
     func start() {
         guard !started, let controller else { return }
         started = true
+        controller.updater.updateCheckInterval = 3600
         controller.startUpdater()
+        if controller.updater.automaticallyChecksForUpdates {
+            controller.updater.checkForUpdatesInBackground()
+        }
+        controller.updater.publisher(for: \.lastUpdateCheckDate)
+            .receive(on: DispatchQueue.main).assign(to: &$lastChecked)
         controller.updater.publisher(for: \.canCheckForUpdates)
             .receive(on: DispatchQueue.main).assign(to: &$canCheck)
         controller.updater.publisher(for: \.automaticallyChecksForUpdates)

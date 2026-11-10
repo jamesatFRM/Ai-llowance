@@ -76,7 +76,7 @@ assert re.fullmatch(r'\d+\.\d+\.\d+',version) and re.fullmatch(r'\d+',build)
 assert preview in ('true','false')
 info=dict(CFBundleIdentifier='com.usagebar.app',CFBundleName='Ai-llowance',CFBundleDisplayName='Ai-llowance',CFBundleExecutable='UsageBar',CFBundleIconFile='UsageBar',CFBundlePackageType='APPL',CFBundleShortVersionString=version,CFBundleVersion=build,LSMinimumSystemVersion='14.0',LSUIElement=True,NSHighResolutionCapable=True,
     AILPreviewBuild=preview=='true',
-    SUFeedURL='https://github.com/jamesatFRM/Ai-llowance/releases/download/update-feed/appcast.xml',SUPublicEDKey=key,SUEnableAutomaticChecks=True,SUAutomaticallyUpdate=False,SUEnableSystemProfiling=False,SUScheduledCheckInterval=86400,SUVerifyUpdateBeforeExtraction=True,SURequireSignedFeed=True,SUSignedFeedFailureExpirationInterval=0)
+    SUFeedURL='https://github.com/jamesatFRM/Ai-llowance/releases/download/update-feed/appcast.xml',SUPublicEDKey=key,SUEnableAutomaticChecks=True,SUAutomaticallyUpdate=False,SUEnableSystemProfiling=False,SUScheduledCheckInterval=3600,SUVerifyUpdateBeforeExtraction=True,SURequireSignedFeed=True,SUSignedFeedFailureExpirationInterval=0)
 pathlib.Path(app,'Contents/Info.plist').write_bytes(plistlib.dumps(info))
 PY2
 if [ "$identity" = "-" ]; then
