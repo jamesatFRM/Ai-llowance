@@ -1605,6 +1605,14 @@ private struct UpdateSettings: View {
                 }
                 Toggle("Automatically check for updates", isOn: Binding(get: { updater.automaticChecks }, set: { updater.setAutomaticChecks($0) }))
                     .toggleStyle(SettingsSwitchStyle()).controlSize(.regular).font(.system(size: 13)).disabled(!updater.canCheck)
+                Text("Checks at launch and hourly while this app is running. You’ll be prompted when an update is available.")
+                    .font(.system(size: 11)).foregroundStyle(.secondary)
+                if let checked = updater.lastChecked {
+                    Text("Last checked " + checked.formatted(date: .abbreviated, time: .shortened))
+                        .font(.system(size: 11)).foregroundStyle(.secondary)
+                }
+                Link("Star Ai-llowance on GitHub ↗", destination: URL(string: "https://github.com/jamesatFRM/Ai-llowance")!)
+                    .font(.system(size: 12, weight: .medium))
                 Divider()
                 HStack {
                     Text("Questions or suggestions?").font(.system(size: 12)).foregroundStyle(.secondary)
