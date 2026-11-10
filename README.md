@@ -82,7 +82,7 @@ See the [hardening and resource report](docs/hardening-and-resources.md) for mea
 - API requests are GET-only to fixed official origins, with redirects rejected. Ai-llowance has no analytics, cookies, or backend service. Processes it launches disable supported Claude telemetry/error reporting and Codex analytics/feedback. Provider services still handle authentication and quota requests; see the [privacy policy](PRIVACY.md).
 - Removing an app-owned OpenAI account logs it out. Claude sign-ins remain CLI-managed; use **More → Sign out in Terminal** before removal if desired.
 - Each account can open links in a selected Chrome profile. The profile must already exist; this app does not change browser sign-ins or read cookies. With Default browser selected, links use that browser's current account.
-- Last readings and bounded history are saved privately for instant startup. Saved readings retain their original timestamp and are marked until refreshed; account changes clear them. History is capped at 2,017 samples per account and seven days, normally sampled every five minutes with additional samples at quota-window changes.
+- Last readings and bounded history are saved privately for instant startup. Saved readings retain their original timestamp and are marked until refreshed; account changes clear them. History is capped at 4,096 observations per account: seven days of detail, followed by daily closing readings, plus 366 days of daily consumption summaries. Normal samples are five minutes apart with additional samples at window changes. Updates preserve the storage folder. History shows measured coverage and never projects usage across missing intervals.
 
 Local settings live under `~/Library/Application Support/UsageBar`. The original storage folder, bundle identity, and Keychain service are intentionally retained so existing accounts and preferences survive the rename. The development app is not App Sandbox enabled because it launches installed CLIs. Stable Developer ID signing is recommended before distribution.
 
@@ -132,6 +132,8 @@ bash scripts/package-release.sh
 ```
 
 ## Troubleshooting
+
+Use **Settings → Advanced → Review diagnostics…** to prepare a local support report. Review it before copying it into an issue. It excludes names, emails, account IDs, keys, usage amounts and paths. Nothing is sent automatically.
 
 - **No quota / sign-in needed:** use Accounts to sign in again. Subscription sign-in and API keys are different connection types.
 - **Claude report not supported:** update Claude Code. The integration was verified with 2.1.294; older versions may not return subscription limits in print mode. Unsupported data remains unavailable.

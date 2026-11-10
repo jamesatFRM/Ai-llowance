@@ -25,7 +25,10 @@ public struct ConnectionPresentation: Equatable, Sendable {
             return state("Reconnect required", "Sign in with this account’s saved email", "person.crop.circle.badge.exclamationmark", action: true)
         }
         if offline { return state("Offline", age + " · retries when online", "wifi.slash") }
-        if refreshing { return state("Updating…", age, "arrow.triangle.2.circlepath") }
+        if refreshing {
+            let expired = snapshot?.isStale(at: now, windows: snapshot?.applicableWindows(for: kind)) == true
+            return state("Updating…", age, "arrow.triangle.2.circlepath", saved: cached || failed || expired)
+        }
         if failed {
             let retry = retryAt.map { date in
                 date <= now ? "Retry queued" : "Retry in \(max(1, Int(ceil(date.timeIntervalSince(now) / 60))))m"
@@ -45,7 +48,11 @@ public struct ConnectionPresentation: Equatable, Sendable {
         let status = AllowanceStatus.evaluate(snapshot: snapshot, kind: kind, now: now)
         if status.state == .exhausted, let session = snapshot?.sessionWindow(for: kind), session.remainingPercent <= 0,
            let weekly = snapshot?.primaryWeeklyWindow(for: kind), weekly.remainingPercent > 0 {
-            return state("5-hour limit reached", "Weekly allowance remains", status.symbol, saved: false)
+            return state("5-hour limit reached", age + " · Weekly allowance remains", status.symbol, saved: false)
+        }
+        if status.state == .low, let session = snapshot?.sessionWindow(for: kind), session.remainingPercent <= 20,
+           let weekly = snapshot?.primaryWeeklyWindow(for: kind), weekly.remainingPercent > session.remainingPercent {
+            return state("5-hour allowance low", age, status.symbol, saved: false)
         }
         return state(status.title, age, status.symbol, saved: false)
     }

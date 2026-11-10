@@ -18,4 +18,6 @@ import Testing
     #expect(AccountGridLayout(count: 9, width: 1176).rowCounts == [3, 3, 3])
     #expect(AccountGridLayout(count: 10, width: 1176).rowCounts == [4, 3, 3])
     #expect(AccountGridLayout(count: 0, width: 1056).rowCounts.isEmpty)
+    #expect(AccountGridLayout(count: 4, width: 1056).rowCounts == [4])
+    #expect(AccountGridLayout(count: 4, width: 1056).cardWidth == 255)
 }

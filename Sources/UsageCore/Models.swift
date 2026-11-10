@@ -94,6 +94,7 @@ public struct Account: Codable, Identifiable, Equatable, Sendable {
     public var menuColorHex: String?
     public var dashboardColorHex: String?
     public var graphColorHex: String?
+    public var pickerLabel: String { name == kind.provider.title ? name : name + " · " + kind.provider.title }
     public init(id: UUID = UUID(), name: String, kind: ConnectionKind, enabled: Bool = true, usesExistingCodex: Bool = false, usesExistingClaude: Bool = false, scopeID: String? = nil) {
         self.id = id; self.name = name; self.kind = kind; self.enabled = enabled; self.usesExistingCodex = usesExistingCodex
         self.usesExistingClaude = usesExistingClaude
