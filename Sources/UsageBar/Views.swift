@@ -30,7 +30,7 @@ private struct PanelBackground: View {
 private struct LiquidGlassPreference: EnvironmentKey {
     static let defaultValue = true
 }
-private extension EnvironmentValues {
+extension EnvironmentValues {
     var liquidGlass: Bool {
         get { self[LiquidGlassPreference.self] }
         set { self[LiquidGlassPreference.self] = newValue }
@@ -686,21 +686,19 @@ struct AccountsView: View {
             }
             Spacer(minLength: 4)
             if section == .history {
-                Picker("Account", selection: $historyAccountID) {
-                    Text("All accounts").tag(nil as UUID?)
-                    ForEach(store.accounts) { Text($0.pickerLabel).tag(Optional($0.id)) }
-                }.labelsHidden().frame(width: 120)
+                AppDropdown(historyAccountID.flatMap { id in store.accounts.first { $0.id == id }?.name } ?? "All accounts", symbol: "person.2", menuTitle: "Show accounts") {
+                    AppDropdownItem("All accounts", symbol: "person.2", selected: historyAccountID == nil) { historyAccountID = nil }
+                    AppDropdownItem.separator
+                    for account in store.accounts {
+                        AppDropdownItem(account.pickerLabel, symbol: "person.crop.circle", selected: historyAccountID == account.id) { historyAccountID = account.id }
+                    }
+                }.frame(width: historyWidth >= 900 ? 148 : 120).accessibilityLabel("Account filter")
                 Button { section = .accounts } label: { Image(systemName: "slider.horizontal.3").frame(width: 26, height: 28) }
                     .buttonStyle(QuietButtonStyle()).help("Manage accounts").accessibilityLabel("Manage accounts")
-                Menu {
-                    Picker("Chart style", selection: Binding(get: { store.menuPreferences.dashboardChartStyle }, set: { store.setDashboardChartStyle($0) })) {
-                        ForEach(DashboardChartStyle.allCases) { style in Label(style.title, systemImage: style.symbol).tag(style) }
-                    }
-                    Divider()
-                    Toggle("Full 0–100% scale", isOn: Binding(get: { store.menuPreferences.dashboardChartFullScale }, set: { store.setDashboardChartFullScale($0) }))
-                } label: { Image(systemName: store.menuPreferences.dashboardChartStyle.symbol).frame(width: 26, height: 28) }
-                .menuStyle(.borderlessButton).fixedSize().help("Chart style · " + store.menuPreferences.dashboardChartStyle.title)
-                .accessibilityLabel("Chart style")
+                Button { store.setAllDashboardCollapsed(!store.dashboardAllCollapsed) } label: {
+                    Image(systemName: store.dashboardAllCollapsed ? "rectangle.expand.vertical" : "rectangle.compress.vertical").frame(width: 26, height: 28)
+                }.buttonStyle(QuietButtonStyle()).help(store.dashboardAllCollapsed ? "Expand all dashboard items" : "Collapse all dashboard items")
+                    .accessibilityLabel(store.dashboardAllCollapsed ? "Expand all dashboard items" : "Collapse all dashboard items")
                 Picker("Time range", selection: $historyHours) {
                     Text("24 hours").tag(24); Text("7 days").tag(168)
                 }.pickerStyle(.segmented).labelsHidden().frame(width: 146)
@@ -734,7 +732,7 @@ struct AccountsView: View {
                 }
                 Toggle("Use full 0–100% scale", isOn: Binding(get: { store.menuPreferences.dashboardChartFullScale }, set: { store.setDashboardChartFullScale($0) }))
                     .toggleStyle(SettingsSwitchStyle())
-                Text("Overview combines account trends, usage share and daily bars. Line, area, bars and dots show history. Ring, pie and gauge show current allowance; API accounts keep a history chart. Your choice is saved for all dashboard cards.")
+                Text("Overview combines account trends, usage share and daily bars. Line, area, bars and dots show history. Ring, pie and gauge show current allowance; API accounts keep a history chart. Sets the default. Each account card can keep its own chart and comparison.")
                     .font(.system(size: 11)).foregroundStyle(.secondary)
             }.padding(10)
         }
@@ -981,6 +979,10 @@ struct AccountsView: View {
                         let points = store.history(for: account).filter { $0.timestamp >= store.now.addingTimeInterval(-Double(historyHours) * 3600) && $0.timestamp <= store.now }
                         return HistoryCard(account: account, points: points, snapshot: store.snapshots[account.id],
                                     error: store.errors[account.id] != nil, cached: store.isCached(account), needsReconnect: store.needsSignIn(account), connection: store.connectionState(account), now: store.now, historyHours: historyHours, chartStyle: store.menuPreferences.dashboardChartStyle, fullScale: store.menuPreferences.dashboardChartFullScale,
+                                    comparison: UsageComparison(days: store.usageDays[account.id] ?? [], kind: account.kind, period: account.dashboardComparison ?? .off, now: store.now),
+                                    setStyle: { store.setAccountChart(account.id, style: $0) },
+                                    setComparison: { store.setAccountComparison(account.id, period: $0) },
+                                    toggleCollapsed: { store.setAccountCollapsed(account.id, collapsed: account.dashboardCollapsed != true) },
                                     overviewTint: store.menuPreferences.dashboardChartStyle == .mixed ? overviewAccountTint(account, accounts: store.accounts) : nil,
                                     actionTitle: store.recoveryAction(account) == .wait ? "Connection details" : store.recoveryAction(account).title,
                                     openUsage: {
@@ -994,44 +996,30 @@ struct AccountsView: View {
                                     moveEarlier: earlier,
                                     moveLater: later,
                                     resetOrder: { store.resetDashboardAccountOrder() })
-                            .frame(width: accountGrid.cardWidth)
+
     }
     private var visibleHistoryAccounts: [Account] { store.orderedDashboardAccounts.filter { historyAccountID == nil || $0.id == historyAccountID } }
-    private var accountGrid: AccountGridLayout { AccountGridLayout(count: visibleHistoryAccounts.count, width: historyWidth) }
-    private var historyRows: [[Account]] {
-        var offset = 0
-        return accountGrid.rowCounts.map { count in
-            defer { offset += count }
-            return Array(visibleHistoryAccounts[offset..<(offset + count)])
-        }
-    }
     private var historyContent: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        DashboardGrid(accountCount: visibleHistoryAccounts.count) {
             if store.accounts.isEmpty { Text("Connect an account to start collecting history.").foregroundStyle(.secondary) }
-            ForEach(historyRows, id: \.first?.id) { row in
-                HStack(alignment: .top, spacing: 12) {
-                    ForEach(row) { account in
-                        dashboardCard(account)
-                    }
-                }.frame(maxWidth: .infinity, alignment: .center)
-            }
+            ForEach(visibleHistoryAccounts) { account in dashboardCard(account).id(account.id) }
             if visibleHistoryAccounts.contains(where: { !$0.kind.isAPI }) {
-            let histories = Dictionary(uniqueKeysWithValues: visibleHistoryAccounts.map { ($0.id, store.history(for: $0).filter { $0.timestamp >= store.now.addingTimeInterval(-7 * 86400) }) })
-            if store.menuPreferences.dashboardChartStyle == .mixed {
-                if historyWidth >= 850 {
-                    HStack(alignment: .top, spacing: 12) {
-                        UsageOverviewCharts(accounts: visibleHistoryAccounts, colorAccounts: store.accounts, histories: histories, now: store.now).frame(width: max(290, historyWidth * 0.34))
-                        ActivityHeatmap(accounts: visibleHistoryAccounts, histories: histories, now: store.now)
-                    }
-                } else {
-                    UsageOverviewCharts(accounts: visibleHistoryAccounts, colorAccounts: store.accounts, histories: histories, now: store.now)
-                    ActivityHeatmap(accounts: visibleHistoryAccounts, histories: histories, now: store.now)
+                let histories = Dictionary(uniqueKeysWithValues: visibleHistoryAccounts.map { ($0.id, store.history(for: $0).filter { $0.timestamp >= store.now.addingTimeInterval(-7 * 86400) }) })
+                if store.menuPreferences.dashboardChartStyle == .mixed {
+                    UsageOverviewCharts(accounts: visibleHistoryAccounts, colorAccounts: store.accounts, histories: histories, now: store.now,
+                        collapsed: store.menuPreferences.collapsedDashboardSummaries.contains("overview"),
+                        collapse: { store.setDashboardSummaryCollapsed("overview", collapsed: !store.menuPreferences.collapsedDashboardSummaries.contains("overview")) })
+                        .dashboardSpan(2).id("overview")
                 }
-            } else {
-                ActivityHeatmap(accounts: visibleHistoryAccounts, histories: histories, now: store.now)
+                ActivityHeatmap(accounts: visibleHistoryAccounts, histories: histories, now: store.now,
+                    collapsed: store.menuPreferences.collapsedDashboardSummaries.contains("activity"),
+                    collapse: { store.setDashboardSummaryCollapsed("activity", collapsed: !store.menuPreferences.collapsedDashboardSummaries.contains("activity")) })
+                    .dashboardSpan(2).id("activity")
             }
-            }
-        }.animation(reduceMotion ? nil : .easeInOut(duration: 0.25), value: historyAccountID)
+        }
+        .animation(reduceMotion ? nil : .spring(response: 0.38, dampingFraction: 0.88), value: store.accounts)
+        .animation(reduceMotion ? nil : .spring(response: 0.38, dampingFraction: 0.88), value: store.menuPreferences.collapsedDashboardSummaries)
+        .animation(reduceMotion ? nil : .easeInOut(duration: 0.25), value: historyAccountID)
         .animation(reduceMotion ? nil : .easeInOut(duration: 0.25), value: visibleHistoryAccounts.map(\.id))
         .onChange(of: store.accounts.map(\.id)) { _, ids in
             if let selected = historyAccountID, !ids.contains(selected) { historyAccountID = nil }
@@ -1154,13 +1142,10 @@ struct AccountsView: View {
         }
     }
     private var agentHelpMenu: some View {
-        Menu {
-            Button("Copy prompt & open Claude Code") { store.openAgentHelp(for: .claudeCode) }
-            Button("Copy prompt & open Codex") { store.openAgentHelp(for: .codex) }
-        } label: {
-            Label("Get setup help from Claude or Codex", systemImage: "sparkles")
-                .font(.system(size: 10, weight: .medium))
-        }.menuStyle(.borderlessButton).foregroundStyle(Color.accentColor)
+        AppDropdown("Get setup help from Claude or Codex", symbol: "sparkles", menuTitle: "Setup help") {
+            AppDropdownItem("Copy prompt & open Claude Code", symbol: "sparkles") { store.openAgentHelp(for: .claudeCode) }
+            AppDropdownItem("Copy prompt & open Codex", symbol: "terminal") { store.openAgentHelp(for: .codex) }
+        }
     }
     @ViewBuilder private func simpleProviderButton(_ kind: ConnectionKind) -> some View {
         let installed = executable(for: kind) != nil
@@ -1360,10 +1345,13 @@ struct AccountsView: View {
                                 HistorySparkline(points: store.history(for: account), kind: account.kind)
                                 if let snapshot = store.snapshots[account.id] { Text("\(snapshot.source) · updated \(snapshot.observedAt.formatted(.dateTime.hour().minute()))").font(.system(size: 10)).foregroundStyle(.secondary) }
                                 if !store.browserProfiles.isEmpty {
-                                    Picker("Open links with", selection: Binding(get: { store.browserProfileID(account) ?? "" }, set: { store.setBrowserProfile(account, id: $0.isEmpty ? nil : $0) })) {
-                                        Text("System default browser").tag("")
-                                        ForEach(store.browserProfiles, id: \.id) { profile in Text(profile.name).tag(profile.id) }
-                                    }.font(.system(size: 11))
+                                    AppDropdown(store.browserProfiles.first { $0.id == store.browserProfileID(account) }?.name ?? "System default browser", symbol: "globe", menuTitle: "Open links with") {
+                                        AppDropdownItem("System default browser", symbol: "globe", selected: store.browserProfileID(account) == nil) { store.setBrowserProfile(account, id: nil) }
+                                        AppDropdownItem.separator
+                                        for profile in store.browserProfiles {
+                                            AppDropdownItem(profile.name, symbol: "person.crop.circle", selected: store.browserProfileID(account) == profile.id) { store.setBrowserProfile(account, id: profile.id) }
+                                        }
+                                    }.frame(maxWidth: 320).accessibilityLabel("Open links with")
                                 }
                                 Text("Choose the browser profile signed into this account. Default-browser links use its current sign-in.").font(.system(size: 10)).foregroundStyle(.secondary)
                             }.padding(.top, 8)
@@ -1419,25 +1407,24 @@ struct AccountsView: View {
                 case .openUsage: Button("Open usage ↗") { store.openUsage(account) }
                 }
                 Spacer()
-                Menu {
+                AppDropdown("", symbol: "ellipsis", showsChevron: false, menuTitle: account.name) {
                     if account.kind == .claudeCode {
-                        Button("Open Claude Code") { store.openClaude(account) }
-                        Button("Open in a project…") { store.openClaude(account, chooseProject: true) }
-                        Button("Sign in again") { store.openClaude(account, login: true) }
-                        Button("Sign out in Terminal") { store.openClaude(account, logout: true) }
-                        Divider()
+                        AppDropdownItem("Open Claude Code", symbol: "terminal") { store.openClaude(account) }
+                        AppDropdownItem("Open in a project…", symbol: "folder") { store.openClaude(account, chooseProject: true) }
+                        AppDropdownItem("Sign in again", symbol: "person.badge.key") { store.openClaude(account, login: true) }
+                        AppDropdownItem("Sign out in Terminal", symbol: "rectangle.portrait.and.arrow.right") { store.openClaude(account, logout: true) }
+                        AppDropdownItem.separator
                     } else if account.kind == .codex && !account.usesExistingCodex {
-                        Button("Sign in again") { store.signIn(account, openBrowser: false) }.disabled(busyConnecting)
-                        Divider()
+                        AppDropdownItem("Sign in again", symbol: "person.badge.key", enabled: !busyConnecting) { store.signIn(account, openBrowser: false) }
+                        AppDropdownItem.separator
                     } else if account.kind.isAPI {
-                        Button("Replace key") { replacement = ""; replacementScopeID = account.scopeID ?? ""; keyAccount = account }
-                        Divider()
+                        AppDropdownItem("Replace key", symbol: "key") { replacement = ""; replacementScopeID = account.scopeID ?? ""; keyAccount = account }
+                        AppDropdownItem.separator
                     }
-                    Button("Name & color…") { newName = account.name; renaming = account }
-                    Button(account.enabled ? "Pause account" : "Resume account") { store.toggle(account) }
-                    Button("Remove account", role: .destructive) { removing = account }.disabled(store.refreshing || store.removing || busyConnecting)
-                } label: { Image(systemName: "ellipsis").frame(width: 32, height: 32) }
-                    .menuStyle(.borderlessButton).frame(width: 36).help("\(account.name) options").accessibilityLabel("\(account.name) options")
+                    AppDropdownItem("Name & color…", symbol: "paintpalette") { newName = account.name; renaming = account }
+                    AppDropdownItem(account.enabled ? "Pause account" : "Resume account", symbol: account.enabled ? "pause.circle" : "play.circle") { store.toggle(account) }
+                    AppDropdownItem("Remove account", symbol: "trash", enabled: !(store.refreshing || store.removing || busyConnecting), destructive: true) { removing = account }
+                }.frame(width: 32).help("\(account.name) options").accessibilityLabel("\(account.name) options")
             }
         }.font(.system(size: 13)).controlSize(.large).disabled(store.demo)
     }
@@ -1471,6 +1458,34 @@ struct AccountsView: View {
                     Text("Provider limits and power-saving mode may delay refreshes.").font(.callout).foregroundStyle(.secondary).frame(maxWidth: .infinity, alignment: .leading)
                     Divider()
                     Toggle("Allowance notifications", isOn: Binding(get: { store.notificationsEnabled }, set: { store.setNotificationsEnabled($0) }))
+                        .disabled(store.notificationPending)
+                    HStack(spacing: 10) {
+                        if store.notificationPending {
+                            ProgressView().controlSize(.small)
+                            Text("Checking macOS permission…")
+                        } else if store.notificationAccess.authorization == .denied {
+                            Label("Disabled in macOS", systemImage: "exclamationmark.circle").foregroundStyle(.orange)
+                        } else if store.notificationAccess.canDeliver {
+                            Label(store.notificationAccess.banners ? "Allowed by macOS" : "Allowed · banners are off", systemImage: "checkmark.circle")
+                        } else { Text("Permission is checked when enabled") }
+                        Spacer(minLength: 0)
+                        Button("Notifications Settings…") { store.openNotificationSettings() }
+                        Button("Send test") { store.sendTestNotification() }
+                            .disabled(!store.notificationsEnabled || !store.notificationAccess.canDeliver || store.notificationPending)
+                    }.font(.system(size: 11)).foregroundStyle(.secondary)
+                    if store.notificationAccess.authorization == .denied {
+                        Text("Turn on Ai-llowance in System Settings → Notifications. We’ll recheck when you return.")
+                            .font(.system(size: 11)).foregroundStyle(.secondary).frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    if let message = store.notificationMessage {
+                        HStack {
+                            Text(message).font(.system(size: 11)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                            Spacer(minLength: 0)
+                            if !store.notificationAccess.canDeliver && store.notificationAccess.authorization != .denied {
+                                Button("Try again") { store.setNotificationsEnabled(true) }.font(.system(size: 11))
+                            }
+                        }
+                    }
                     Divider()
                     Toggle("Remind me before weekly resets", isOn: Binding(get: { store.menuPreferences.resetRemindersEnabled }, set: { store.setResetRemindersEnabled($0) }))
                         .disabled(!store.notificationsEnabled)
@@ -1823,10 +1838,15 @@ private struct HistoryCard: View {
     let historyHours: Int
     let chartStyle: DashboardChartStyle
     let fullScale: Bool
+    let comparison: UsageComparison
+    let setStyle: (DashboardChartStyle?) -> Void
+    let setComparison: (UsageComparisonPeriod) -> Void
+    let toggleCollapsed: () -> Void
     var overviewTint: Color? = nil
     private var effectiveStyle: DashboardChartStyle {
-        if historyHours == 168 { return .bars }
-        return chartStyle == .mixed ? .matrix : account.kind.isAPI && chartStyle.isCurrentAllowance ? .line : chartStyle
+        let selected = account.dashboardChartStyle ?? chartStyle
+        if selected == .mixed { return historyHours == 168 ? .bars : .matrix }
+        return account.kind.isAPI && selected.isCurrentAllowance ? .line : selected
     }
     var actionTitle: String
     var openUsage: () -> Void
@@ -1884,7 +1904,7 @@ private struct HistoryCard: View {
     private var quotaSummary: some View {
         VStack(alignment: .leading, spacing: 5) {
             Text(reading.value)
-                .font(.system(size: 32, weight: .semibold, design: .rounded)).monospacedDigit()
+                .font(.system(size: 28, weight: .semibold, design: .rounded)).monospacedDigit()
                 .foregroundStyle(connection.saved ? Color.secondary : Color.primary)
                 .lineLimit(1).minimumScaleFactor(0.65)
             HStack {
@@ -1892,7 +1912,7 @@ private struct HistoryCard: View {
                 Spacer(minLength: 4)
                 Text(reading.reset).lineLimit(2).multilineTextAlignment(.trailing)
             }.font(.system(size: 10)).foregroundStyle(.secondary)
-        }.padding(.vertical, 5).frame(height: 58, alignment: .topLeading)
+        }.padding(.vertical, 5).frame(height: 50, alignment: .topLeading)
             .accessibilityElement(children: .ignore).accessibilityLabel(reading.accessibilitySummary)
     }
     private var sessionSummary: some View {
@@ -1915,37 +1935,26 @@ private struct HistoryCard: View {
                 Label("5-hour limit not reported", systemImage: "info.circle")
                     .font(.system(size: 10)).foregroundStyle(.secondary)
             }
-        }.frame(maxWidth: .infinity, minHeight: 42, maxHeight: 42, alignment: .leading)
+        }.frame(maxWidth: .infinity, minHeight: 36, maxHeight: 36, alignment: .leading)
     }
 
-    var body: some View {
+    @ViewBuilder private var allowancePlot: some View {
         let samples = self.samples
         let plotted = self.plotted
         let plotDomain = self.plotDomain
         let displaySamples = HistorySeries.plotSamples(samples)
         let series = effectiveStyle == .bars ? HistorySeries.barSamples(samples, count: historyHours == 168 ? 28 : 24) : effectiveStyle == .dots ? displaySamples : HistorySeries.smoothTrend(displaySamples)
         let segmentCounts = Dictionary(grouping: series, by: \.segment).mapValues(\.count)
-        SettingsCard(inset: 16, tint: dashboardTint) {
-            VStack(alignment: .leading, spacing: 8) {
-                HStack(spacing: 7) {
-                    ProviderMark(provider: account.kind.provider, size: 23).foregroundStyle(dashboardTint)
-                    Text(account.name).font(.system(size: 14, weight: .semibold)).lineLimit(1)
-                    Spacer(minLength: 4)
-                    Image(systemName: connection.symbol).foregroundStyle(statusColor).help(connection.title)
-                }
-                Text(account.expectedIdentity ?? snapshot?.identity ?? account.kind.title)
-                    .font(.system(size: 11)).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
-                quotaSummary
                 if effectiveStyle.isCurrentAllowance {
                     CurrentAllowanceChart(percent: snapshot?.displayWindow(for: account.kind)?.remainingPercent,
                                           style: effectiveStyle, tint: graphTint,
                                           saved: reading.saved)
-                        .frame(height: 92)
+                        .frame(height: 86)
                     Text(reading.saved ? "Remaining vs. used · last known" : "Remaining vs. used · current limit")
                         .font(.system(size: 10)).foregroundStyle(.secondary).lineLimit(1)
                 } else if plotted.isEmpty {
                     Text("No readings in this range yet. History grows as this Mac refreshes your accounts.")
-                        .font(.system(size: 12)).foregroundStyle(.secondary).frame(maxWidth: .infinity).frame(height: 92)
+                        .font(.system(size: 12)).foregroundStyle(.secondary).frame(maxWidth: .infinity).frame(height: 86)
                 } else {
                     Chart {
                         ForEach(series) { sample in
@@ -2037,7 +2046,7 @@ private struct HistoryCard: View {
                                 .allowsHitTesting(false)
                         }
                     }
-                    .frame(height: 92).padding(.top, 3).padding(.bottom, 2)
+                    .frame(height: 86).padding(.top, 3).padding(.bottom, 2)
                     if let last = plotted.last {
                         HStack {
                             Text(fittedTrend ? String(format: "Smoothed trend · %.0f–%.0f%%", plotDomain.lowerBound, plotDomain.upperBound) : effectiveStyle == .bars ? "Latest reading per time bucket" : historyCaption).lineLimit(1).help(fittedTrend ? "The trend uses a fitted vertical scale and one-hour smoothing. Hover for exact recorded readings. Switch to the full 0–100% scale in the chart menu. Missing intervals and resets are never connected." : "History uses the full scale. Hover for exact recorded readings; missing intervals and resets are not connected.")
@@ -2047,39 +2056,86 @@ private struct HistoryCard: View {
                     }
 
                 }
+    }
+    private var cardControls: some View {
+        HStack(spacing: 6) {
+            AppDropdown(effectiveStyle.title, symbol: effectiveStyle.symbol, accent: graphTint, menuTitle: "Chart style") {
+                AppDropdownItem("Use default", symbol: "sparkles", selected: account.dashboardChartStyle == nil) { setStyle(nil) }
+                AppDropdownItem.separator
+                for style in DashboardChartStyle.allCases.filter({ $0 != .mixed && (!account.kind.isAPI || !$0.isCurrentAllowance) }) {
+                    AppDropdownItem(style.title, symbol: style.symbol, selected: account.dashboardChartStyle == style) { setStyle(style) }
+                }
+            }.accessibilityLabel("Chart for " + account.name)
+            AppDropdown(comparison.period == .off ? "Compare" : comparison.period.title, symbol: "arrow.left.arrow.right", accent: graphTint, menuTitle: "Compare usage") {
+                for period in UsageComparisonPeriod.allCases {
+                    AppDropdownItem(period.title, symbol: period == .off ? "minus.circle" : "arrow.left.arrow.right",
+                                    subtitle: period == .off ? "Current history only" : "vs " + period.previousLabel,
+                                    selected: comparison.period == period) { setComparison(period) }
+                }
+            }.accessibilityLabel("Compare " + account.name)
+                .help("WoW: last week · MoM: last month · YoY: last year. Seven completed days, compared with the matching earlier period.")
+        }
+    }
+    var body: some View {
+        SettingsCard(inset: 14, tint: dashboardTint) {
+            VStack(alignment: .leading, spacing: 5) {
+                HStack(spacing: 7) {
+                    ProviderMark(provider: account.kind.provider, size: 23).foregroundStyle(dashboardTint)
+                    Text(account.name).font(.system(size: 14, weight: .semibold)).lineLimit(1)
+                    Spacer(minLength: 2)
+                    Image(systemName: connection.symbol).foregroundStyle(statusColor).help(connection.title)
+                    Button(action: toggleCollapsed) { Image(systemName: account.dashboardCollapsed == true ? "chevron.right" : "chevron.down").font(.system(size: 10, weight: .semibold)).frame(width: 24, height: 24) }
+                        .buttonStyle(.plain).help(account.dashboardCollapsed == true ? "Expand account" : "Collapse account")
+                        .accessibilityLabel((account.dashboardCollapsed == true ? "Expand " : "Collapse ") + account.name)
+                }
+                if account.dashboardCollapsed == true {
+                    HStack(alignment: .firstTextBaseline) {
+                        Text(reading.value).font(.system(size: 18, weight: .semibold, design: .rounded)).monospacedDigit()
+                        Spacer(minLength: 0)
+                        Text(reading.compactTitle).font(.system(size: 10)).foregroundStyle(.secondary).lineLimit(1)
+                    }
+                } else {
+                    Text(account.expectedIdentity ?? snapshot?.identity ?? account.kind.title)
+                        .font(.system(size: 11)).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
+                    quotaSummary
+                    cardControls
+                    if comparison.period == .off { allowancePlot }
+                    else { AccountComparisonChart(comparison: comparison, style: effectiveStyle, tint: graphTint, isMoney: account.kind.isAPI) }
+                    Text(comparison.summary).font(.system(size: 11, weight: .medium)).lineLimit(1).minimumScaleFactor(0.8)
+                        .foregroundStyle(comparison.changePercent == nil ? Color.secondary : graphTint).help(comparison.detail)
                 if !account.kind.isAPI { sessionSummary }
                 else {
                     Label(account.kind.isBalance ? "Credits, separate from plan limits" : "Spending, not a credit balance", systemImage: "info.circle")
                         .font(.system(size: 10)).foregroundStyle(.secondary)
-                        .frame(maxWidth: .infinity, minHeight: 42, maxHeight: 42, alignment: .leading)
+                        .frame(maxWidth: .infinity, minHeight: 36, maxHeight: 36, alignment: .leading)
                 }
                 ConnectionStatusLine(connection: connection)
-                    .frame(maxWidth: .infinity, minHeight: 36, maxHeight: 36, alignment: .topLeading)
+                    .frame(maxWidth: .infinity, minHeight: 30, maxHeight: 30, alignment: .topLeading)
                 HStack(spacing: 8) {
                     Button(action: openUsage) { Label(actionTitle, systemImage: actionTitle == "Open usage" ? "arrow.up.right" : "arrow.clockwise").frame(maxWidth: .infinity).frame(height: 28) }
-                    Menu {
-                        Button("Name & color…", action: manage)
-                        Divider()
-                        Button("Move earlier") { moveEarlier?() }.disabled(moveEarlier == nil)
-                        Button("Move later") { moveLater?() }.disabled(moveLater == nil)
-                        Button("Reset dashboard order") { resetOrder?() }.disabled(resetOrder == nil)
-                    } label: { Image(systemName: "slider.horizontal.3").frame(width: 28, height: 28) }
-                    .menuStyle(.borderlessButton).fixedSize().help("Name, color & dashboard order").accessibilityLabel("Options for " + account.name)
+                    AppDropdown("", symbol: "slider.horizontal.3", accent: graphTint, showsChevron: false, menuTitle: account.name) {
+                        AppDropdownItem("Name & color…", symbol: "paintpalette", action: manage)
+                        AppDropdownItem.separator
+                        AppDropdownItem("Move earlier", symbol: "arrow.left", enabled: moveEarlier != nil) { moveEarlier?() }
+                        AppDropdownItem("Move later", symbol: "arrow.right", enabled: moveLater != nil) { moveLater?() }
+                        AppDropdownItem("Reset dashboard order", symbol: "arrow.counterclockwise", enabled: resetOrder != nil) { resetOrder?() }
+                    }.frame(width: 30).help("Name, color & dashboard order").accessibilityLabel("Options for " + account.name)
                 }.font(.system(size: 11, weight: .medium)).buttonStyle(QuietButtonStyle())
+                }
             }
         }
     }
 }
 
 
-private struct MatrixPoint {
+struct MatrixPoint {
     let x: CGFloat
     let y: CGFloat
     let segment: Int
 }
 
 /// Screen-space rasterization of the same trend, never connecting separate periods.
-private struct DotMatrixPlot: View {
+struct DotMatrixPlot: View {
     let points: [MatrixPoint]
     let tint: Color
     var bars = false
@@ -2133,62 +2189,77 @@ private struct ActivityHeatmap: View {
     let accounts: [Account]
     let histories: [UUID: [UsageHistoryPoint]]
     let now: Date
+    var collapsed = false
+    var collapse: (() -> Void)? = nil
     private let calendar = Calendar.current
     var body: some View {
+        SettingsCard(inset: 16) {
+            VStack(alignment: .leading, spacing: 6) {
+                HStack {
+                    Label("Allowance activity", systemImage: "square.grid.3x3.fill").font(.system(size: 13, weight: .semibold))
+                    Spacer()
+                    Text("7d").font(.system(size: 10)).foregroundStyle(.secondary).help("Last 7 days · " + (calendar.timeZone.abbreviation() ?? calendar.timeZone.identifier))
+                    Button { collapse?() } label: { Image(systemName: collapsed ? "chevron.right" : "chevron.down").font(.system(size: 10, weight: .semibold)).frame(width: 24, height: 24) }
+                        .buttonStyle(.plain).accessibilityLabel((collapsed ? "Expand " : "Collapse ") + "allowance activity")
+                }
+                if !collapsed {
         let today = calendar.startOfDay(for: now)
         let days = (0..<7).compactMap { calendar.date(byAdding: .day, value: $0 - 6, to: today) }
         let buckets = accounts.reduce(into: [Date: Double]()) { result, account in
             let hours = UsageHeatmap.hours(points: histories[account.id] ?? [], kind: account.kind, calendar: calendar)
             for (hour, value) in hours where hour >= (days.first ?? today) && hour <= now { result[hour, default: 0] += value }
         }
-        let peak = buckets.values.max() ?? 0
-        SettingsCard(inset: 16) {
-            VStack(alignment: .leading, spacing: 6) {
-                HStack {
-                    Label("Allowance activity", systemImage: "square.grid.3x3.fill").font(.system(size: 13, weight: .semibold))
-                    Spacer()
-                    Text("Last 7 days · " + (calendar.timeZone.abbreviation() ?? calendar.timeZone.identifier)).font(.system(size: 10)).foregroundStyle(.secondary)
-                }
-                Grid(horizontalSpacing: 4, verticalSpacing: 3) {
-                    GridRow {
-                        Color.clear.frame(width: 62, height: 12)
-                        ForEach(0..<24) { hour in
-                            Text(hour % 6 == 0 ? (hour == 0 ? "12a" : hour == 6 ? "6a" : hour == 12 ? "12p" : "6p") : "")
-                                .font(.system(size: 9)).foregroundStyle(.secondary).frame(maxWidth: .infinity)
-                        }
-                    }
-                    ForEach(days, id: \.self) { day in
-                        GridRow {
-                            Text(day, format: .dateTime.weekday(.abbreviated).day()).font(.system(size: 10)).foregroundStyle(.secondary).frame(width: 62, alignment: .leading)
-                            ForEach(0..<24) { hour in
-                                heatmapCell(day: day, hour: hour, buckets: buckets, peak: peak)
+                GeometryReader { geometry in
+                    let step = geometry.size.width < 320 ? 4 : 1
+                    let hours = Array(stride(from: 0, to: 24, by: step))
+                    let grouped = Dictionary(grouping: buckets, by: { entry in
+                        String(calendar.startOfDay(for: entry.key).timeIntervalSince1970) + ":" + String(calendar.component(.hour, from: entry.key) / step)
+                    })
+                    let peak = grouped.values.map { $0.reduce(0) { $0 + $1.value } }.max() ?? 0
+                    VStack(spacing: 6) {
+                        Grid(horizontalSpacing: 4, verticalSpacing: 3) {
+                            GridRow {
+                                Color.clear.frame(width: 46, height: 12)
+                                ForEach(hours, id: \.self) { hour in
+                                    Text(step > 1 || hour % 6 == 0 ? (hour == 0 ? "12a" : hour < 12 ? "\(hour)a" : hour == 12 ? "12p" : "\(hour - 12)p") : "")
+                                        .font(.system(size: 8)).foregroundStyle(.secondary).frame(maxWidth: .infinity)
+                                }
+                            }
+                            ForEach(days, id: \.self) { day in
+                                GridRow {
+                                    Text(day, format: .dateTime.weekday(.abbreviated).day()).font(.system(size: 9)).foregroundStyle(.secondary).frame(width: 46, alignment: .leading)
+                                    ForEach(hours, id: \.self) { hour in heatmapCell(day: day, hour: hour, step: step, buckets: buckets, peak: peak) }
+                                }
                             }
                         }
+                        HStack(spacing: 4) {
+                            Text("Less")
+                            ForEach(0..<5) { level in RoundedRectangle(cornerRadius: 2).fill(Brand.cyan.opacity(0.12 + Double(level) * 0.22)).frame(width: step > 1 ? 8 : 12, height: 8) }
+                            Text("More")
+                            Spacer(minLength: 0)
+                            Text(step > 1 ? "4h blocks" : "Gaps outlined")
+                                .help("Only observed usage is included. Outlined blocks have no reading; faded blocks have partial coverage.")
+                        }.font(.system(size: 8)).foregroundStyle(.secondary)
                     }
+                }.frame(height: 124)
                 }
-                HStack(spacing: 5) {
-                    Text("Less")
-                    ForEach(0..<5) { level in RoundedRectangle(cornerRadius: 2).fill(Brand.cyan.opacity(0.12 + Double(level) * 0.22)).frame(width: 12, height: 10) }
-                    Text("More")
-                    Spacer()
-                    Text("Outlined = no reading").help("Recorded subscription allowance consumption, not coding hours. Gaps and resets are excluded; API spending is not mixed in.")
-                }.font(.system(size: 9)).foregroundStyle(.secondary)
             }
         }
     }
-    private func heatmapCell(day: Date, hour: Int, buckets: [Date: Double], peak: Double) -> some View {
-        let matching = buckets.filter { calendar.isDate($0.key, inSameDayAs: day) && calendar.component(.hour, from: $0.key) == hour }
+    private func heatmapCell(day: Date, hour: Int, step: Int, buckets: [Date: Double], peak: Double) -> some View {
+        let matching = buckets.filter { calendar.isDate($0.key, inSameDayAs: day) && (hour..<(hour + step)).contains(calendar.component(.hour, from: $0.key)) }
         let value: Double? = matching.isEmpty ? nil : matching.values.reduce(0, +)
-        let strength = value.map { peak > 0 ? sqrt($0 / peak) : 0 } ?? 0
+        let strength = value.map { peak > 0 ? min(1, sqrt($0 / peak)) : 0 } ?? 0
         let fill: Color = value == nil ? Color.primary.opacity(0.025) : Brand.cyan.opacity(0.12 + strength * 0.88)
         let border: Color = Color.primary.opacity(value == nil ? 0.08 : 0)
         let dateText = day.formatted(date: .abbreviated, time: .omitted)
         let amount = value.map { String(format: "%.1f allowance points consumed", $0) } ?? "No measured interval"
-        let description = "\(dateText) · \(hour):00 · \(amount)"
+        let description = "\(dateText) · \(hour):00–\(hour + step):00 · \(amount)"
         return RoundedRectangle(cornerRadius: 3)
             .fill(fill)
             .overlay(RoundedRectangle(cornerRadius: 3).strokeBorder(border, lineWidth: 0.5))
             .frame(maxWidth: .infinity).frame(height: 10)
+            .opacity(value != nil && matching.count < step ? 0.65 : 1)
             .help(description)
             .accessibilityLabel(description)
     }
@@ -2291,6 +2362,8 @@ private struct UsageOverviewCharts: View {
     let colorAccounts: [Account]
     let histories: [UUID: [UsageHistoryPoint]]
     let now: Date
+    var collapsed = false
+    var collapse: (() -> Void)? = nil
     private let calendar = Calendar.current
     private struct DailyUsage: Identifiable {
         let account: UUID
@@ -2315,16 +2388,19 @@ private struct UsageOverviewCharts: View {
     }
     private func tint(_ account: Account) -> Color { overviewAccountTint(account, accounts: colorAccounts) }
     var body: some View {
-        let records = readings
-        let totals = eligible.map { account in (account, records.filter { $0.account == account.id }.reduce(0) { $0 + $1.value }) }
-        let total = totals.reduce(0) { $0 + $1.1 }
         SettingsCard(inset: 16) {
             VStack(alignment: .leading, spacing: 6) {
                 HStack {
                 Text("Allowance use").font(.system(size: 13, weight: .semibold))
                     Spacer()
                     Text("Last 7 days").font(.system(size: 10)).foregroundStyle(.secondary)
+                    Button { collapse?() } label: { Image(systemName: collapsed ? "chevron.right" : "chevron.down").font(.system(size: 10, weight: .semibold)).frame(width: 24, height: 24) }
+                        .buttonStyle(.plain).accessibilityLabel((collapsed ? "Expand " : "Collapse ") + "allowance use")
                 }
+                if !collapsed {
+        let records = readings
+        let totals = eligible.map { account in (account, records.filter { $0.account == account.id }.reduce(0) { $0 + $1.value }) }
+        let total = totals.reduce(0) { $0 + $1.1 }
                 if total > 0 {
                     HStack(spacing: 14) {
                         Chart {
@@ -2383,6 +2459,7 @@ private struct UsageOverviewCharts: View {
                 Text("Plan-relative points · not tokens or dollars")
                     .font(.system(size: 9)).foregroundStyle(.secondary)
                     .help("Each point is one percentage point of an account’s quota. Plans have different capacities, so this compares observed allowance depletion, not tokens, cost or coding time. API accounts are excluded. Empty days have no measured consumption or no readings.")
+                }
             }
         }
     }

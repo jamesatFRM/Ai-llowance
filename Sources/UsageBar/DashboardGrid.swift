@@ -1,0 +1,34 @@
+import SwiftUI
+import UsageCore
+
+private struct DashboardSpanKey: LayoutValueKey { static let defaultValue = 1 }
+extension View {
+    func dashboardSpan(_ span: Int) -> some View { layoutValue(key: DashboardSpanKey.self, value: span) }
+}
+
+/// Natural-height tiles fill the shortest available column. Summary tiles prefer
+/// two columns, but become compact tiles when that closes a collapsed-card gap.
+struct DashboardGrid: Layout {
+    let accountCount: Int
+    private func plan(width: CGFloat, subviews: Subviews) -> DashboardGridPlan {
+        let columns = DashboardGridPlan.columns(width: width, accounts: accountCount)
+        let columnWidth = max(0, (width - CGFloat(columns - 1) * 12) / CGFloat(columns))
+        let items = subviews.map { view in
+            DashboardGridItem(heights: (1...max(1, min(columns, view[DashboardSpanKey.self]))).map { span in
+                let proposed = columnWidth * CGFloat(span) + CGFloat(span - 1) * 12
+                return view.sizeThatFits(ProposedViewSize(width: proposed, height: nil)).height
+            })
+        }
+        return DashboardGridPlan(width: width, columns: columns, items: items)
+    }
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let width = proposal.width ?? 760
+        return CGSize(width: width, height: plan(width: width, subviews: subviews).height)
+    }
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        for (view, frame) in zip(subviews, plan(width: bounds.width, subviews: subviews).frames) {
+            view.place(at: CGPoint(x: bounds.minX + frame.x, y: bounds.minY + frame.y), anchor: .topLeading,
+                proposal: ProposedViewSize(width: frame.width, height: frame.height))
+        }
+    }
+}

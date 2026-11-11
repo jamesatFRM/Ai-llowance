@@ -19,10 +19,13 @@ struct HistoryTrendsView: View {
                     Text("See how your usage changes over time.").font(.system(size: 12)).foregroundStyle(.secondary)
                 }
                 Spacer()
-                Picker("Account", selection: $accountID) {
-                    Text("All accounts").tag(nil as UUID?)
-                    ForEach(store.accounts) { Text($0.pickerLabel).tag(Optional($0.id)) }
-                }.labelsHidden().frame(width: 180)
+                AppDropdown(accountID.flatMap { id in store.accounts.first { $0.id == id }?.name } ?? "All accounts", symbol: "person.2", menuTitle: "Show accounts") {
+                    AppDropdownItem("All accounts", symbol: "person.2", selected: accountID == nil) { accountID = nil }
+                    AppDropdownItem.separator
+                    for account in store.accounts {
+                        AppDropdownItem(account.pickerLabel, symbol: "person.crop.circle", selected: accountID == account.id) { accountID = account.id }
+                    }
+                }.frame(width: 180).accessibilityLabel("History account filter")
             }
             HStack(spacing: 16) {
                 Picker("History range", selection: $days) {
@@ -43,7 +46,7 @@ struct HistoryTrendsView: View {
                 let summary = ConsumptionSummary(days: recorded, kind: account.kind, session: session, since: start, now: store.now)
                 HistoryTrendPanel(account: account, samples: samples, summary: summary, firstRecorded: recorded.first(where: { account.kind.isAPI ? $0.money != nil : session ? $0.session != nil : $0.weekly != nil })?.day, start: start, end: store.now, days: days, session: session)
             }
-            Label("Stored on this Mac · 7 days of detail, 366-day retention for daily summaries (UTC)", systemImage: "lock.shield")
+            Label("Stored on this Mac · 7 days of detail, 400-day retention for daily summaries (UTC)", systemImage: "lock.shield")
                 .font(.system(size: 11)).foregroundStyle(.secondary)
             Text("Bars show observed consumption, excluding refills and resets. Faded bars have incomplete coverage; gaps are unmeasured. One allowance point is 1% of that account’s limit. Different plans have different capacities; points are not comparable tokens or dollars. Weekly and 5-hour usage stay separate. Usage is never projected into unmeasured time.")
                 .font(.system(size: 11)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)

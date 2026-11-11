@@ -61,7 +61,12 @@ final class AppStore: ObservableObject {
     private var alerts = AlertTracker()
     private var pendingAlerts: [UsageAlert] = []
     private var notificationRequestVersion = UUID()
-    private let requestNotificationAuthorization: @Sendable () async throws -> Bool
+    private var notificationClient: NotificationPermissionClient
+    private var notificationTask: Task<Void, Never>?
+    private var enableAfterNotificationSettings = false
+    @Published private(set) var notificationAccess = NotificationAccess.unknown
+    @Published private(set) var notificationPending = false
+    @Published private(set) var notificationMessage: String?
     private var cachedAccounts: Set<UUID> = []
     private var restoredLegacyFeeds: Set<UUID> = []
     private var cacheTask: Task<Void, Never>?
@@ -97,21 +102,29 @@ final class AppStore: ObservableObject {
 
     init(demo: Bool = false, demoAccountCount: Int = 4, root: URL = Paths.root, monitor: Bool = true,
          fetch: (@Sendable (Account, Date) async throws -> Snapshot)? = nil,
-         requestNotificationAuthorization: @escaping @Sendable () async throws -> Bool = {
-             try await UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound])
-         },
+         requestNotificationAuthorization: (@Sendable () async throws -> Bool)? = nil,
+         notificationClient: NotificationPermissionClient = .live,
          openExternal: @escaping (URL) -> Bool = { NSWorkspace.shared.open($0) }) {
         self.demo = demo; self.root = root; self.fetchOverride = fetch; self.openExternal = openExternal
-        self.requestNotificationAuthorization = requestNotificationAuthorization
+        self.notificationClient = notificationClient
+        if let requestNotificationAuthorization { self.notificationClient.request = requestNotificationAuthorization }
         if demo {
             dashboardVisible = true
             if Bundle.main.object(forInfoDictionaryKey: "AILSetupPreview") as? Bool == true { return }
             let qualityPreview = Bundle.main.object(forInfoDictionaryKey: "AILQualityPreview") as? Bool == true
+            let comparisonPreview = Bundle.main.object(forInfoDictionaryKey: "AILComparisonPreview") as? Bool == true
+            if comparisonPreview { notificationAccess = .init(authorization: .denied) }
             accounts = [Account(name: "Personal", kind: .claudeCode), Account(name: "Work", kind: .claudeCode),
                         Account(name: "Personal", kind: .codex), Account(name: "Work", kind: .codex)]
             if qualityPreview { accounts[3].kind = .vercelGateway; accounts[3].name = "AI Gateway" }
             let count = min(10, max(1, demoAccountCount))
             if count < accounts.count { accounts = Array(accounts.prefix(count)) }
+            if comparisonPreview {
+                for index in accounts.indices {
+                    accounts[index].dashboardComparison = [UsageComparisonPeriod.week, .month, .year, .off][index % 4]
+                    if index == 0 { accounts[index].dashboardChartStyle = .glow }
+                }
+            }
             while accounts.count < count {
                 accounts.append(Account(name: "Account \(accounts.count + 1)", kind: accounts.count % 3 == 1 ? .grokSubscription : .codex))
             }
@@ -132,14 +145,14 @@ final class AppStore: ObservableObject {
                     return point
                 }
                 if (qualityPreview || CommandLine.arguments.contains("--history") || Bundle.main.object(forInfoDictionaryKey: "AILHistoryPreview") as? Bool == true) {
-                    let older = (2...359).reversed().map { day -> UsageHistoryPoint in
+                    let older = (2...399).reversed().map { day -> UsageHistoryPoint in
                         let date = now.addingTimeInterval(-Double(day) * 86400)
                         var point = UsageHistoryPoint(timestamp: date, remainingPercent: max(4, 97 - Double((day + index * 2) % 7) * (8 + Double(index))), windowID: windows[0].id, resetsAt: date.addingTimeInterval(Double(day % 7 + 1) * 86400))
                         point.sessionRemainingPercent = 30 + Double((day * 13 + index * 19) % 70)
                         return point
                     }
                     usageHistory[account.id] = older + (usageHistory[account.id] ?? [])
-                    usageDays[account.id] = (0...359).reversed().map { day in
+                    usageDays[account.id] = (0...399).reversed().map { day in
                         let date = HistoryTrends.calendar.startOfDay(for: now).addingTimeInterval(-Double(day) * 86400)
                         let wave = 12 + Double(index) * 3 + 5 * sin(Double(day) / 24) + 2 * cos(Double(day) / 8)
                         return UsageDay(day: date, weekly: MeasuredUsage(amount: max(0,wave), seconds: day == 0 ? 3600 : 85000), session: MeasuredUsage(amount: max(0,wave * 2.4), seconds: day == 0 ? 3600 : 82000))
@@ -156,7 +169,7 @@ final class AppStore: ObservableObject {
                     usageHistory[account.id] = (0...48).map { sample in
                         UsageHistoryPoint(timestamp: now.addingTimeInterval(Double(sample - 48) * 1800), balanceUSD: 25 - Decimal(sample) / 10)
                     }
-                    usageDays[account.id] = (0...359).reversed().map { day in
+                    usageDays[account.id] = (0...399).reversed().map { day in
                         UsageDay(day: HistoryTrends.calendar.startOfDay(for: now).addingTimeInterval(-Double(day) * 86400), money: .init(amount: 1.2, seconds: 85000))
                     }
                 }
@@ -341,6 +354,34 @@ final class AppStore: ObservableObject {
     func setResetReminderMinimumPercent(_ value: Int) { guard (0...100).contains(value) else { return }; updateMenu { $0.resetReminderMinimumPercent = value } }
     func setDashboardChartFullScale(_ value: Bool) { updateMenu { $0.dashboardChartFullScale = value } }
     func setDashboardChartStyle(_ value: DashboardChartStyle) { updateMenu { $0.dashboardChartStyle = value } }
+    private func editDashboardAccount(_ id: UUID, change: (inout Account) -> Void) {
+        guard !readOnly, !shuttingDown, let index = accounts.firstIndex(where: { $0.id == id }) else { return }
+        let old = accounts[index]
+        change(&accounts[index])
+        do { try persist() }
+        catch { accounts[index] = old; notice = "Could not save the dashboard setting." }
+    }
+    func setAccountChart(_ id: UUID, style: DashboardChartStyle?) { editDashboardAccount(id) { $0.dashboardChartStyle = style } }
+    func setAccountComparison(_ id: UUID, period: UsageComparisonPeriod) { editDashboardAccount(id) { $0.dashboardComparison = period } }
+    func setAccountCollapsed(_ id: UUID, collapsed: Bool) { editDashboardAccount(id) { $0.dashboardCollapsed = collapsed } }
+    var dashboardAllCollapsed: Bool {
+        !accounts.isEmpty && accounts.allSatisfy { $0.dashboardCollapsed == true }
+            && menuPreferences.collapsedDashboardSummaries.isSuperset(of: ["overview", "activity"])
+    }
+    func setAllDashboardCollapsed(_ collapsed: Bool) {
+        guard !readOnly, !shuttingDown else { return }
+        let old = accounts, preferences = menuPreferences
+        var next = accounts
+        for index in next.indices { next[index].dashboardCollapsed = collapsed }
+        accounts = next
+        menuPreferences.collapsedDashboardSummaries = collapsed ? ["overview", "activity"] : []
+        do { try persist() }
+        catch { accounts = old; menuPreferences = preferences; notice = "Could not save the dashboard layout." }
+    }
+    func setDashboardSummaryCollapsed(_ name: String, collapsed: Bool) {
+        guard ["overview", "activity"].contains(name) else { return }
+        updateMenu { if collapsed { $0.collapsedDashboardSummaries.insert(name) } else { $0.collapsedDashboardSummaries.remove(name) } }
+    }
     func setDashboardTransparency(_ value: Double) { guard value.isFinite else { return }; updateMenu { $0.dashboardTransparency = min(1, max(0, value)) } }
     func setDropdownTransparency(_ value: Double) { guard value.isFinite else { return }; updateMenu { $0.dropdownTransparency = min(1, max(0, value)) } }
     func setLiquidGlass(_ enabled: Bool) { updateMenu { $0.liquidGlass = enabled } }
@@ -897,6 +938,7 @@ final class AppStore: ObservableObject {
         workspaceObservers = []
         refreshTask?.cancel(); loginTask?.cancel(); connectionTask?.cancel()
         diagnosticsTask?.cancel()
+        notificationTask?.cancel()
         await refreshTask?.value
         await loginTask?.value
         await connectionTask?.value
@@ -1113,31 +1155,92 @@ final class AppStore: ObservableObject {
             if loginItemNeedsApproval { SMAppService.openSystemSettingsLoginItems() }
         } catch { notice = "macOS could not change launch at login. Open System Settings → General → Login Items." }
     }
+    private func saveNotificationPreference(_ enabled: Bool) {
+        let previous = notificationsEnabled
+        notificationsEnabled = enabled
+        do { try persist() }
+        catch { notificationsEnabled = previous; notificationMessage = "Could not save the notification setting." }
+    }
+    func refreshNotificationAccess() {
+        guard !demo, !shuttingDown, notificationTask == nil else { return }
+        let version = notificationRequestVersion
+        notificationTask = Task {
+            let access = await notificationClient.read()
+            guard version == notificationRequestVersion, !shuttingDown, !Task.isCancelled else { return }
+            notificationAccess = access
+            if access.canDeliver { notificationMessage = nil }
+            if access.canDeliver && enableAfterNotificationSettings {
+                enableAfterNotificationSettings = false
+                notificationMessage = nil
+                saveNotificationPreference(true)
+            }
+            notificationTask = nil
+        }
+    }
     func setNotificationsEnabled(_ enabled: Bool) {
         guard !demo, !readOnly, !shuttingDown else { return }
-        let version = UUID()
-        notificationRequestVersion = version
+        notificationTask?.cancel(); notificationTask = nil
+        notificationRequestVersion = UUID()
+        let version = notificationRequestVersion
+        notificationMessage = nil
+        if notice?.hasPrefix("Could not enable notifications.") == true || notice?.hasPrefix("Allow notifications for Ai-llowance") == true { notice = nil }
         if !enabled {
-            let previous = notificationsEnabled
-            notificationsEnabled = false
-            pendingAlerts = []
-            do { try persist() }
-            catch { notificationsEnabled = previous; notice = "Could not save the notification setting." }
+            notificationPending = false; enableAfterNotificationSettings = false
+            pendingAlerts = []; saveNotificationPreference(false)
             return
         }
-        Task {
-            do {
-                let accepted = try await requestNotificationAuthorization()
-                guard notificationRequestVersion == version, !shuttingDown else { return }
-                let previous = notificationsEnabled
-                notificationsEnabled = accepted
-                do { try persist() }
-                catch { notificationsEnabled = previous; notice = "Could not save the notification setting."; return }
-                if !accepted { notice = "Allow notifications for Ai-llowance in System Settings to receive allowance alerts." }
-            } catch {
-                guard notificationRequestVersion == version, !shuttingDown else { return }
-                notice = "Could not enable notifications. Check System Settings → Notifications."
+        notificationPending = true
+        notificationTask = Task {
+            let initial = await notificationClient.read()
+            guard version == notificationRequestVersion, !shuttingDown, !Task.isCancelled else { return }
+            var access = initial
+            var failureMessage: String?
+            var accepted = initial.canDeliver
+            if initial.authorization != .denied && !accepted {
+                do {
+                    accepted = try await notificationClient.request()
+                    access = await notificationClient.read()
+                    if access.authorization == .unknown && accepted { access = NotificationAccess(authorization: .allowed) }
+                } catch {
+                    // macOS may already have granted access despite an interrupted reply.
+                    access = await notificationClient.read()
+                    accepted = access.canDeliver
+                    if !accepted && access.authorization != .denied { failureMessage = "macOS couldn’t check notification access. Try again or open Notifications Settings." }
+                }
             }
+            guard version == notificationRequestVersion, !shuttingDown, !Task.isCancelled else { return }
+            notificationAccess = access
+            notificationMessage = failureMessage
+            notificationPending = false; notificationTask = nil
+            if access.canDeliver || accepted && access.authorization != .denied {
+                enableAfterNotificationSettings = false
+                notificationMessage = nil; saveNotificationPreference(true)
+            } else {
+                enableAfterNotificationSettings = access.authorization == .denied
+                if access.authorization == .notDetermined && notificationMessage == nil { notificationMessage = "Notification permission wasn’t granted. Try again when you’re ready." }
+            }
+        }
+    }
+    func openNotificationSettings() {
+        guard !demo else { return }
+        if !openExternal(URL(string: "x-apple.systempreferences:com.apple.Notifications-Settings.extension")!) {
+            notificationMessage = "Open System Settings → Notifications → Ai-llowance."
+        }
+    }
+    func sendTestNotification() {
+        guard !demo, notificationsEnabled, notificationAccess.canDeliver, notificationTask == nil else { return }
+        notificationMessage = nil
+        notificationTask = Task {
+            do {
+                try await notificationClient.test()
+                guard !shuttingDown, !Task.isCancelled else { return }
+                notificationMessage = "Test sent. Check Notification Center; Focus may silence banners."
+            } catch {
+                guard !shuttingDown, !Task.isCancelled else { return }
+                notificationAccess = await notificationClient.read()
+                notificationMessage = "The test couldn’t be sent. Check Notifications Settings and try again."
+            }
+            notificationTask = nil
         }
     }
     func browserProfileID(_ account: Account) -> String? { browserChoices[account.id.uuidString] }
