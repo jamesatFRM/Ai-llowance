@@ -53,7 +53,14 @@ public struct ReadingPresentation: Equatable, Sendable {
 
     public static func windowLabel(_ window: QuotaWindow) -> String {
         if window.durationMinutes == 300 || window.id == "session" { return "5-hour" }
-        if window.durationMinutes == 10_080 || window.id == "7-day" || window.id == "week.all models" { return "Weekly" }
+        // Claude can report both an overall weekly allowance and a separate
+        // named limit. Their shared duration does not make them the same quota.
+        if window.id == "week.all models" || window.id == "7-day" { return "Weekly · All models" }
+        if window.id.hasPrefix("week.") {
+            let scope = window.id.dropFirst("week.".count).trimmingCharacters(in: .whitespacesAndNewlines)
+            if !scope.isEmpty { return "Weekly · \(scope)" }
+        }
+        if window.durationMinutes == 10_080 { return "Weekly" }
         return window.label.replacingOccurrences(of: " · 7d", with: "")
     }
 

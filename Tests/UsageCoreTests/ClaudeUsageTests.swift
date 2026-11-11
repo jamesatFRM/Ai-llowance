@@ -30,6 +30,24 @@ private func envelope(_ text: String, turns: Int = 0, cost: Double = 0) throws -
     #expect(snapshot.source == "Claude Code /usage")
 }
 
+@Test func claudeWeeklyLabelsDistinguishOverallAndNamedLimits() throws {
+    let report = """
+    Current week (all models): 63% used · resets Oct 13 at 10am (America/Denver)
+    Current week (Fable): 53% used · resets Oct 13 at 10am (America/Denver)
+    """
+    let snapshot = try ClaudeUsageReport.parse(envelope(report), at: checkTime)
+    #expect(snapshot.windows.map(ReadingPresentation.windowLabel) == ["Weekly · All models", "Weekly · Fable"])
+    #expect(snapshot.windows.map(\.remainingPercent) == [37, 47])
+    #expect(snapshot.primaryWeeklyWindow(for: .claudeCode)?.remainingPercent == 37)
+    #expect(snapshot.sessionWindow(for: .claudeCode) == nil)
+
+    // The label fix also applies to already-cached records and legacy feeds.
+    let cached = try JSONDecoder().decode(Snapshot.self, from: JSONEncoder().encode(snapshot))
+    #expect(cached.windows.map(ReadingPresentation.windowLabel) == ["Weekly · All models", "Weekly · Fable"])
+    #expect(ReadingPresentation.windowLabel(try QuotaWindow(id: "7-day", label: "7-day", usedPercent: 63, durationMinutes: 10080)) == "Weekly · All models")
+    #expect(ReadingPresentation.windowLabel(try QuotaWindow(id: "codex.Secondary", label: "codex · 7d", usedPercent: 63, durationMinutes: 10080)) == "Weekly")
+}
+
 @Test func directClaudeUsageRejectsCachedOrInferenceReports() throws {
     for text in ["Showing last-known usage\n" + planText, "Usage endpoint is rate limited\n" + planText] {
         #expect(throws: UsageError.rateLimited(300)) { try ClaudeUsageReport.parse(envelope(text), at: checkTime) }
