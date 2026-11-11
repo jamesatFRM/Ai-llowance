@@ -2,6 +2,23 @@ import Foundation
 import Testing
 @testable import UsageCore
 
+@Test func recentUsageNeverMixesWeeklyAndFiveHourPointsIntoTheSameGraph() {
+    let now = Date(timeIntervalSince1970: 1_800_000_000)
+    func point(_ seconds: Double, weekly: Double?, session: Double) -> UsageHistoryPoint {
+        var point = UsageHistoryPoint(timestamp: now.addingTimeInterval(seconds), remainingPercent: weekly ?? session,
+            windowID: weekly == nil ? "codex.Primary" : "codex.Secondary", resetsAt: now.addingTimeInterval(weekly == nil ? 7200 : 86400))
+        point.windowDurationMinutes = weekly == nil ? 300 : 10080
+        point.sessionRemainingPercent = session; point.sessionResetsAt = now.addingTimeInterval(7200)
+        return point
+    }
+    let points = [point(-1800, weekly: 90, session: 90), point(-900, weekly: 89, session: 70), point(0, weekly: nil, session: 30)]
+    let mixed = RecentUsage.buckets(points, kind: .codex, now: now)
+    #expect(mixed[22] == 1)
+    #expect(mixed[23] == nil) // Missing weekly usage cannot become a 40-point session spike.
+    let sessionOnly = RecentUsage.buckets([point(-900, weekly: nil, session: 70), point(0, weekly: nil, session: 30)], kind: .codex, now: now)
+    #expect(sessionOnly[23] == 40)
+}
+
 @Test func recentUsageShowsConsumptionAndKeepsMissingBucketsEmpty() {
     let now = Date(timeIntervalSince1970: 1_800_000_000)
     func point(_ seconds: Double, _ remaining: Double) -> UsageHistoryPoint {

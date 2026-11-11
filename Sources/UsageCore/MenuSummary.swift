@@ -257,17 +257,33 @@ public enum MenuSummary {
         func balanceAccounts(_ provider: MenuProvider? = nil) -> [Account] {
             selected.filter { $0.kind.isBalance && (provider == nil || $0.kind.provider == provider) }
         }
+        func allowanceEntries(_ group: [Account], label: String, icon: MenuProvider?) -> [MenuEntry] {
+            guard !group.isEmpty else { return [] }
+            let periods = group.compactMap { snapshots[$0.id]?.displayWindow(for: $0.kind)?.periodLabel }
+            // Keep incomplete groups unavailable, but never average a weekly
+            // allowance with a five-hour or other differently named window.
+            guard periods.count == group.count else { return [entry(group, label: label, icon: icon)] }
+            var order: [String] = [], groups: [String: [Account]] = [:]
+            for (account, period) in zip(group, periods) {
+                if groups[period] == nil { order.append(period) }
+                groups[period, default: []].append(account)
+            }
+            return order.map { period in
+                let name = order.count == 1 ? label : label + " · " + (period == "Week" ? "Weekly" : period == "5h" ? "5-hour" : period)
+                return entry(groups[period] ?? [], label: name, icon: icon)
+            }
+        }
         switch preferences.display {
         case .combined:
             let allowances = allowanceAccounts()
-            return (allowances.isEmpty ? [] : [entry(allowances, label: "All accounts", icon: nil)])
+            return allowanceEntries(allowances, label: "All accounts", icon: nil)
                 + balanceAccounts().map(balanceEntry)
         case .byProvider:
             var seenProviders = Set<MenuProvider>()
             let providers = selected.map { $0.kind.provider }.filter { seenProviders.insert($0).inserted }
             return providers.flatMap { icon in
                 let group = allowanceAccounts(icon)
-                let allowance = group.isEmpty ? [] : [entry(group, label: icon.title, icon: icon)]
+                let allowance = allowanceEntries(group, label: icon.title, icon: icon)
                 return allowance + balanceAccounts(icon).map(balanceEntry)
             }
         case .byAccount:

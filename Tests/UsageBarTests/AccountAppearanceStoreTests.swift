@@ -4,6 +4,36 @@ import Testing
 import UsageCore
 @testable import UsageBar
 
+@MainActor @Test func renamingInAppearanceEditorPreservesDistinctColorsAcrossRestart() async throws {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent("AppearanceDraft-\(UUID().uuidString)")
+    defer { try? FileManager.default.removeItem(at: root) }
+    let store = AppStore(root: root, monitor: false)
+    var account = Account(name: "Original", kind: .codex)
+    account.menuColorHex = "FF0033"; account.dashboardColorHex = "00BB88"; account.graphColorHex = "3399FF"
+    store.accounts = [account]
+    var draft = AccountAppearanceDraft(account: account, fallbackHex: "000000")
+    draft.name = "Renamed"
+    draft.chooseColor("3399ff") // An unchanged picker value is not a color edit.
+    #expect(store.setAccountAppearance(account, name: draft.name, menu: draft.menuHex, dashboard: draft.dashboardHex, graph: draft.graphHex))
+    await store.shutdown()
+    let restored = AppStore(root: root, monitor: false)
+    let saved = try #require(restored.accounts.first)
+    #expect(saved.name == "Renamed")
+    #expect(saved.menuColorHex == "FF0033" && saved.dashboardColorHex == "00BB88" && saved.graphColorHex == "3399FF")
+    draft.menu = false; draft.dashboard = false
+    draft.chooseColor("FFAACC")
+    #expect(draft.menuHex == "FF0033" && draft.dashboardHex == "00BB88" && draft.graphHex == "FFAACC")
+    draft.chooseColor("3399FF") // Reverting the picker restores all original choices.
+    #expect(draft.menuHex == "FF0033" && draft.dashboardHex == "00BB88" && draft.graphHex == "3399FF")
+    draft.applyEverywhere()
+    #expect(draft.menuHex == "3399FF" && draft.dashboardHex == "3399FF" && draft.graphHex == "3399FF")
+    draft.useProviderColors()
+    #expect(draft.menuHex == nil && draft.dashboardHex == nil && draft.graphHex == nil)
+    draft.graph = true; draft.chooseColor("AA33BB")
+    #expect(draft.graphHex == "AA33BB" && draft.menuHex == nil && draft.dashboardHex == nil)
+    await restored.shutdown()
+}
+
 @MainActor @Test func appearanceSavePersistsNameAndIndependentTargets() async throws {
     let root = FileManager.default.temporaryDirectory.appendingPathComponent("Appearance-\(UUID().uuidString)")
     try Paths.prepare(root)

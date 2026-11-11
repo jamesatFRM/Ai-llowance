@@ -2,6 +2,29 @@ import Foundation
 import Testing
 @testable import UsageCore
 
+@Test func groupedMenuKeepsWeeklyAndFiveHourAllowancesSeparate() throws {
+    let now = Date(timeIntervalSince1970: 1_800_000_000)
+    let a = Account(name: "Weekly", kind: .claudeCode), b = Account(name: "Session", kind: .codex)
+    let week = Snapshot(observedAt: now, windows: [try QuotaWindow(id: "week.all models", label: "Week", usedPercent: 20, durationMinutes: 10080)], source: "Fixture")
+    let session = Snapshot(observedAt: now, windows: [try QuotaWindow(id: "codex.Primary", label: "Session", usedPercent: 80, durationMinutes: 300)], source: "Fixture")
+    var preferences = MenuPreferences(); preferences.display = .combined
+    let result = MenuSummary.entries(accounts: [a,b], snapshots: [a.id: week, b.id: session], unavailable: [], preferences: preferences, now: now)
+    #expect(result.count == 2)
+    #expect(result.map(\.primaryPeriod) == ["Week", "5h"])
+    #expect(result.map(\.remainingPercent) == [80,20])
+    #expect(result.allSatisfy { $0.accountCount == 1 })
+    #expect(result.allSatisfy { !MenuEntryPresentation.value($0, preferences: preferences).contains("Quota") })
+    var secondClaude = b; secondClaude.kind = .claudeCode
+    let claudeSession = Snapshot(observedAt: now, windows: [try QuotaWindow(id: "session", label: "Session", usedPercent: 80, durationMinutes: 300)], source: "Fixture")
+    preferences.display = .byProvider
+    let provider = MenuSummary.entries(accounts: [a,secondClaude], snapshots: [a.id: week,secondClaude.id: claudeSession], unavailable: [], preferences: preferences, now: now)
+    #expect(provider.count == 2 && provider.map(\.primaryPeriod) == ["Week", "5h"])
+    preferences.display = .combined
+    // An unread account still prevents a deceptively complete combined value.
+    let missing = MenuSummary.entries(accounts: [a,b], snapshots: [a.id: week], unavailable: [], preferences: preferences, now: now)
+    #expect(missing.count == 1 && missing[0].remainingPercent == nil && missing[0].accountCount == 2)
+}
+
 private let menuTime = Date(timeIntervalSince1970: 1_790_000_000)
 private func weeklyReading(_ remaining: Double, kind: ConnectionKind, sessionRemaining: Double = 100) throws -> Snapshot {
     Snapshot(observedAt: menuTime, windows: [
