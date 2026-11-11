@@ -17,7 +17,7 @@ Run `bash scripts/quality-check.sh` locally. It runs privacy-guard self-tests, f
 
 ## Resource checks
 
-- Retained history is bounded at 4,096 observations and 366 days of daily summaries per account. Verify with a populated one-year fixture.
+- Retained history is bounded at 4,096 observations and 400 days of daily summaries per account. Verify with a populated one-year fixture.
 - Chart rendering is bounded to 360 actual observations before smoothing; exact hover uses original samples. Segment IDs keep resets and gaps disconnected. Bar views are bounded to 24/28 actual bucket readings.
 - Startup loads each account cache once for its reading, history and summaries. Cache persistence runs on a utility task.
 - Dashboard chart contents unload on hide, close or minimize. Navigation state remains in the root view. No new background timers or polling are added.

@@ -195,7 +195,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
         store.setInterfaceVisible(popover.isShown || hasVisibleSettings)
     }
     func applicationDidResignActive(_ notification: Notification) { closePopover() }
-    func applicationDidBecomeActive(_ notification: Notification) { store.rediscoverTools(); store.refresh() }
+    func applicationDidBecomeActive(_ notification: Notification) { store.rediscoverTools(); store.refresh(); store.refreshNotificationAccess() }
     func windowWillClose(_ notification: Notification) { store.setDashboardVisible(false); store.setInterfaceVisible(popover.isShown) }
     private func showAccounts() {
         closePopover()

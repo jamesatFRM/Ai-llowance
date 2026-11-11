@@ -19,7 +19,7 @@ For processes it starts, Ai-llowance sets Claude's `DISABLE_TELEMETRY=1` and `DI
 | Account nicknames, connection choices, preferences | Private files under `~/Library/Application Support/UsageBar` |
 | Expected subscription identity | Saved privately with connection settings to detect account changes and duplicate accounts |
 | Latest signed-in identity and reading | Private cache, bounded to 2 MiB per account including history; original observation time is preserved |
-| Allowance, credits, or spending history | At most 4,096 observations per account: seven days of detail, then actual daily closing readings. Daily consumption summaries are retained for 366 days. Normal samples are at least five minutes apart; window changes may add samples earlier. Updates keep this storage in place. |
+| Allowance, credits, or spending history | At most 4,096 observations per account: seven days of detail, then actual daily closing readings. Daily consumption summaries are retained for 400 days. Normal samples are at least five minutes apart; window changes may add samples earlier. Updates keep this storage in place. |
 | Unreadable-history recovery | At most one private recovery copy per account, at most 2 MiB, before replacing an unreadable cache. Kept locally for troubleshooting and removed with the account. |
 | Notification deduplication state | Private alert state; no chats or credentials |
 | Browser profile choice and custom CLI location | Private preferences; remembered CLI metadata includes path, size, modification time, and inode |

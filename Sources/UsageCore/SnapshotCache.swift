@@ -32,7 +32,7 @@ public struct UsageHistoryPoint: Codable, Equatable, Identifiable, Sendable {
 /// Private, bounded readings, never credentials. Cached timestamps and reset dates are preserved.
 public struct SnapshotCache: Sendable {
     public static let maximumPoints = 4096
-    public static let retentionDays = 366
+    public static let retentionDays = 400
     public static let retention: TimeInterval = Double(retentionDays) * 86400
 
     public struct State: Sendable {

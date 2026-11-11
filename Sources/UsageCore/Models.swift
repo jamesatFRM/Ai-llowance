@@ -94,11 +94,36 @@ public struct Account: Codable, Identifiable, Equatable, Sendable {
     public var menuColorHex: String?
     public var dashboardColorHex: String?
     public var graphColorHex: String?
+    public var dashboardChartStyle: DashboardChartStyle?
+    public var dashboardComparison: UsageComparisonPeriod?
+    public var dashboardCollapsed: Bool?
     public var pickerLabel: String { name == kind.provider.title ? name : name + " · " + kind.provider.title }
     public init(id: UUID = UUID(), name: String, kind: ConnectionKind, enabled: Bool = true, usesExistingCodex: Bool = false, usesExistingClaude: Bool = false, scopeID: String? = nil) {
         self.id = id; self.name = name; self.kind = kind; self.enabled = enabled; self.usesExistingCodex = usesExistingCodex
         self.usesExistingClaude = usesExistingClaude
         self.scopeID = scopeID
+    }
+    private enum CodingKeys: String, CodingKey {
+        case id, name, kind, enabled, usesExistingCodex, usesExistingClaude, expectedIdentity, scopeID, credentialRevision
+        case menuColorHex, dashboardColorHex, graphColorHex, dashboardChartStyle, dashboardComparison, dashboardCollapsed
+    }
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        id = try values.decode(UUID.self, forKey: .id)
+        name = try values.decode(String.self, forKey: .name)
+        kind = try values.decode(ConnectionKind.self, forKey: .kind)
+        enabled = try values.decodeIfPresent(Bool.self, forKey: .enabled) ?? true
+        usesExistingCodex = try values.decodeIfPresent(Bool.self, forKey: .usesExistingCodex) ?? false
+        usesExistingClaude = try values.decodeIfPresent(Bool.self, forKey: .usesExistingClaude)
+        expectedIdentity = try values.decodeIfPresent(String.self, forKey: .expectedIdentity)
+        scopeID = try values.decodeIfPresent(String.self, forKey: .scopeID)
+        credentialRevision = try values.decodeIfPresent(UUID.self, forKey: .credentialRevision)
+        menuColorHex = try values.decodeIfPresent(String.self, forKey: .menuColorHex)
+        dashboardColorHex = try values.decodeIfPresent(String.self, forKey: .dashboardColorHex)
+        graphColorHex = try values.decodeIfPresent(String.self, forKey: .graphColorHex)
+        dashboardChartStyle = (try values.decodeIfPresent(String.self, forKey: .dashboardChartStyle)).flatMap(DashboardChartStyle.init(rawValue:))
+        dashboardComparison = (try values.decodeIfPresent(String.self, forKey: .dashboardComparison)).flatMap(UsageComparisonPeriod.init(rawValue:))
+        dashboardCollapsed = try values.decodeIfPresent(Bool.self, forKey: .dashboardCollapsed)
     }
 }
 
