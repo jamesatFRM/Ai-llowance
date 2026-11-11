@@ -10,6 +10,7 @@ public struct ReadingPresentation: Equatable, Sendable {
     public let saved: Bool
     public let session: QuotaWindow?
     public let window: QuotaWindow?
+    public let secondaryLimitNote: String
 
     public init(snapshot: Snapshot?, kind: ConnectionKind, now: Date, saved: Bool = false) {
         let snapshot = snapshot.flatMap { try? $0.validated() }
@@ -18,6 +19,10 @@ public struct ReadingPresentation: Equatable, Sendable {
         self.period = window?.periodLabel
         self.saved = snapshot != nil && (saved || snapshot!.isStale(at: now, windows: snapshot!.applicableWindows(for: kind)))
         self.session = snapshot?.sessionWindow(for: kind).flatMap { $0.id == window?.id ? nil : $0 }
+        if snapshot == nil { secondaryLimitNote = "Awaiting limit details" }
+        else if kind == .claudeCode || kind == .codex {
+            secondaryLimitNote = window?.periodLabel == "5h" ? "Weekly limit not reported" : "5-hour limit not reported"
+        } else { secondaryLimitNote = "No additional limit reported" }
         if snapshot?.unlimited == true { value = "Unlimited" }
         else if let balance = snapshot?.balanceUSD { value = balance.formatted(.currency(code: "USD")) }
         else if let cost = snapshot?.costUSD, kind.isAPI { value = cost.formatted(.currency(code: "USD")) }

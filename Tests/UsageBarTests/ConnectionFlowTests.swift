@@ -30,6 +30,17 @@ private actor FetchGate {
     }
     func finish(_ value: Snapshot) { continuation?.resume(returning: value); continuation = nil }
 }
+private actor CancelledRefreshProbe {
+    var started = false
+    var cancelled = false
+    func fetch() async throws -> Snapshot {
+        started = true
+        do { try await Task.sleep(for: .seconds(30)) }
+        catch { cancelled = error is CancellationError; throw error }
+        Issue.record("Cancelled read must not finish")
+        throw UsageError.server
+    }
+}
 private actor QueuedSetupGate {
     var waiting: [UUID: CheckedContinuation<Snapshot, Never>] = [:]
     var targetRequests: [Account] = []
@@ -402,17 +413,19 @@ private actor QueuedSetupGate {
 
 @Test @MainActor func shutdownCancelsPendingRefreshAndPreventsRestart() async throws {
     let root = try fixtureRoot(); defer { try? FileManager.default.removeItem(at: root) }
-    let store = AppStore(root: root, monitor: false, fetch: { _, _ in
-        try await Task.sleep(for: .seconds(30))
-        Issue.record("Cancelled read must not finish")
-        throw UsageError.server
-    })
+    let probe = CancelledRefreshProbe()
+    let store = AppStore(root: root, monitor: false, fetch: { _, _ in try await probe.fetch() })
     store.accounts = [Account(name: "Test", kind: .codex)]
     store.refresh()
     #expect(store.refreshing)
-    let start = Date()
+    let deadline = Date().addingTimeInterval(10)
+    while !(await probe.started) {
+        guard Date() < deadline else { throw UsageError.timeout }
+        try await Task.sleep(for: .milliseconds(10))
+    }
+    // Observe in-flight cancellation directly; parallel fixtures share the main actor.
     await store.shutdown()
-    #expect(Date().timeIntervalSince(start) < 2)
+    #expect(await probe.cancelled)
     #expect(!store.refreshing)
     #expect(store.snapshots.isEmpty)
     store.refresh(force: true)

@@ -113,6 +113,7 @@ final class AppStore: ObservableObject {
             if Bundle.main.object(forInfoDictionaryKey: "AILSetupPreview") as? Bool == true { return }
             let qualityPreview = Bundle.main.object(forInfoDictionaryKey: "AILQualityPreview") as? Bool == true
             let comparisonPreview = Bundle.main.object(forInfoDictionaryKey: "AILComparisonPreview") as? Bool == true
+            let reliabilityPreview = Bundle.main.object(forInfoDictionaryKey: "AILReliabilityPreview") as? Bool == true
             if comparisonPreview { notificationAccess = .init(authorization: .denied) }
             accounts = [Account(name: "Personal", kind: .claudeCode), Account(name: "Work", kind: .claudeCode),
                         Account(name: "Personal", kind: .codex), Account(name: "Work", kind: .codex)]
@@ -125,16 +126,21 @@ final class AppStore: ObservableObject {
                     if index == 0 { accounts[index].dashboardChartStyle = .glow }
                 }
             }
+            if reliabilityPreview {
+                accounts[0].menuColorHex = "FF0033"; accounts[0].dashboardColorHex = "00BB88"; accounts[0].graphColorHex = "3399FF"
+                accounts[0].dashboardChartStyle = .ring; accounts[0].dashboardComparison = .off
+            }
             while accounts.count < count {
                 accounts.append(Account(name: "Account \(accounts.count + 1)", kind: accounts.count % 3 == 1 ? .grokSubscription : .codex))
             }
             for (index, account) in accounts.enumerated() {
                 let claude = account.kind == .claudeCode
-                let remaining = [72.0, qualityPreview ? 16.0 : 24.0, 58.0, 16.0][index % 4]
+                let remaining = [reliabilityPreview ? 72.8 : 72.0, qualityPreview ? 16.0 : 24.0, reliabilityPreview ? 82.0 : 58.0, 16.0][index % 4]
                 var windows = [try! QuotaWindow(id: claude ? "week.all models" : "codex.Secondary", label: "Week · 7d", usedPercent: 100 - remaining,
                     resetsAt: now.addingTimeInterval(Double(index + 2) * 86400), durationMinutes: 10_080)]
                 if !qualityPreview || index != 1 { windows.append(try! QuotaWindow(id: claude ? "session" : "codex.Primary", label: "Session · 5h", usedPercent: index == 1 ? 100 : 18,
                     resetsAt: now.addingTimeInterval(7200), durationMinutes: 300)) }
+                if reliabilityPreview && index == 2 { windows = windows.filter { $0.durationMinutes == 300 } }
                 snapshots[account.id] = Snapshot(observedAt: now, windows: windows, identity: index % 2 == 0 ? "alex@example.com" : "work@example.com", source: "Sample data")
                 usageHistory[account.id] = (0...48).map { sample in
                     let progress = Double(sample) / 48
@@ -157,6 +163,10 @@ final class AppStore: ObservableObject {
                         let wave = 12 + Double(index) * 3 + 5 * sin(Double(day) / 24) + 2 * cos(Double(day) / 8)
                         return UsageDay(day: date, weekly: MeasuredUsage(amount: max(0,wave), seconds: day == 0 ? 3600 : 85000), session: MeasuredUsage(amount: max(0,wave * 2.4), seconds: day == 0 ? 3600 : 82000))
                     }
+                    if reliabilityPreview && index == 1 {
+                        let missing = HistoryTrends.calendar.startOfDay(for: now).addingTimeInterval(-32 * 86400)
+                        usageDays[account.id]?.removeAll { $0.day == missing }
+                    }
                 }
                 if index == 2 {
                     snapshots[account.id]?.observedAt = now.addingTimeInterval(-480)
@@ -173,6 +183,13 @@ final class AppStore: ObservableObject {
                         UsageDay(day: HistoryTrends.calendar.startOfDay(for: now).addingTimeInterval(-Double(day) * 86400), money: .init(amount: 1.2, seconds: 85000))
                     }
                 }
+            }
+            if Bundle.main.object(forInfoDictionaryKey: "AILUnlimitedPreview") as? Bool == true {
+                let id = accounts[0].id
+                accounts[0].name = "Unlimited plan"; accounts[0].kind = .copilot
+                accounts[0].dashboardChartStyle = .ring; accounts[0].dashboardComparison = .off
+                snapshots[id] = Snapshot(observedAt: now, source: "Sample data", unlimited: true)
+                usageHistory[id] = []; usageDays[id] = []
             }
             menuPreferences.display = .byAccount; menuPreferences.showAccountNames = false
             return

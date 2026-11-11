@@ -9,6 +9,11 @@ public struct HistorySample: Identifiable, Sendable {
 
 /// Lines connect only nearby observations from the same known reporting period.
 public enum HistorySeries {
+    /// The expanded dropdown shows recent detail, not a year of closing readings.
+    public static func recentSamples(_ points: [UsageHistoryPoint], kind: ConnectionKind, now: Date) -> [HistorySample] {
+        let start = now.addingTimeInterval(-86400)
+        return plotSamples(samples(points.filter { $0.timestamp >= start && $0.timestamp <= now }, kind: kind), maximum: 120)
+    }
     /// Bound chart work independently of retained history. Select only actual
     /// observations, keeping local extrema and segment IDs; hover stays exact.
     public static func plotSamples(_ samples: [HistorySample], maximum: Int = 360) -> [HistorySample] {
@@ -99,7 +104,8 @@ public enum HistorySeries {
                 }
                 let changedWindow = !kind.isAPI && (point.windowID != previous.windowID || resetChanged)
                 let restoredQuota = !kind.isAPI && value > last.value
-                let newBillingPeriod = kind.isAPI && !kind.isBalance && value < last.value
+                let newBillingPeriod = kind.isAPI && !kind.isBalance
+                    && (value < last.value || !HistoryTrends.calendar.isDate(previous.timestamp, equalTo: point.timestamp, toGranularity: .month))
                 if gap <= 0 || gap > max(previous.continuityInterval ?? 1800, point.continuityInterval ?? 1800) || changedWindow || restoredQuota || newBillingPeriod { segment += 1 }
             }
             result.append(HistorySample(timestamp: point.timestamp, value: value, segment: segment))

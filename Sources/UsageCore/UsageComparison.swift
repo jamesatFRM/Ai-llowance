@@ -48,7 +48,11 @@ public struct UsageComparison: Equatable, Sendable {
         days = (0..<7).map { index in
             let day = calendar.date(byAdding: .day, value: index, to: start)!
             let prior = calendar.date(byAdding: .day, value: index, to: previousStart)!
-            return ComparisonDay(day: day, previousDay: prior, current: byDay[day], previous: byDay[prior])
+            // Plot the same paired observations used by the totals. Retain empty
+            // day positions so a line cannot connect across an unmatched day.
+            let current = byDay[day], previous = byDay[prior]
+            let paired = current != nil && previous != nil
+            return ComparisonDay(day: day, previousDay: prior, current: paired ? current : nil, previous: paired ? previous : nil)
         }
         let paired = days.filter { $0.current != nil && $0.previous != nil }
         pairedDays = paired.count

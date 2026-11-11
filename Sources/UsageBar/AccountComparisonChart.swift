@@ -33,7 +33,7 @@ struct AccountComparisonChart: View {
                 Text("7d · UTC")
             }.font(.system(size: 9)).foregroundStyle(.secondary)
             if samples.isEmpty {
-                Text("Comparison history is building")
+                Text("Matched history is building")
                     .font(.system(size: 11)).foregroundStyle(.secondary).frame(maxWidth: .infinity).frame(height: 86)
             } else if style.isCurrentAllowance {
                 HStack(spacing: 12) {
@@ -121,7 +121,7 @@ struct AccountComparisonChart: View {
                 .frame(height: 86)
             }
             HStack(spacing: 8) {
-                Label("Now " + (comparison.pairedDays == 0 ? "—" : amount(comparison.currentAmount)), systemImage: "circle.fill").foregroundStyle(tint)
+                Label("Matched " + (comparison.pairedDays == 0 ? "—" : amount(comparison.currentAmount)), systemImage: "circle.fill").foregroundStyle(tint)
                 Spacer(minLength: 0)
                 Label(comparison.period.previousLabel.capitalized + " " + (comparison.pairedDays == 0 ? "—" : amount(comparison.previousAmount)), systemImage: "circle.dashed").foregroundStyle(.secondary)
             }.font(.system(size: 9)).lineLimit(1).minimumScaleFactor(0.8)

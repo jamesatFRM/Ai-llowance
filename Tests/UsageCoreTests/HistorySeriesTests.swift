@@ -2,6 +2,22 @@ import Foundation
 import Testing
 @testable import UsageCore
 
+@Test func spendingHistoryBreaksAtUTCBillingMonthEvenWhenNewSpendingIsHigher() throws {
+    let formatter = ISO8601DateFormatter()
+    let january = try #require(formatter.date(from: "2026-01-31T23:55:00Z"))
+    let february = try #require(formatter.date(from: "2026-02-01T00:05:00Z"))
+    let points = [UsageHistoryPoint(timestamp: january, costUSD: 2),
+                  UsageHistoryPoint(timestamp: february, costUSD: 5),
+                  UsageHistoryPoint(timestamp: february.addingTimeInterval(300), costUSD: 6)]
+    for kind in [ConnectionKind.openAIAPI, .claudeAPI] {
+        #expect(HistorySeries.samples(points, kind: kind).map(\.segment) == [0, 1, 1])
+        #expect(ConsumptionHistory.rebuild(points, kind: kind).first?.money?.amount == 1)
+    }
+    // Credit balances have no calendar-month reset.
+    let credits = points.map { UsageHistoryPoint(timestamp: $0.timestamp, balanceUSD: $0.costUSD) }
+    #expect(HistorySeries.samples(credits, kind: .vercelGateway).map(\.segment) == [0, 0, 0])
+}
+
 @Test func historyLineBreaksAtGapsResetsAndQuotaChanges() {
     let start = Date()
     let reset = start.addingTimeInterval(86400)

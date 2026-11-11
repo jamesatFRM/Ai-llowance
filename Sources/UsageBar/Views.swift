@@ -287,6 +287,14 @@ private struct CompactAccountRow: View {
     private var status: AllowanceStatus { AllowanceStatus.evaluate(snapshot: snapshot, kind: account.kind, now: now, hasError: error != nil) }
     private var reading: ReadingPresentation { ReadingPresentation(snapshot: snapshot, kind: account.kind, now: now, saved: connection?.saved == true || cached) }
     private var window: QuotaWindow? { reading.window }
+    private var accessibilitySummary: String {
+        let parts: [String?] = [account.name,
+            dropdownPreferences.dropdownShowEmails ? account.expectedIdentity ?? snapshot?.identity : nil,
+            reading.value, detail,
+            dropdownPreferences.dropdownShowRecentUsage ? "Recent usage graph: last 6 hours" : nil,
+            expanded ? "collapse" : "show details"]
+        return parts.compactMap { $0 }.joined(separator: ", ")
+    }
     private var detail: String {
         if let connection, connection.saved || connection.needsAction || status.state == .exhausted || snapshot == nil {
             let period = window.map { ReadingPresentation.windowLabel($0) + " · " } ?? ""
@@ -338,7 +346,7 @@ private struct CompactAccountRow: View {
                     }
                 }.padding(.vertical, dropdownPreferences.dropdownRoomyRows ? 9 : 4).contentShape(Rectangle())
             }.buttonStyle(.plain).help("\(account.kind.title) · click for limits and actions")
-                .accessibilityLabel("\(account.name), \(reading.value), \(detail), \(expanded ? "collapse" : "show details")")
+                .accessibilityLabel(accessibilitySummary)
             if detailedLabels, let snapshot {
                 VStack(alignment: .leading, spacing: 8) {
                     ForEach(snapshot.windows) { window in
@@ -355,7 +363,7 @@ private struct CompactAccountRow: View {
                         if !detailedLabels {
                             ForEach(snapshot.windows) { window in QuotaDetailRow(window: window, now: now, unavailable: reading.saved || error != nil || cached || snapshot.isStale(at: now, windows: [window]) || !account.enabled || snapshot.providerRestricted == true, showReset: dropdownPreferences.dropdownShowResets, showBar: dropdownPreferences.dropdownShowBars) }
                         }
-                        HistorySparkline(points: history, kind: account.kind)
+                        HistorySparkline(points: history, kind: account.kind, now: now)
                         Text(readingAge(snapshot.observedAt, at: now)).font(.system(size: 9)).foregroundStyle(.tertiary)
                     }
                     if let error { Text(error).font(.system(size: 10)).foregroundStyle(.orange).fixedSize(horizontal: false, vertical: true) }
@@ -408,7 +416,8 @@ private struct QuotaDetailRow: View {
 private struct HistorySparkline: View {
     let points: [UsageHistoryPoint]
     let kind: ConnectionKind
-    private var samples: [HistorySample] { HistorySeries.samples(points, kind: kind) }
+    let now: Date
+    private var samples: [HistorySample] { HistorySeries.recentSamples(points, kind: kind, now: now) }
     private var series: [(Date, Double)] { samples.map { ($0.timestamp, $0.value) } }
     private var values: [Double] { series.map { $0.1 } }
     var body: some View {
@@ -416,13 +425,13 @@ private struct HistorySparkline: View {
             VStack(alignment: .leading, spacing: 3) {
                 SparklineShape(values: values, dates: series.map { $0.0 }, segments: samples.map(\.segment)).stroke(Brand.gradient, style: StrokeStyle(lineWidth: 1.8, lineCap: .round, lineJoin: .round)).frame(height: 26)
                 HStack {
-                    Text("Recent readings")
+                    Text("Last 24 hours")
                     Spacer()
-                    if let first = points.first { Text(first.timestamp, format: .dateTime.hour().minute()) }
+                    if let first = samples.first { Text(first.timestamp, format: .dateTime.hour().minute()) }
                     Text("→")
-                    if let last = points.last { Text(last.timestamp, format: .dateTime.hour().minute()) }
+                    if let last = samples.last { Text(last.timestamp, format: .dateTime.hour().minute()) }
                 }.font(.system(size: 8)).foregroundStyle(.tertiary)
-            }.accessibilityElement(children: .ignore).accessibilityLabel("\(values.count) recent local usage readings")
+            }.accessibilityElement(children: .ignore).accessibilityLabel("\(values.count) plotted local usage readings from the last 24 hours")
         }
     }
 }
@@ -1360,7 +1369,7 @@ struct AccountsView: View {
                         accountActions(account)
                         DisclosureGroup("Details & link preferences") {
                             VStack(alignment: .leading, spacing: 10) {
-                                HistorySparkline(points: store.history(for: account), kind: account.kind)
+                                HistorySparkline(points: store.history(for: account), kind: account.kind, now: store.now)
                                 if let snapshot = store.snapshots[account.id] { Text("\(snapshot.source) · updated \(snapshot.observedAt.formatted(.dateTime.hour().minute()))").font(.system(size: 10)).foregroundStyle(.secondary) }
                                 if !store.browserProfiles.isEmpty {
                                     AppDropdown(store.browserProfiles.first { $0.id == store.browserProfileID(account) }?.name ?? "System default browser", symbol: "globe", menuTitle: "Open links with") {
@@ -1599,7 +1608,7 @@ struct AccountsView: View {
                     Text("Uses Liquid Glass from General. Higher transparency lets more of the desktop show through.").font(.callout).foregroundStyle(.secondary)
                     Divider()
                     Toggle("Always show individual limits", isOn: Binding(get: { store.menuPreferences.detailedQuotaLabels }, set: { store.setDetailedQuotaLabels($0) }))
-                    Text("Show each limit and reset time without expanding an account.")
+                    Text("Show each reported limit without expanding an account.")
                         .font(.callout).foregroundStyle(.secondary)
                     Divider()
                     Toggle("Show account emails", isOn: Binding(get: { store.menuPreferences.dropdownShowEmails }, set: { store.setDropdownShowEmails($0) }))
@@ -1757,6 +1766,8 @@ struct AccountsView: View {
                             .disabled(store.menuPreferences.accountOrder.isEmpty)
                     }
                     Text("Top to bottom becomes left to right. Provider groups follow their first account. All together combines subscription icons.")
+                        .font(.callout).foregroundStyle(.secondary)
+                    Text("Different allowance windows stay separate when grouping usage. API credit balances stay in dollars.")
                         .font(.callout).foregroundStyle(.secondary)
                     ForEach(Array(store.orderedMenuAccounts.enumerated()), id: \.element.id) { index, account in
                         HStack(spacing: 10) {
@@ -1950,7 +1961,7 @@ private struct HistoryCard: View {
                 }.frame(height: 5)
                 Text(ReadingPresentation.resetText(session.resetsAt, at: now)).font(.system(size: 9)).foregroundStyle(.secondary)
             } else {
-                Label("5-hour limit not reported", systemImage: "info.circle")
+                Label(reading.secondaryLimitNote, systemImage: "info.circle")
                     .font(.system(size: 10)).foregroundStyle(.secondary)
             }
         }.frame(maxWidth: .infinity, minHeight: 36, maxHeight: 36, alignment: .leading)
@@ -1966,12 +1977,12 @@ private struct HistoryCard: View {
                 if effectiveStyle.isCurrentAllowance {
                     CurrentAllowanceChart(percent: snapshot?.displayWindow(for: account.kind)?.remainingPercent,
                                           style: effectiveStyle, tint: graphTint,
-                                          saved: reading.saved)
+                                          saved: reading.saved, unlimited: snapshot?.unlimited == true)
                         .frame(height: 86)
-                    Text(reading.saved ? "Remaining vs. used · last known" : "Remaining vs. used · current limit")
+                    Text(snapshot?.unlimited == true ? "No percentage limit" : reading.saved ? "Remaining vs. used · last known" : "Remaining vs. used · current limit")
                         .font(.system(size: 10)).foregroundStyle(.secondary).lineLimit(1)
                 } else if plotted.isEmpty {
-                    Text("No readings in this range yet. History grows as this Mac refreshes your accounts.")
+                    Text(snapshot?.unlimited == true ? "The provider reports an unlimited allowance, with no percentage history." : "No readings in this range yet. History grows as this Mac refreshes your accounts.")
                         .font(.system(size: 12)).foregroundStyle(.secondary).frame(maxWidth: .infinity).frame(height: 86)
                 } else {
                     Chart {
@@ -2115,9 +2126,11 @@ private struct HistoryCard: View {
                         .font(.system(size: 11)).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
                     quotaSummary
                     cardControls
-                    if comparison.period == .off { allowancePlot }
-                    else { AccountComparisonChart(comparison: comparison, style: effectiveStyle, tint: graphTint, isMoney: account.kind.isAPI) }
-                    Text(comparison.summary).font(.system(size: 11, weight: .medium)).lineLimit(1).minimumScaleFactor(0.8)
+                    VStack(alignment: .leading, spacing: 5) {
+                        if comparison.period == .off { allowancePlot }
+                        else { AccountComparisonChart(comparison: comparison, style: effectiveStyle, tint: graphTint, isMoney: account.kind.isAPI) }
+                    }.frame(height: 120, alignment: .top)
+                    Text(snapshot?.unlimited == true && comparison.period == .off ? "Provider reports no limit" : comparison.summary).font(.system(size: 11, weight: .medium)).lineLimit(1).minimumScaleFactor(0.8)
                         .foregroundStyle(comparison.changePercent == nil ? Color.secondary : graphTint).help(comparison.detail)
                 if !account.kind.isAPI { sessionSummary }
                 else {
@@ -2286,44 +2299,42 @@ private struct AccountAppearanceEditor: View {
     let account: Account
     var save: (String, String?, String?, String?) -> Void
     var cancel: () -> Void
-    @ViewState private var name: String
-    @ViewState private var color: Color
-    @ViewState private var menu: Bool
-    @ViewState private var dashboard: Bool
-    @ViewState private var graph: Bool
+    @ViewState private var draft: AccountAppearanceDraft
     init(account: Account, save: @escaping (String, String?, String?, String?) -> Void, cancel: @escaping () -> Void) {
         self.account = account; self.save = save; self.cancel = cancel
-        _name = ViewState(initialValue: account.name)
-        _color = ViewState(initialValue: NSColor.accountHex(account.graphColorHex ?? account.dashboardColorHex ?? account.menuColorHex).map { Color(nsColor: $0) } ?? providerAccent(account.kind.provider))
-        _menu = ViewState(initialValue: account.menuColorHex != nil)
-        _dashboard = ViewState(initialValue: account.dashboardColorHex != nil)
-        _graph = ViewState(initialValue: account.graphColorHex != nil)
+        let fallback = NSColor(providerAccent(account.kind.provider)).usingColorSpace(.sRGB).map {
+            String(format: "%02X%02X%02X", Int(($0.redComponent * 255).rounded()), Int(($0.greenComponent * 255).rounded()), Int(($0.blueComponent * 255).rounded()))
+        } ?? "007AFF"
+        _draft = ViewState(initialValue: AccountAppearanceDraft(account: account, fallbackHex: fallback))
     }
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             Text("Account Appearance").font(.headline)
-            TextField("Account name", text: $name).textFieldStyle(.roundedBorder)
-            ColorPicker("Accent color", selection: $color, supportsOpacity: false)
+            TextField("Account name", text: $draft.name).textFieldStyle(.roundedBorder)
+            ColorPicker("Accent color", selection: Binding(get: {
+                NSColor.accountHex(draft.colorHex).map { Color(nsColor: $0) } ?? providerAccent(account.kind.provider)
+            }, set: { color in
+                guard let rgb = NSColor(color).usingColorSpace(.sRGB) else { return }
+                draft.chooseColor(String(format: "%02X%02X%02X", Int((rgb.redComponent * 255).rounded()), Int((rgb.greenComponent * 255).rounded()), Int((rgb.blueComponent * 255).rounded())))
+            }), supportsOpacity: false)
             GroupBox("Apply color to") {
                 VStack(alignment: .leading, spacing: 10) {
-                    Toggle("Menu bar & dropdown", isOn: $menu)
-                    Toggle("Dashboard", isOn: $dashboard)
-                    Toggle("Usage graph", isOn: $graph)
+                    Toggle("Menu bar & dropdown", isOn: $draft.menu)
+                    Toggle("Dashboard", isOn: $draft.dashboard)
+                    Toggle("Usage graph", isOn: $draft.graph)
                     HStack {
-                        Button("All") { menu = true; dashboard = true; graph = true }
-                        Button("Use provider colors") { menu = false; dashboard = false; graph = false }
+                        Button("All") { draft.applyEverywhere() }
+                        Button("Use provider colors") { draft.useProviderColors() }
                     }
                 }.frame(maxWidth: .infinity, alignment: .leading).padding(8)
             }
-            Text("Combined menu items use a custom color only when all included accounts share it.").font(.callout).foregroundStyle(.secondary)
+            Text("Changing the accent affects selected surfaces. Other saved colors stay as they are.").font(.callout).foregroundStyle(.secondary)
             HStack {
                 Button("Cancel", action: cancel).keyboardShortcut(.cancelAction)
                 Spacer()
                 Button("Save") {
-                    guard let rgb = NSColor(color).usingColorSpace(.sRGB) else { return }
-                    let hex = String(format: "%02X%02X%02X", Int((rgb.redComponent * 255).rounded()), Int((rgb.greenComponent * 255).rounded()), Int((rgb.blueComponent * 255).rounded()))
-                    save(name, menu ? hex : nil, dashboard ? hex : nil, graph ? hex : nil)
-                }.keyboardShortcut(.defaultAction).disabled(name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    save(draft.name, draft.menuHex, draft.dashboardHex, draft.graphHex)
+                }.keyboardShortcut(.defaultAction).disabled(draft.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
         }.font(.system(size: 13)).padding(20).frame(width: 360)
     }
@@ -2335,16 +2346,21 @@ private struct CurrentAllowanceChart: View {
     let style: DashboardChartStyle
     let tint: Color
     let saved: Bool
-    private var remaining: Double? { percent.flatMap { $0.isFinite ? min(100, max(0, $0)) : nil } }
+    var unlimited = false
+    private var composition: AllowanceComposition? { AllowanceComposition(percent) }
     var body: some View {
         HStack(spacing: 16) {
-            if let remaining {
+            if unlimited {
+                Label("Unlimited", systemImage: "infinity")
+                    .font(.system(size: 20, weight: .semibold, design: .rounded)).foregroundStyle(tint)
+            } else if let composition {
+                let remaining = composition.remainingPercent
                 if style == .gauge {
                     ZStack {
                         Circle().trim(from: 0, to: 0.75).stroke(Color.primary.opacity(0.08), style: StrokeStyle(lineWidth: 9, lineCap: .round))
                         Circle().trim(from: 0, to: 0.75 * remaining / 100)
                             .stroke(AngularGradient(colors: [tint.opacity(0.35), tint], center: .center, startAngle: .degrees(0), endAngle: .degrees(270)), style: StrokeStyle(lineWidth: 9, lineCap: .round))
-                        Text(String(format: "%.0f%%", remaining)).font(.system(size: 16, weight: .semibold, design: .rounded)).rotationEffect(.degrees(-135))
+                        Text("\(composition.remainingWholePercent)%").font(.system(size: 16, weight: .semibold, design: .rounded)).rotationEffect(.degrees(-135))
                     }.rotationEffect(.degrees(135)).padding(7).frame(width: 74, height: 74)
                 } else {
                     Chart {
@@ -2354,13 +2370,13 @@ private struct CurrentAllowanceChart: View {
                             .foregroundStyle(Color.primary.opacity(0.08)).cornerRadius(3)
                     }.chartLegend(.hidden).frame(width: 74, height: 74)
                         .overlay {
-                            if style == .ring { Text(String(format: "%.0f%%", remaining)).font(.system(size: 16, weight: .semibold, design: .rounded)) }
+                            if style == .ring { Text("\(composition.remainingWholePercent)%").font(.system(size: 16, weight: .semibold, design: .rounded)) }
                         }
                 }
                 VStack(alignment: .leading, spacing: 7) {
                     Text(saved ? "Saved allowance" : "Current allowance").font(.system(size: 10, weight: .medium)).foregroundStyle(.secondary)
-                    Label(String(format: "%.0f%% remaining", remaining), systemImage: "circle.fill").foregroundStyle(tint)
-                    Label(String(format: "%.0f%% used", 100 - remaining), systemImage: "circle").foregroundStyle(.secondary)
+                    Label("\(composition.remainingWholePercent)% remaining", systemImage: "circle.fill").foregroundStyle(tint)
+                    Label("\(composition.usedWholePercent)% used", systemImage: "circle").foregroundStyle(.secondary)
                 }.font(.system(size: 11, weight: .medium)).monospacedDigit()
             } else {
                 Text("No allowance reading yet").font(.callout).foregroundStyle(.secondary)
@@ -2368,7 +2384,7 @@ private struct CurrentAllowanceChart: View {
             Spacer(minLength: 0)
         }.frame(maxWidth: .infinity, alignment: .leading)
             .accessibilityElement(children: .ignore)
-            .accessibilityLabel(remaining.map { String(format: "%@ %.0f percent remaining, %.0f percent used", saved ? "Saved allowance" : "Current allowance", $0, 100 - $0) } ?? "No allowance reading yet")
+            .accessibilityLabel(unlimited ? "Unlimited allowance. No percentage limit reported." : composition.map { "\(saved ? "Saved allowance" : "Current allowance") \($0.remainingWholePercent) percent remaining, \($0.usedWholePercent) percent used" } ?? "No allowance reading yet")
     }
 }
 

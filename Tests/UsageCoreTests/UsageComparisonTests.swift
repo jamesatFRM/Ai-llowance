@@ -3,6 +3,19 @@ import Testing
 @testable import UsageCore
 
 private let comparisonNow = Date(timeIntervalSince1970: 1_800_000_000)
+
+@Test func comparisonChartsAndTotalsUseExactlyTheSameMatchedDays() {
+    var records = comparisonDays(current: 8, prior: 10)
+    records.remove(at: 9)
+    let comparison = UsageComparison(days: records, kind: .claudeCode, period: .week, now: comparisonNow)
+    #expect(comparison.pairedDays == 6)
+    #expect(comparison.days.reduce(0) { $0 + ($1.current?.amount ?? 0) } == comparison.currentAmount)
+    #expect(comparison.days.reduce(0) { $0 + ($1.previous?.amount ?? 0) } == comparison.previousAmount)
+    #expect(comparison.days.allSatisfy { ($0.current == nil) == ($0.previous == nil) })
+    #expect(comparison.days.count == 7) // Keep missing positions so lines cannot bridge them.
+    let unpaired = UsageComparison(days: Array(records.prefix(7)), kind: .claudeCode, period: .week, now: comparisonNow)
+    #expect(unpaired.days.allSatisfy { $0.current == nil && $0.previous == nil })
+}
 private func comparisonDays(current: Double = 8, prior: Double = 10, count: Int = 14, seconds: Double = 86400) -> [UsageDay] {
     let end = HistoryTrends.calendar.startOfDay(for: comparisonNow)
     return (1...count).map { index in UsageDay(day: end.addingTimeInterval(-Double(index) * 86400), weekly: .init(amount: index <= 7 ? current : prior, seconds: seconds)) }
