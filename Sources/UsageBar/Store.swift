@@ -184,6 +184,13 @@ final class AppStore: ObservableObject {
                     }
                 }
             }
+            if Bundle.main.object(forInfoDictionaryKey: "AILUnlimitedPreview") as? Bool == true {
+                let id = accounts[0].id
+                accounts[0].name = "Unlimited plan"; accounts[0].kind = .copilot
+                accounts[0].dashboardChartStyle = .ring; accounts[0].dashboardComparison = .off
+                snapshots[id] = Snapshot(observedAt: now, source: "Sample data", unlimited: true)
+                usageHistory[id] = []; usageDays[id] = []
+            }
             menuPreferences.display = .byAccount; menuPreferences.showAccountNames = false
             return
         }
