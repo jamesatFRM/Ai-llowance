@@ -19,11 +19,11 @@ struct HistoryTrendsView: View {
                     Text("See how your usage changes over time.").font(.system(size: 12)).foregroundStyle(.secondary)
                 }
                 Spacer()
-                AppDropdown(accountID.flatMap { id in store.accounts.first { $0.id == id }?.name } ?? "All accounts", symbol: "person.2") {
-                    Button { accountID = nil } label: { AppDropdownChoice(title: "All accounts", selected: accountID == nil) }
-                    Divider()
-                    ForEach(store.accounts) { account in
-                        Button { accountID = account.id } label: { AppDropdownChoice(title: account.pickerLabel, selected: accountID == account.id) }
+                AppDropdown(accountID.flatMap { id in store.accounts.first { $0.id == id }?.name } ?? "All accounts", symbol: "person.2", menuTitle: "Show accounts") {
+                    AppDropdownItem("All accounts", symbol: "person.2", selected: accountID == nil) { accountID = nil }
+                    AppDropdownItem.separator
+                    for account in store.accounts {
+                        AppDropdownItem(account.pickerLabel, symbol: "person.crop.circle", selected: accountID == account.id) { accountID = account.id }
                     }
                 }.frame(width: 180).accessibilityLabel("History account filter")
             }

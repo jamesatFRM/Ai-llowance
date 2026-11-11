@@ -30,7 +30,7 @@ private struct PanelBackground: View {
 private struct LiquidGlassPreference: EnvironmentKey {
     static let defaultValue = true
 }
-private extension EnvironmentValues {
+extension EnvironmentValues {
     var liquidGlass: Bool {
         get { self[LiquidGlassPreference.self] }
         set { self[LiquidGlassPreference.self] = newValue }
@@ -686,13 +686,13 @@ struct AccountsView: View {
             }
             Spacer(minLength: 4)
             if section == .history {
-                AppDropdown(historyAccountID.flatMap { id in store.accounts.first { $0.id == id }?.name } ?? "All accounts", symbol: "person.2") {
-                    Button { historyAccountID = nil } label: { AppDropdownChoice(title: "All accounts", selected: historyAccountID == nil) }
-                    Divider()
-                    ForEach(store.accounts) { account in
-                        Button { historyAccountID = account.id } label: { AppDropdownChoice(title: account.pickerLabel, selected: historyAccountID == account.id) }
+                AppDropdown(historyAccountID.flatMap { id in store.accounts.first { $0.id == id }?.name } ?? "All accounts", symbol: "person.2", menuTitle: "Show accounts") {
+                    AppDropdownItem("All accounts", symbol: "person.2", selected: historyAccountID == nil) { historyAccountID = nil }
+                    AppDropdownItem.separator
+                    for account in store.accounts {
+                        AppDropdownItem(account.pickerLabel, symbol: "person.crop.circle", selected: historyAccountID == account.id) { historyAccountID = account.id }
                     }
-                }.frame(width: 120).accessibilityLabel("Account filter")
+                }.frame(width: historyWidth >= 900 ? 148 : 120).accessibilityLabel("Account filter")
                 Button { section = .accounts } label: { Image(systemName: "slider.horizontal.3").frame(width: 26, height: 28) }
                     .buttonStyle(QuietButtonStyle()).help("Manage accounts").accessibilityLabel("Manage accounts")
                 Button { store.setAllDashboardCollapsed(!store.dashboardAllCollapsed) } label: {
@@ -1142,9 +1142,9 @@ struct AccountsView: View {
         }
     }
     private var agentHelpMenu: some View {
-        AppDropdown("Get setup help from Claude or Codex", symbol: "sparkles", accent: .accentColor) {
-            Button("Copy prompt & open Claude Code") { store.openAgentHelp(for: .claudeCode) }
-            Button("Copy prompt & open Codex") { store.openAgentHelp(for: .codex) }
+        AppDropdown("Get setup help from Claude or Codex", symbol: "sparkles", menuTitle: "Setup help") {
+            AppDropdownItem("Copy prompt & open Claude Code", symbol: "sparkles") { store.openAgentHelp(for: .claudeCode) }
+            AppDropdownItem("Copy prompt & open Codex", symbol: "terminal") { store.openAgentHelp(for: .codex) }
         }
     }
     @ViewBuilder private func simpleProviderButton(_ kind: ConnectionKind) -> some View {
@@ -1345,11 +1345,11 @@ struct AccountsView: View {
                                 HistorySparkline(points: store.history(for: account), kind: account.kind)
                                 if let snapshot = store.snapshots[account.id] { Text("\(snapshot.source) · updated \(snapshot.observedAt.formatted(.dateTime.hour().minute()))").font(.system(size: 10)).foregroundStyle(.secondary) }
                                 if !store.browserProfiles.isEmpty {
-                                    AppDropdown(store.browserProfiles.first { $0.id == store.browserProfileID(account) }?.name ?? "System default browser", symbol: "globe") {
-                                        Button { store.setBrowserProfile(account, id: nil) } label: { AppDropdownChoice(title: "System default browser", selected: store.browserProfileID(account) == nil) }
-                                        Divider()
-                                        ForEach(store.browserProfiles, id: \.id) { profile in
-                                            Button { store.setBrowserProfile(account, id: profile.id) } label: { AppDropdownChoice(title: profile.name, selected: store.browserProfileID(account) == profile.id) }
+                                    AppDropdown(store.browserProfiles.first { $0.id == store.browserProfileID(account) }?.name ?? "System default browser", symbol: "globe", menuTitle: "Open links with") {
+                                        AppDropdownItem("System default browser", symbol: "globe", selected: store.browserProfileID(account) == nil) { store.setBrowserProfile(account, id: nil) }
+                                        AppDropdownItem.separator
+                                        for profile in store.browserProfiles {
+                                            AppDropdownItem(profile.name, symbol: "person.crop.circle", selected: store.browserProfileID(account) == profile.id) { store.setBrowserProfile(account, id: profile.id) }
                                         }
                                     }.frame(maxWidth: 320).accessibilityLabel("Open links with")
                                 }
@@ -1407,23 +1407,23 @@ struct AccountsView: View {
                 case .openUsage: Button("Open usage ↗") { store.openUsage(account) }
                 }
                 Spacer()
-                AppDropdown("", symbol: "ellipsis", showsChevron: false) {
+                AppDropdown("", symbol: "ellipsis", showsChevron: false, menuTitle: account.name) {
                     if account.kind == .claudeCode {
-                        Button("Open Claude Code") { store.openClaude(account) }
-                        Button("Open in a project…") { store.openClaude(account, chooseProject: true) }
-                        Button("Sign in again") { store.openClaude(account, login: true) }
-                        Button("Sign out in Terminal") { store.openClaude(account, logout: true) }
-                        Divider()
+                        AppDropdownItem("Open Claude Code", symbol: "terminal") { store.openClaude(account) }
+                        AppDropdownItem("Open in a project…", symbol: "folder") { store.openClaude(account, chooseProject: true) }
+                        AppDropdownItem("Sign in again", symbol: "person.badge.key") { store.openClaude(account, login: true) }
+                        AppDropdownItem("Sign out in Terminal", symbol: "rectangle.portrait.and.arrow.right") { store.openClaude(account, logout: true) }
+                        AppDropdownItem.separator
                     } else if account.kind == .codex && !account.usesExistingCodex {
-                        Button("Sign in again") { store.signIn(account, openBrowser: false) }.disabled(busyConnecting)
-                        Divider()
+                        AppDropdownItem("Sign in again", symbol: "person.badge.key", enabled: !busyConnecting) { store.signIn(account, openBrowser: false) }
+                        AppDropdownItem.separator
                     } else if account.kind.isAPI {
-                        Button("Replace key") { replacement = ""; replacementScopeID = account.scopeID ?? ""; keyAccount = account }
-                        Divider()
+                        AppDropdownItem("Replace key", symbol: "key") { replacement = ""; replacementScopeID = account.scopeID ?? ""; keyAccount = account }
+                        AppDropdownItem.separator
                     }
-                    Button("Name & color…") { newName = account.name; renaming = account }
-                    Button(account.enabled ? "Pause account" : "Resume account") { store.toggle(account) }
-                    Button("Remove account", role: .destructive) { removing = account }.disabled(store.refreshing || store.removing || busyConnecting)
+                    AppDropdownItem("Name & color…", symbol: "paintpalette") { newName = account.name; renaming = account }
+                    AppDropdownItem(account.enabled ? "Pause account" : "Resume account", symbol: account.enabled ? "pause.circle" : "play.circle") { store.toggle(account) }
+                    AppDropdownItem("Remove account", symbol: "trash", enabled: !(store.refreshing || store.removing || busyConnecting), destructive: true) { removing = account }
                 }.frame(width: 32).help("\(account.name) options").accessibilityLabel("\(account.name) options")
             }
         }.font(.system(size: 13)).controlSize(.large).disabled(store.demo)
@@ -2059,16 +2059,18 @@ private struct HistoryCard: View {
     }
     private var cardControls: some View {
         HStack(spacing: 6) {
-            AppDropdown(effectiveStyle.title, symbol: effectiveStyle.symbol, accent: graphTint) {
-                Button { setStyle(nil) } label: { AppDropdownChoice(title: "Use default", selected: account.dashboardChartStyle == nil) }
-                Divider()
-                ForEach(DashboardChartStyle.allCases.filter { $0 != .mixed && (!account.kind.isAPI || !$0.isCurrentAllowance) }) { style in
-                    Button { setStyle(style) } label: { AppDropdownChoice(title: style.title, selected: account.dashboardChartStyle == style) }
+            AppDropdown(effectiveStyle.title, symbol: effectiveStyle.symbol, accent: graphTint, menuTitle: "Chart style") {
+                AppDropdownItem("Use default", symbol: "sparkles", selected: account.dashboardChartStyle == nil) { setStyle(nil) }
+                AppDropdownItem.separator
+                for style in DashboardChartStyle.allCases.filter({ $0 != .mixed && (!account.kind.isAPI || !$0.isCurrentAllowance) }) {
+                    AppDropdownItem(style.title, symbol: style.symbol, selected: account.dashboardChartStyle == style) { setStyle(style) }
                 }
             }.accessibilityLabel("Chart for " + account.name)
-            AppDropdown(comparison.period == .off ? "Compare" : comparison.period.title, symbol: "arrow.left.arrow.right", accent: comparison.period == .off ? .secondary : graphTint) {
-                ForEach(UsageComparisonPeriod.allCases) { period in
-                    Button { setComparison(period) } label: { AppDropdownChoice(title: period.title, selected: comparison.period == period) }
+            AppDropdown(comparison.period == .off ? "Compare" : comparison.period.title, symbol: "arrow.left.arrow.right", accent: graphTint, menuTitle: "Compare usage") {
+                for period in UsageComparisonPeriod.allCases {
+                    AppDropdownItem(period.title, symbol: period == .off ? "minus.circle" : "arrow.left.arrow.right",
+                                    subtitle: period == .off ? "Current history only" : "vs " + period.previousLabel,
+                                    selected: comparison.period == period) { setComparison(period) }
                 }
             }.accessibilityLabel("Compare " + account.name)
                 .help("WoW: last week · MoM: last month · YoY: last year. Seven completed days, compared with the matching earlier period.")
@@ -2111,12 +2113,12 @@ private struct HistoryCard: View {
                     .frame(maxWidth: .infinity, minHeight: 30, maxHeight: 30, alignment: .topLeading)
                 HStack(spacing: 8) {
                     Button(action: openUsage) { Label(actionTitle, systemImage: actionTitle == "Open usage" ? "arrow.up.right" : "arrow.clockwise").frame(maxWidth: .infinity).frame(height: 28) }
-                    AppDropdown("", symbol: "slider.horizontal.3", accent: graphTint, showsChevron: false) {
-                        Button("Name & color…", action: manage)
-                        Divider()
-                        Button("Move earlier") { moveEarlier?() }.disabled(moveEarlier == nil)
-                        Button("Move later") { moveLater?() }.disabled(moveLater == nil)
-                        Button("Reset dashboard order") { resetOrder?() }.disabled(resetOrder == nil)
+                    AppDropdown("", symbol: "slider.horizontal.3", accent: graphTint, showsChevron: false, menuTitle: account.name) {
+                        AppDropdownItem("Name & color…", symbol: "paintpalette", action: manage)
+                        AppDropdownItem.separator
+                        AppDropdownItem("Move earlier", symbol: "arrow.left", enabled: moveEarlier != nil) { moveEarlier?() }
+                        AppDropdownItem("Move later", symbol: "arrow.right", enabled: moveLater != nil) { moveLater?() }
+                        AppDropdownItem("Reset dashboard order", symbol: "arrow.counterclockwise", enabled: resetOrder != nil) { resetOrder?() }
                     }.frame(width: 30).help("Name, color & dashboard order").accessibilityLabel("Options for " + account.name)
                 }.font(.system(size: 11, weight: .medium)).buttonStyle(QuietButtonStyle())
                 }
