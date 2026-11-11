@@ -128,6 +128,24 @@ private struct QuietButtonStyle: ButtonStyle {
     }
 }
 
+private struct DashboardCollapseButton: View {
+    let collapsed: Bool
+    let item: String
+    let action: () -> Void
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: collapsed ? "chevron.right" : "chevron.down")
+                .font(.system(size: 10, weight: .semibold))
+                .frame(width: 28, height: 28)
+                // A plain image button otherwise hits only the tiny chevron.
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(QuietButtonStyle())
+        .help((collapsed ? "Expand " : "Collapse ") + item)
+        .accessibilityLabel((collapsed ? "Expand " : "Collapse ") + item)
+    }
+}
+
 struct Dashboard: View {
     @ObservedObject var store: AppStore
     var renderForSharing = false
@@ -2084,9 +2102,7 @@ private struct HistoryCard: View {
                     Text(account.name).font(.system(size: 14, weight: .semibold)).lineLimit(1)
                     Spacer(minLength: 2)
                     Image(systemName: connection.symbol).foregroundStyle(statusColor).help(connection.title)
-                    Button(action: toggleCollapsed) { Image(systemName: account.dashboardCollapsed == true ? "chevron.right" : "chevron.down").font(.system(size: 10, weight: .semibold)).frame(width: 24, height: 24) }
-                        .buttonStyle(.plain).help(account.dashboardCollapsed == true ? "Expand account" : "Collapse account")
-                        .accessibilityLabel((account.dashboardCollapsed == true ? "Expand " : "Collapse ") + account.name)
+                    DashboardCollapseButton(collapsed: account.dashboardCollapsed == true, item: account.name, action: toggleCollapsed)
                 }
                 if account.dashboardCollapsed == true {
                     HStack(alignment: .firstTextBaseline) {
@@ -2199,8 +2215,7 @@ private struct ActivityHeatmap: View {
                     Label("Allowance activity", systemImage: "square.grid.3x3.fill").font(.system(size: 13, weight: .semibold))
                     Spacer()
                     Text("7d").font(.system(size: 10)).foregroundStyle(.secondary).help("Last 7 days · " + (calendar.timeZone.abbreviation() ?? calendar.timeZone.identifier))
-                    Button { collapse?() } label: { Image(systemName: collapsed ? "chevron.right" : "chevron.down").font(.system(size: 10, weight: .semibold)).frame(width: 24, height: 24) }
-                        .buttonStyle(.plain).accessibilityLabel((collapsed ? "Expand " : "Collapse ") + "allowance activity")
+                    DashboardCollapseButton(collapsed: collapsed, item: "allowance activity") { collapse?() }
                 }
                 if !collapsed {
         let today = calendar.startOfDay(for: now)
@@ -2394,8 +2409,7 @@ private struct UsageOverviewCharts: View {
                 Text("Allowance use").font(.system(size: 13, weight: .semibold))
                     Spacer()
                     Text("Last 7 days").font(.system(size: 10)).foregroundStyle(.secondary)
-                    Button { collapse?() } label: { Image(systemName: collapsed ? "chevron.right" : "chevron.down").font(.system(size: 10, weight: .semibold)).frame(width: 24, height: 24) }
-                        .buttonStyle(.plain).accessibilityLabel((collapsed ? "Expand " : "Collapse ") + "allowance use")
+                    DashboardCollapseButton(collapsed: collapsed, item: "allowance use") { collapse?() }
                 }
                 if !collapsed {
         let records = readings
