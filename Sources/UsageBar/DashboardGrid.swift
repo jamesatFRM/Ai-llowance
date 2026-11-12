@@ -2,8 +2,11 @@ import SwiftUI
 import UsageCore
 
 private struct DashboardSpanKey: LayoutValueKey { static let defaultValue = 1 }
+private struct DashboardMinimumSpanKey: LayoutValueKey { static let defaultValue = 1 }
 extension View {
-    func dashboardSpan(_ span: Int) -> some View { layoutValue(key: DashboardSpanKey.self, value: span) }
+    func dashboardSpan(_ span: Int, minimum: Int = 1) -> some View {
+        layoutValue(key: DashboardSpanKey.self, value: span).layoutValue(key: DashboardMinimumSpanKey.self, value: minimum)
+    }
 }
 
 /// Natural-height tiles fill the shortest available column. Summary tiles prefer
@@ -14,10 +17,14 @@ struct DashboardGrid: Layout {
         let columns = DashboardGridPlan.columns(width: width, accounts: accountCount)
         let columnWidth = max(0, (width - CGFloat(columns - 1) * 12) / CGFloat(columns))
         let items = subviews.map { view in
-            DashboardGridItem(heights: (1...max(1, min(columns, view[DashboardSpanKey.self]))).map { span in
+            let maximumSpan = max(1, min(columns, view[DashboardSpanKey.self]))
+            let minimumSpan = max(1, min(maximumSpan, view[DashboardMinimumSpanKey.self]))
+            return DashboardGridItem(heights: (1...maximumSpan).map { span in
+                // Exact-width cards do not need charts laid out at discarded widths.
+                guard span >= minimumSpan else { return 0 }
                 let proposed = columnWidth * CGFloat(span) + CGFloat(span - 1) * 12
                 return view.sizeThatFits(ProposedViewSize(width: proposed, height: nil)).height
-            })
+            }, minimumSpan: minimumSpan)
         }
         return DashboardGridPlan(width: width, columns: columns, items: items)
     }

@@ -3,7 +3,8 @@ import Foundation
 public struct DashboardGridItem: Sendable {
     /// One natural height for each permitted column span, starting at one.
     public let heights: [Double]
-    public init(heights: [Double]) { self.heights = heights }
+    public let minimumSpan: Int
+    public init(heights: [Double], minimumSpan: Int = 1) { self.heights = heights; self.minimumSpan = minimumSpan }
 }
 public struct DashboardTileFrame: Equatable, Sendable {
     public let x: Double
@@ -27,7 +28,8 @@ public struct DashboardGridPlan: Sendable {
         var frames: [DashboardTileFrame] = []
         for item in items {
             var chosen: DashboardTileFrame?
-            for span in 1...max(1, min(columns, item.heights.count)) {
+            let maximumSpan = max(1, min(columns, item.heights.count))
+            for span in max(1, min(maximumSpan, item.minimumSpan))...maximumSpan {
                 let proposedHeight = item.heights.isEmpty ? 0 : item.heights[span - 1]
                 let height = proposedHeight.isFinite ? max(0, proposedHeight) : 0
                 for column in 0...(columns - span) {
