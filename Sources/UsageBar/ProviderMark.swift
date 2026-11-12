@@ -13,7 +13,7 @@ enum ProviderImages {
         guard let source = image(provider) else { return nil }
         var result = source
         // Match visible artwork, not the different transparent margins in provider assets.
-        if provider == .claude || provider == .openAI,
+        if provider == .claude || provider == .openAI || provider == .grok,
            let cg = source.cgImage(forProposedRect: nil, context: nil, hints: nil) {
             let bitmap = NSBitmapImageRep(cgImage: cg)
             var left = bitmap.pixelsWide, top = bitmap.pixelsHigh, right = -1, bottom = -1
@@ -43,6 +43,7 @@ enum ProviderImages {
 
     private static let claude = load("Claude")
     private static let openAI = load("ChatGPT")
+    private static let grokBot = load("GrokBot")
     private static func load(_ name: String) -> NSImage? {
         guard let url = Bundle.main.url(forResource: name, withExtension: "png") else { return nil }
         guard let original = NSImage(contentsOf: url) else { return nil }
@@ -65,11 +66,11 @@ enum ProviderImages {
         switch provider {
         case .claude: claude?.copy() as? NSImage
         case .openAI: openAI?.copy() as? NSImage
+        case .grok: grokBot?.copy() as? NSImage
         // Native symbols identify integrations without downloading or imitating provider artwork.
         case .copilot: NSImage(systemSymbolName: "terminal", accessibilityDescription: "GitHub Copilot")
         case .openRouter: NSImage(systemSymbolName: "arrow.triangle.branch", accessibilityDescription: "OpenRouter")
         case .vercelGateway: NSImage(systemSymbolName: "triangle", accessibilityDescription: "Vercel AI Gateway")
-        case .grok: NSImage(systemSymbolName: "sparkle", accessibilityDescription: "Grok")
         case .xai: NSImage(systemSymbolName: "sparkle", accessibilityDescription: "xAI")
         case nil: Brand.menuMark()
         }
