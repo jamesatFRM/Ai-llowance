@@ -59,7 +59,7 @@ private struct DesktopGlass: NSViewRepresentable {
 }
 
 // One native material backing; cards use inexpensive translucent fills.
-private struct WorkspaceBackground: View {
+struct WorkspaceBackground: View {
     var transparency: Double = 0.75
     @Environment(\.liquidGlass) private var liquidGlass
     @Environment(\.colorScheme) private var scheme
@@ -118,7 +118,7 @@ private struct InsetSurface: ViewModifier {
     }
 }
 
-private struct QuietButtonStyle: ButtonStyle {
+struct QuietButtonStyle: ButtonStyle {
     @Environment(\.isEnabled) private var isEnabled
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
@@ -128,7 +128,7 @@ private struct QuietButtonStyle: ButtonStyle {
     }
 }
 
-private struct DashboardCollapseButton: View {
+struct DashboardCollapseButton: View {
     let collapsed: Bool
     let item: String
     let action: () -> Void
@@ -452,7 +452,7 @@ private struct SparklineShape: Shape {
         return path
     }
 }
-private struct SettingsCard<Content: View>: View {
+struct SettingsCard<Content: View>: View {
     @Environment(\.liquidGlass) private var liquidGlass
     @Environment(\.colorScheme) private var scheme
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
@@ -570,6 +570,8 @@ struct AccountsView: View {
     @ViewState private var settingsSection: SettingsSection = .menuBar
     @ViewState private var historyHours = 24
     @ViewState private var historyAccountID: UUID?
+    @ViewState private var showingInsightGallery = false
+    @ViewState private var pendingInsightID: UUID?
     @AppStorage("hideFromDock") private var hideFromDock = true
     @ViewState private var handledAccountNavigationVersion: UInt64 = 0
     @ViewState private var handledSettingsNavigationVersion: UInt64 = 0
@@ -606,6 +608,14 @@ struct AccountsView: View {
                             }
                             .onAppear { historyWidth = max(0, viewport.size.width - 24) }
                             .onChange(of: viewport.size.width) { _, width in historyWidth = max(0, width - 24) }
+                            .onChange(of: showingInsightGallery) { _, showing in
+                                if !showing, let id = pendingInsightID {
+                                    pendingInsightID = nil
+                                    DispatchQueue.main.async {
+                                        withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.25)) { proxy.scrollTo("insight:" + id.uuidString, anchor: .top) }
+                                    }
+                                }
+                            }
                             .onAppear {
                                 if handledAccountNavigationVersion != store.accountNavigationVersion {
                                     handledAccountNavigationVersion = store.accountNavigationVersion
@@ -653,6 +663,12 @@ struct AccountsView: View {
             AccountAppearanceEditor(account: account) { name, menu, dashboard, graph in
                 if store.setAccountAppearance(account, name: name, menu: menu, dashboard: dashboard, graph: graph) { renaming = nil }
             } cancel: { renaming = nil }
+        }
+        .sheet(isPresented: $showingInsightGallery) {
+            DashboardInsightGallery(store: store, preferredAccountID: historyAccountID) { id, accountID in
+                if let selected = historyAccountID, selected != accountID { historyAccountID = nil }
+                pendingInsightID = id; showingInsightGallery = false
+            }
         }
         .sheet(item: $keyAccount) { account in
             VStack(alignment: .leading, spacing: 16) {
@@ -719,16 +735,22 @@ struct AccountsView: View {
                     for account in store.accounts {
                         AppDropdownItem(account.pickerLabel, symbol: "person.crop.circle", selected: historyAccountID == account.id) { historyAccountID = account.id }
                     }
-                }.frame(width: historyWidth >= 900 ? 148 : 120).accessibilityLabel("Account filter")
-                Button { section = .accounts } label: { Image(systemName: "slider.horizontal.3").frame(width: 26, height: 28) }
-                    .buttonStyle(QuietButtonStyle()).help("Manage accounts").accessibilityLabel("Manage accounts")
+                }.frame(width: historyWidth >= 900 ? 148 : historyWidth >= 800 ? 120 : 100).accessibilityLabel("Account filter")
+                Button { showingInsightGallery = true } label: {
+                    HStack(spacing: 5) {
+                        Image(systemName: "plus.rectangle.on.rectangle")
+                        if historyWidth >= 1100 { Text("Add a view").font(.system(size: 11, weight: .medium)) }
+                    }.padding(.horizontal, 6).frame(minWidth: 26, minHeight: 28)
+                }.buttonStyle(QuietButtonStyle()).help("Add a view or edit your dashboard layout").accessibilityLabel("Customize dashboard")
+                if historyWidth >= 800 {
                 Button { store.setAllDashboardCollapsed(!store.dashboardAllCollapsed) } label: {
                     Image(systemName: store.dashboardAllCollapsed ? "rectangle.expand.vertical" : "rectangle.compress.vertical").frame(width: 26, height: 28)
                 }.buttonStyle(QuietButtonStyle()).help(store.dashboardAllCollapsed ? "Expand all dashboard items" : "Collapse all dashboard items")
                     .accessibilityLabel(store.dashboardAllCollapsed ? "Expand all dashboard items" : "Collapse all dashboard items")
+                }
                 Picker("Time range", selection: $historyHours) {
                     Text("24 hours").tag(24); Text("7 days").tag(168)
-                }.pickerStyle(.segmented).labelsHidden().frame(width: 146)
+                }.pickerStyle(.segmented).labelsHidden().frame(width: historyWidth >= 800 ? 146 : 128)
             }
             Button { store.rediscoverTools(); store.refresh(force: true) } label: {
                 Image(systemName: "arrow.clockwise").frame(width: 28, height: 28)
@@ -1001,8 +1023,10 @@ struct AccountsView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @ViewState private var historyWidth: CGFloat = 800
     private func dashboardCard(_ account: Account) -> some View {
-        let earlier: (() -> Void)? = store.orderedDashboardAccounts.first?.id == account.id ? nil : { store.moveDashboardAccount(account.id, offset: -1) }
-        let later: (() -> Void)? = store.orderedDashboardAccounts.last?.id == account.id ? nil : { store.moveDashboardAccount(account.id, offset: 1) }
+        let keys = displayedHistoryAccounts.map { DashboardLayoutPreferences.accountTileID($0.id) }
+        let key = DashboardLayoutPreferences.accountTileID(account.id)
+        let earlier: (() -> Void)? = keys.first == key ? nil : { store.moveDashboardTile(key, offset: -1, within: keys) }
+        let later: (() -> Void)? = keys.last == key ? nil : { store.moveDashboardTile(key, offset: 1, within: keys) }
                         let points = store.history(for: account).filter { $0.timestamp >= store.now.addingTimeInterval(-Double(historyHours) * 3600) && $0.timestamp <= store.now }
                         return HistoryCard(account: account, points: points, snapshot: store.snapshots[account.id],
                                     error: store.errors[account.id] != nil, cached: store.isCached(account), needsReconnect: store.needsSignIn(account), connection: store.connectionState(account), now: store.now, historyHours: historyHours, chartStyle: store.menuPreferences.dashboardChartStyle, fullScale: store.menuPreferences.dashboardChartFullScale,
@@ -1022,34 +1046,59 @@ struct AccountsView: View {
                                     }, manage: { renaming = account },
                                     moveEarlier: earlier,
                                     moveLater: later,
-                                    resetOrder: { store.resetDashboardAccountOrder() })
+                                    resetOrder: { store.resetDashboardAccountOrder() },
+                                    hide: { store.setDashboardTileHidden(DashboardLayoutPreferences.accountTileID(account.id), hidden: true) })
 
     }
     private var visibleHistoryAccounts: [Account] { store.orderedDashboardAccounts.filter { historyAccountID == nil || $0.id == historyAccountID } }
+    private var displayedHistoryAccounts: [Account] { visibleHistoryAccounts.filter { !store.menuPreferences.dashboardLayout.hidden.contains(DashboardLayoutPreferences.accountTileID($0.id)) } }
+    private var availableDashboardIDs: [String] {
+        visibleHistoryAccounts.map { DashboardLayoutPreferences.accountTileID($0.id) }
+            + (visibleHistoryAccounts.contains { !$0.kind.isAPI } ? (store.menuPreferences.dashboardChartStyle == .mixed ? ["overview", "activity"] : ["activity"]) : [])
+            + store.menuPreferences.dashboardLayout.insights.filter { historyAccountID == nil || $0.accountID == historyAccountID }.map(\.tileID)
+    }
     private var historyContent: some View {
-        DashboardGrid(accountCount: visibleHistoryAccounts.count) {
+        let visibleIDs = store.menuPreferences.dashboardLayout.arranged(availableDashboardIDs)
+        let hasInsights = visibleIDs.contains { $0.hasPrefix("insight:") }
+        return DashboardGrid(accountCount: max(displayedHistoryAccounts.count, hasInsights ? 2 : 1)) {
             if store.accounts.isEmpty { Text("Connect an account to start collecting history.").foregroundStyle(.secondary) }
-            ForEach(visibleHistoryAccounts) { account in dashboardCard(account).id(account.id) }
-            if visibleHistoryAccounts.contains(where: { !$0.kind.isAPI }) {
-                let histories = Dictionary(uniqueKeysWithValues: visibleHistoryAccounts.map { ($0.id, store.history(for: $0).filter { $0.timestamp >= store.now.addingTimeInterval(-7 * 86400) }) })
-                if store.menuPreferences.dashboardChartStyle == .mixed {
-                    UsageOverviewCharts(accounts: visibleHistoryAccounts, colorAccounts: store.accounts, histories: histories, now: store.now,
-                        collapsed: store.menuPreferences.collapsedDashboardSummaries.contains("overview"),
-                        collapse: { store.setDashboardSummaryCollapsed("overview", collapsed: !store.menuPreferences.collapsedDashboardSummaries.contains("overview")) })
-                        .dashboardSpan(2).id("overview")
-                }
-                ActivityHeatmap(accounts: visibleHistoryAccounts, histories: histories, now: store.now,
-                    collapsed: store.menuPreferences.collapsedDashboardSummaries.contains("activity"),
-                    collapse: { store.setDashboardSummaryCollapsed("activity", collapsed: !store.menuPreferences.collapsedDashboardSummaries.contains("activity")) })
-                    .dashboardSpan(2).id("activity")
+            if visibleIDs.isEmpty && !store.accounts.isEmpty {
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("Your cards are hidden").font(.headline)
+                    Button("Customize dashboard") { showingInsightGallery = true }.buttonStyle(.bordered)
+                }.padding(12).dashboardSpan(4)
+            }
+            ForEach(visibleIDs, id: \.self) { id in
+                dashboardTile(id).id(id)
             }
         }
         .animation(reduceMotion ? nil : .spring(response: 0.38, dampingFraction: 0.88), value: store.accounts)
         .animation(reduceMotion ? nil : .spring(response: 0.38, dampingFraction: 0.88), value: store.menuPreferences.collapsedDashboardSummaries)
+        .animation(reduceMotion ? nil : .spring(response: 0.38, dampingFraction: 0.88), value: store.menuPreferences.dashboardLayout)
         .animation(reduceMotion ? nil : .easeInOut(duration: 0.25), value: historyAccountID)
         .animation(reduceMotion ? nil : .easeInOut(duration: 0.25), value: visibleHistoryAccounts.map(\.id))
         .onChange(of: store.accounts.map(\.id)) { _, ids in
             if let selected = historyAccountID, !ids.contains(selected) { historyAccountID = nil }
+        }
+    }
+    @ViewBuilder private func dashboardTile(_ id: String) -> some View {
+        if let account = visibleHistoryAccounts.first(where: { DashboardLayoutPreferences.accountTileID($0.id) == id }) {
+            dashboardCard(account).dashboardSpan(displayedHistoryAccounts.count == 1 ? 4 : 1, minimum: displayedHistoryAccounts.count == 1 ? 4 : 1)
+        } else if let card = store.menuPreferences.dashboardLayout.insights.first(where: { $0.tileID == id }) {
+            DashboardInsightCard(store: store, card: card, tileOrder: store.menuPreferences.dashboardLayout.arranged(availableDashboardIDs)).dashboardSpan(card.size.span, minimum: card.size.span)
+        } else {
+            let histories = Dictionary(uniqueKeysWithValues: visibleHistoryAccounts.map { ($0.id, store.history(for: $0).filter { $0.timestamp >= store.now.addingTimeInterval(-7 * 86400) }) })
+            if id == "overview" {
+                UsageOverviewCharts(accounts: visibleHistoryAccounts, colorAccounts: store.accounts, histories: histories, now: store.now,
+                    collapsed: store.menuPreferences.collapsedDashboardSummaries.contains("overview"),
+                    collapse: { store.setDashboardSummaryCollapsed("overview", collapsed: !store.menuPreferences.collapsedDashboardSummaries.contains("overview")) })
+                    .dashboardSpan(2)
+            } else if id == "activity" {
+                ActivityHeatmap(accounts: visibleHistoryAccounts, histories: histories, now: store.now,
+                    collapsed: store.menuPreferences.collapsedDashboardSummaries.contains("activity"),
+                    collapse: { store.setDashboardSummaryCollapsed("activity", collapsed: !store.menuPreferences.collapsedDashboardSummaries.contains("activity")) })
+                    .dashboardSpan(2)
+            }
         }
     }
     private var busyConnecting: Bool { store.connectingClaude || store.signingIn != nil || !store.waitingForClaude.isEmpty }
@@ -1883,6 +1932,7 @@ private struct HistoryCard: View {
     var moveEarlier: (() -> Void)? = nil
     var moveLater: (() -> Void)? = nil
     var resetOrder: (() -> Void)? = nil
+    var hide: (() -> Void)? = nil
     private var status: AllowanceStatus { AllowanceStatus.evaluate(snapshot: snapshot, kind: account.kind, now: now, hasError: error) }
     private var statusColor: Color {
         if connection.needsAction { return .orange }
@@ -2148,6 +2198,7 @@ private struct HistoryCard: View {
                         AppDropdownItem("Move earlier", symbol: "arrow.left", enabled: moveEarlier != nil) { moveEarlier?() }
                         AppDropdownItem("Move later", symbol: "arrow.right", enabled: moveLater != nil) { moveLater?() }
                         AppDropdownItem("Reset dashboard order", symbol: "arrow.counterclockwise", enabled: resetOrder != nil) { resetOrder?() }
+                        if let hide { AppDropdownItem("Hide card", symbol: "eye.slash", action: hide) }
                     }.frame(width: 30).help("Name, color & dashboard order").accessibilityLabel("Options for " + account.name)
                 }.font(.system(size: 11, weight: .medium)).buttonStyle(QuietButtonStyle())
                 }

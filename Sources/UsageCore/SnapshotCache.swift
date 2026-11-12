@@ -39,6 +39,7 @@ public struct SnapshotCache: Sendable {
         public var snapshots: [UUID: Snapshot] = [:]
         public var history: [UUID: [UsageHistoryPoint]] = [:]
         public var usage: [UUID: [UsageDay]] = [:]
+        public var resetCycles: [UUID: [ResetCycle]] = [:]
         public var unreadableRecords = 0
     }
 
@@ -76,6 +77,7 @@ public struct SnapshotCache: Sendable {
         var snapshot: Snapshot
         var history: [UsageHistoryPoint]
         var usageDays: [UsageDay]? = nil
+        var resetCycles: [ResetCycle]? = nil
     }
     public init(root: URL = Paths.root) { directory = root.appendingPathComponent("Readings", isDirectory: true) }
     private func file(_ account: Account) -> URL { directory.appendingPathComponent("\(account.id.uuidString).json") }
@@ -129,6 +131,8 @@ public struct SnapshotCache: Sendable {
                 state.snapshots[account.id] = record.snapshot
             }
             state.history[account.id] = Self.compact(record.history, now: now)
+            state.resetCycles[account.id] = (record.resetCycles ?? ResetCycles.rebuild(record.history, kind: account.kind))
+                .filter { $0.valid && $0.resetAt <= now && $0.resetAt >= now.addingTimeInterval(-Self.retention) }.suffix(64).map { $0 }
             state.usage[account.id] = (record.usageDays.flatMap { $0.isEmpty ? nil : $0 } ?? ConsumptionHistory.rebuild(record.history, kind: account.kind))
                 .filter { $0.day >= cutoff }
         }
@@ -167,6 +171,7 @@ public struct SnapshotCache: Sendable {
         if let existing, existing.snapshot.observedAt > snapshot.observedAt { return existing.history }
         var history = existing?.history ?? []
         var usageDays = existing?.usageDays.flatMap { $0.isEmpty ? nil : $0 } ?? ConsumptionHistory.rebuild(history, kind: account.kind)
+        var resetCycles = existing?.resetCycles ?? ResetCycles.rebuild(history, kind: account.kind)
         history.removeAll { snapshot.observedAt.timeIntervalSince($0.timestamp) > Self.retention }
         let status = AllowanceStatus.evaluate(snapshot: snapshot, kind: account.kind, now: snapshot.observedAt)
         if ![.unavailable, .stale, .restricted].contains(status.state) {
@@ -181,6 +186,7 @@ public struct SnapshotCache: Sendable {
             // Preserve the sample timestamp. Replacing it every minute would move
             // the five-minute boundary forever and leave the chart with one point.
             if Self.shouldAppend(point, after: history.last) {
+                resetCycles = ResetCycles.append(resetCycles, previous: history.last, current: point, kind: account.kind)
                 usageDays = ConsumptionHistory.append(usageDays, previous: history.last, current: point, kind: account.kind)
                 // A quota-window change can arrive with the same provider timestamp.
                 // Replace that instant rather than writing duplicate dates that read() rejects.
@@ -196,7 +202,7 @@ public struct SnapshotCache: Sendable {
             try Paths.writePrivate(data, to: recoveryFile(account))
         }
         try Paths.write(Record(accountID: account.id, kind: account.kind, scopeID: account.scopeID, credentialRevision: account.credentialRevision,
-                               identity: identity, claudeProfileIsolated: account.kind == .claudeCode ? account.usesExistingClaude != true : nil, snapshot: snapshot, history: history, usageDays: usageDays), to: file(account))
+                               identity: identity, claudeProfileIsolated: account.kind == .claudeCode ? account.usesExistingClaude != true : nil, snapshot: snapshot, history: history, usageDays: usageDays, resetCycles: resetCycles), to: file(account))
         return history
     }
     /// Reauthentication invalidates the current reading, not verified historical samples.

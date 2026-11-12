@@ -53,6 +53,7 @@ public enum DashboardChartStyle: String, Codable, CaseIterable, Identifiable, Se
 }
 
 public struct MenuPreferences: Codable, Equatable, Sendable {
+    public var dashboardLayout = DashboardLayoutPreferences()
     public var dashboardChartFullScale = false
     public var dashboardChartStyle: DashboardChartStyle = .mixed
     public var theme: AppTheme = .automatic
@@ -85,9 +86,10 @@ public struct MenuPreferences: Codable, Equatable, Sendable {
     public var dashboardAccountOrder: [UUID] = []
     public var collapsedDashboardSummaries: Set<String> = []
     public init() {}
-    private enum CodingKeys: String, CodingKey { case collapsedDashboardSummaries, secondResetReminderEnabled, secondResetReminderLeadHours, secondResetReminderMinimumPercent, resetRemindersEnabled, resetReminderLeadHours, resetReminderMinimumPercent, dashboardAccountOrder, dropdownShowRecentUsage, dashboardTransparency, dropdownTransparency, liquidGlass, accountOrder, dashboardChartFullScale, dashboardChartStyle, dropdownShowEmails, dropdownShowResets, dropdownShowBars, dropdownShowHeadings, dropdownRoomyRows, sessionMenuLabel, weeklyMenuLabel, showSessionInMenuBar, colorByAllowance, theme, display, aggregation, showAccountNames, detailedQuotaLabels, allAccounts, selectedAccountIDs }
+    private enum CodingKeys: String, CodingKey { case dashboardLayout, collapsedDashboardSummaries, secondResetReminderEnabled, secondResetReminderLeadHours, secondResetReminderMinimumPercent, resetRemindersEnabled, resetReminderLeadHours, resetReminderMinimumPercent, dashboardAccountOrder, dropdownShowRecentUsage, dashboardTransparency, dropdownTransparency, liquidGlass, accountOrder, dashboardChartFullScale, dashboardChartStyle, dropdownShowEmails, dropdownShowResets, dropdownShowBars, dropdownShowHeadings, dropdownRoomyRows, sessionMenuLabel, weeklyMenuLabel, showSessionInMenuBar, colorByAllowance, theme, display, aggregation, showAccountNames, detailedQuotaLabels, allAccounts, selectedAccountIDs }
     public init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
+        dashboardLayout = try values.decodeIfPresent(DashboardLayoutPreferences.self, forKey: .dashboardLayout) ?? DashboardLayoutPreferences()
         dashboardChartFullScale = try values.decodeIfPresent(Bool.self, forKey: .dashboardChartFullScale) ?? false
         dashboardChartStyle = (try values.decodeIfPresent(String.self, forKey: .dashboardChartStyle)).flatMap(DashboardChartStyle.init(rawValue:)) ?? .mixed
         liquidGlass = try values.decodeIfPresent(Bool.self, forKey: .liquidGlass) ?? true

@@ -51,6 +51,7 @@ final class AppStore: ObservableObject {
     @Published private(set) var browserProfiles: [BrowserProfile] = []
     @Published private(set) var usageDays: [UUID: [UsageDay]] = [:]
     @Published private(set) var usageHistory: [UUID: [UsageHistoryPoint]] = [:]
+    @Published private(set) var resetCycles: [UUID: [ResetCycle]] = [:]
     @Published var executable = CodexAdapter.findExecutable()
     @Published var claudeExecutable = ClaudeConnection.findExecutable()
     @Published var grokExecutable = GrokAdapter.findExecutable()
@@ -111,7 +112,8 @@ final class AppStore: ObservableObject {
         if demo {
             dashboardVisible = true
             if Bundle.main.object(forInfoDictionaryKey: "AILSetupPreview") as? Bool == true { return }
-            let qualityPreview = Bundle.main.object(forInfoDictionaryKey: "AILQualityPreview") as? Bool == true
+            let insightsPreview = Bundle.main.object(forInfoDictionaryKey: "AILInsightsPreview") as? Bool == true
+            let qualityPreview = Bundle.main.object(forInfoDictionaryKey: "AILQualityPreview") as? Bool == true || insightsPreview
             let comparisonPreview = Bundle.main.object(forInfoDictionaryKey: "AILComparisonPreview") as? Bool == true
             let reliabilityPreview = Bundle.main.object(forInfoDictionaryKey: "AILReliabilityPreview") as? Bool == true
             if comparisonPreview { notificationAccess = .init(authorization: .denied) }
@@ -148,6 +150,13 @@ final class AppStore: ObservableObject {
                     var point = UsageHistoryPoint(timestamp: now.addingTimeInterval(Double(sample - 48) * 1800 - (index == 2 ? 480 : 0)),
                         remainingPercent: 100 - (100 - remaining) * used, windowID: windows[0].id, resetsAt: windows[0].resetsAt)
                     point.windowDurationMinutes = windows[0].durationMinutes
+                    if insightsPreview, !account.kind.isAPI {
+                        let anchor = now.addingTimeInterval(7200)
+                        let cycle = floor(anchor.timeIntervalSince(point.timestamp) / 18000)
+                        let end = anchor.addingTimeInterval(-cycle * 18000)
+                        point.sessionResetsAt = end
+                        point.sessionRemainingPercent = max(0, 100 - (18000 - end.timeIntervalSince(point.timestamp)) / 18000 * 80)
+                    }
                     return point
                 }
                 if (qualityPreview || CommandLine.arguments.contains("--history") || Bundle.main.object(forInfoDictionaryKey: "AILHistoryPreview") as? Bool == true) {
@@ -184,6 +193,35 @@ final class AppStore: ObservableObject {
                     }
                 }
             }
+            if insightsPreview {
+                for account in accounts where !account.kind.isAPI {
+                    if let latest = usageHistory[account.id]?.last, let remaining = latest.sessionRemainingPercent,
+                       let index = snapshots[account.id]?.windows.firstIndex(where: { $0.durationMinutes == 300 }) {
+                        snapshots[account.id]?.windows[index].usedPercent = 100 - remaining
+                        snapshots[account.id]?.windows[index].resetsAt = latest.sessionResetsAt
+                    }
+                    if var days = usageDays[account.id] {
+                        for index in days.indices {
+                            let weekday = HistoryTrends.calendar.component(.weekday, from: days[index].day)
+                            if weekday == 1 || weekday == 7 { days[index].weekly?.amount = 0; days[index].session?.amount = 0 }
+                        }
+                        days = days.enumerated().filter { $0.offset % 37 != 9 }.map(\.element)
+                        usageDays[account.id] = days
+                    }
+                    resetCycles[account.id] = (0..<12).reversed().map { index in
+                        let reset = now.addingTimeInterval(-Double(index * 7 + 3) * 86400)
+                        return ResetCycle(resetAt: reset, lastObservedAt: reset.addingTimeInterval(-900), remainingPercent: Double([33,18,45,9,26,41][index % 6]), windowID: "week.all models")
+                    }
+                }
+                for index in accounts.indices { accounts[index].dashboardCollapsed = true }
+                menuPreferences.dashboardLayout.hidden = ["overview", "activity"]
+                for kind in DashboardInsightKind.allCases {
+                    if let account = accounts.first(where: { kind.supports($0.kind) }) {
+                        let size: InsightSize = kind == .usageCalendar ? .full : [.unusedAllowance,.limitPressure].contains(kind) ? .compact : .wide
+                        menuPreferences.dashboardLayout.insights.append(DashboardInsight(kind: kind, accountID: account.id, size: size))
+                    }
+                }
+            }
             if Bundle.main.object(forInfoDictionaryKey: "AILUnlimitedPreview") as? Bool == true {
                 let id = accounts[0].id
                 accounts[0].name = "Unlimited plan"; accounts[0].kind = .copilot
@@ -215,6 +253,7 @@ final class AppStore: ObservableObject {
             cachedAccounts = Set(snapshots.keys)
             usageHistory = savedState.history
             usageDays = savedState.usage
+            resetCycles = savedState.resetCycles
             if savedState.unreadableRecords > 0 {
                 notice = "Some saved history could not be read. A private recovery copy will be kept before saving new readings. Current usage can still refresh; diagnostics can help troubleshoot."
             }
@@ -339,7 +378,7 @@ final class AppStore: ObservableObject {
         change(&next)
         guard next != previous else { return }
         menuPreferences = next
-        do { try persist() } catch { menuPreferences = previous; notice = "Could not save the menu-bar setting." }
+        do { try persist() } catch { menuPreferences = previous; notice = "Could not save this setting." }
     }
     var orderedDashboardAccounts: [Account] {
         var seen = Set<UUID>()
@@ -350,9 +389,14 @@ final class AppStore: ObservableObject {
         var ids = orderedDashboardAccounts.map(\.id)
         guard let index = ids.firstIndex(of: id), ids.indices.contains(index + offset) else { return }
         ids.swapAt(index, index + offset)
-        updateMenu { $0.dashboardAccountOrder = ids }
+        var tiles = menuPreferences.dashboardLayout.arranged(dashboardTileIDs, includingHidden: true)
+        let slots = tiles.indices.filter { tiles[$0].hasPrefix("account:") }
+        for (slot, accountID) in zip(slots, ids) { tiles[slot] = DashboardLayoutPreferences.accountTileID(accountID) }
+        updateMenu { $0.dashboardAccountOrder = ids; $0.dashboardLayout.order = tiles }
     }
-    func resetDashboardAccountOrder() { updateMenu { $0.dashboardAccountOrder = [] } }
+    func resetDashboardAccountOrder() {
+        updateMenu { $0.dashboardAccountOrder = []; $0.dashboardLayout.order = [] }
+    }
     var orderedMenuAccounts: [Account] {
         MenuSummary.orderedAccounts(accounts.filter { !$0.kind.isAPI || $0.kind.isBalance }, preferences: menuPreferences)
     }
@@ -382,8 +426,9 @@ final class AppStore: ObservableObject {
     func setAccountComparison(_ id: UUID, period: UsageComparisonPeriod) { editDashboardAccount(id) { $0.dashboardComparison = period } }
     func setAccountCollapsed(_ id: UUID, collapsed: Bool) { editDashboardAccount(id) { $0.dashboardCollapsed = collapsed } }
     var dashboardAllCollapsed: Bool {
-        !accounts.isEmpty && accounts.allSatisfy { $0.dashboardCollapsed == true }
+        (!accounts.isEmpty || !menuPreferences.dashboardLayout.insights.isEmpty) && accounts.allSatisfy { $0.dashboardCollapsed == true }
             && menuPreferences.collapsedDashboardSummaries.isSuperset(of: ["overview", "activity"])
+            && menuPreferences.dashboardLayout.insights.allSatisfy(\.collapsed)
     }
     func setAllDashboardCollapsed(_ collapsed: Bool) {
         guard !readOnly, !shuttingDown else { return }
@@ -392,12 +437,68 @@ final class AppStore: ObservableObject {
         for index in next.indices { next[index].dashboardCollapsed = collapsed }
         accounts = next
         menuPreferences.collapsedDashboardSummaries = collapsed ? ["overview", "activity"] : []
+        for index in menuPreferences.dashboardLayout.insights.indices { menuPreferences.dashboardLayout.insights[index].collapsed = collapsed }
         do { try persist() }
         catch { accounts = old; menuPreferences = preferences; notice = "Could not save the dashboard layout." }
     }
     func setDashboardSummaryCollapsed(_ name: String, collapsed: Bool) {
         guard ["overview", "activity"].contains(name) else { return }
         updateMenu { if collapsed { $0.collapsedDashboardSummaries.insert(name) } else { $0.collapsedDashboardSummaries.remove(name) } }
+    }
+    var dashboardTileIDs: [String] {
+        orderedDashboardAccounts.map { DashboardLayoutPreferences.accountTileID($0.id) }
+            + (accounts.contains { !$0.kind.isAPI } ? (menuPreferences.dashboardChartStyle == .mixed ? ["overview", "activity"] : ["activity"]) : [])
+            + menuPreferences.dashboardLayout.insights.map(\.tileID)
+    }
+    @discardableResult
+    func addInsight(_ kind: DashboardInsightKind, accountID: UUID? = nil) -> UUID? {
+        guard menuPreferences.dashboardLayout.insights.count < DashboardLayoutPreferences.maximumInsights,
+              let account = accounts.first(where: { $0.id == accountID && kind.supports($0.kind) }) ?? accounts.first(where: { kind.supports($0.kind) }) else { return nil }
+        let card = DashboardInsight(kind: kind, accountID: account.id)
+        updateMenu { $0.dashboardLayout.insights.append(card) }
+        return menuPreferences.dashboardLayout.insights.contains { $0.id == card.id } ? card.id : nil
+    }
+    func updateInsight(_ id: UUID, _ change: (inout DashboardInsight) -> Void) {
+        guard menuPreferences.dashboardLayout.insights.contains(where: { $0.id == id }) else { return }
+        updateMenu { preferences in
+            guard let index = preferences.dashboardLayout.insights.firstIndex(where: { $0.id == id }) else { return }
+            change(&preferences.dashboardLayout.insights[index])
+            let card = preferences.dashboardLayout.insights[index]
+            if !card.kind.charts.contains(card.chart) { preferences.dashboardLayout.insights[index].chart = card.kind.charts[0] }
+            if !card.kind.periods.contains(card.period) { preferences.dashboardLayout.insights[index].period = card.kind.defaultPeriod }
+        }
+    }
+    func setInsightAccount(_ id: UUID, accountID: UUID) {
+        guard let insight = menuPreferences.dashboardLayout.insights.first(where: { $0.id == id }),
+              let account = accounts.first(where: { $0.id == accountID }), insight.kind.supports(account.kind) else { return }
+        updateInsight(id) { $0.accountID = accountID }
+    }
+    func removeInsight(_ id: UUID) {
+        let key = "insight:" + id.uuidString
+        updateMenu { $0.dashboardLayout.insights.removeAll { $0.id == id }; $0.dashboardLayout.order.removeAll { $0 == key }; $0.dashboardLayout.hidden.remove(key) }
+    }
+    func setDashboardTileHidden(_ id: String, hidden: Bool) {
+        guard dashboardTileIDs.contains(id) else { return }
+        updateMenu { if hidden { $0.dashboardLayout.hidden.insert(id) } else { $0.dashboardLayout.hidden.remove(id) } }
+    }
+    func moveDashboardTile(_ id: String, offset: Int, includingHidden: Bool = false, within scope: [String]? = nil) {
+        var ids = menuPreferences.dashboardLayout.arranged(dashboardTileIDs, includingHidden: true)
+        let allowed = scope.map(Set.init)
+        let movable = ids.filter { (includingHidden || !menuPreferences.dashboardLayout.hidden.contains($0)) && (allowed?.contains($0) ?? true) }
+        guard let index = movable.firstIndex(of: id), movable.indices.contains(index + offset),
+              let source = ids.firstIndex(of: id), let target = ids.firstIndex(of: movable[index + offset]) else { return }
+        ids.swapAt(source, target)
+        updateMenu { $0.dashboardLayout.order = ids; $0.dashboardAccountOrder = ids.compactMap { $0.hasPrefix("account:") ? UUID(uuidString: String($0.dropFirst(8))) : nil } }
+    }
+    func restoreDashboardLayout() {
+        guard !readOnly, !shuttingDown else { return }
+        let old = accounts, preferences = menuPreferences
+        for index in accounts.indices { accounts[index].dashboardCollapsed = false }
+        menuPreferences.dashboardLayout = DashboardLayoutPreferences()
+        menuPreferences.dashboardAccountOrder = []; menuPreferences.collapsedDashboardSummaries = []
+        menuPreferences.dashboardChartStyle = .mixed
+        do { try persist() }
+        catch { accounts = old; menuPreferences = preferences; notice = "Could not restore the dashboard layout." }
     }
     func setDashboardTransparency(_ value: Double) { guard value.isFinite else { return }; updateMenu { $0.dashboardTransparency = min(1, max(0, value)) } }
     func setDropdownTransparency(_ value: Double) { guard value.isFinite else { return }; updateMenu { $0.dropdownTransparency = min(1, max(0, value)) } }
@@ -1094,6 +1195,7 @@ final class AppStore: ObservableObject {
         let status = AllowanceStatus.evaluate(snapshot: snapshot, kind: account.kind, now: now)
         if ![.unavailable, .stale, .restricted].contains(status.state),
            SnapshotCache.shouldAppend(point, after: points.last) {
+            resetCycles[account.id] = ResetCycles.append(resetCycles[account.id] ?? [], previous: points.last, current: point, kind: account.kind)
             usageDays[account.id] = ConsumptionHistory.append(usageDays[account.id] ?? [], previous: points.last, current: point, kind: account.kind)
             if points.last?.timestamp == point.timestamp { points[points.count - 1] = point }
             else if points.last.map({ point.timestamp > $0.timestamp }) ?? true { points.append(point) }
@@ -1116,7 +1218,7 @@ final class AppStore: ObservableObject {
     }
     private func clearCachedReading(_ account: Account, preserveHistory: Bool = false) {
         cachedAccounts.remove(account.id)
-        if !preserveHistory { usageHistory[account.id] = nil; usageDays[account.id] = nil }
+        if !preserveHistory { usageHistory[account.id] = nil; usageDays[account.id] = nil; resetCycles[account.id] = nil }
         alerts.remove(account.id)
         pendingAlerts.removeAll { $0.accountID == account.id }
         guard !demo, !readOnly else { return }
