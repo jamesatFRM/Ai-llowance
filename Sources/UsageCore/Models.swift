@@ -97,6 +97,14 @@ public struct Account: Codable, Identifiable, Equatable, Sendable {
     public var dashboardChartStyle: DashboardChartStyle?
     public var dashboardComparison: UsageComparisonPeriod?
     public var dashboardCollapsed: Bool?
+    public func dashboardLabel(in accounts: [Account]) -> String {
+        let matches = accounts.filter { $0.name.localizedCaseInsensitiveCompare(name) == .orderedSame }
+        guard matches.count > 1 else { return name }
+        let label = pickerLabel
+        guard matches.filter({ $0.kind.provider == kind.provider }).count > 1 else { return label }
+        if let expectedIdentity { return label + " · " + expectedIdentity }
+        return label + " · " + String(id.uuidString.prefix(6))
+    }
     public var pickerLabel: String { name == kind.provider.title ? name : name + " · " + kind.provider.title }
     public init(id: UUID = UUID(), name: String, kind: ConnectionKind, enabled: Bool = true, usesExistingCodex: Bool = false, usesExistingClaude: Bool = false, scopeID: String? = nil) {
         self.id = id; self.name = name; self.kind = kind; self.enabled = enabled; self.usesExistingCodex = usesExistingCodex

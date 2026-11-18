@@ -95,6 +95,9 @@ public enum ClaudeUsageReport {
                         note: "Read directly from Claude’s plan-usage command. No conversation or open Terminal is needed for updates.")
     }
 
+    private static let resetClock = try! NSRegularExpression(
+        pattern: #"^(?:(?:([a-z]{3}) (\d{1,2})|([a-z]{3,9})) at )?(\d{1,2})(?::(\d{2}))?\s*(am|pm)?$"#,
+        options: .caseInsensitive)
     static func resetDate(_ value: String, now: Date) -> Date? {
         let input = value.trimmingCharacters(in: .whitespacesAndNewlines)
         var zone = TimeZone.current
@@ -111,29 +114,43 @@ public enum ClaudeUsageReport {
         }
         if let iso = valid(ISO8601DateFormatter().date(from: raw)) { return iso }
         var calendar = Calendar(identifier: .gregorian); calendar.timeZone = zone
-        let year = calendar.component(.year, from: now)
-        let formatter = DateFormatter(); formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.timeZone = zone; formatter.isLenient = false
-        for candidateYear in [year, year + 1] {
-            for format in ["yyyy MMM d 'at' h:mma", "yyyy MMM d 'at' ha", "yyyy MMM d 'at' h:mm a", "yyyy MMM d 'at' h a", "yyyy MMM d 'at' HH:mm"] {
-                formatter.dateFormat = format
-                if let date = valid(formatter.date(from: "\(candidateYear) \(raw)")) { return date }
-            }
+        // Parse the clock once. Trying date-format permutations for each of the
+        // next eight days repeatedly constructs ICU formatters during a refresh.
+        let text = raw.lowercased() as NSString
+        guard let match = resetClock.firstMatch(in: text as String, range: NSRange(location: 0, length: text.length)) else { return nil }
+        func part(_ i: Int) -> String? {
+            let range = match.range(at: i)
+            return range.location == NSNotFound ? nil : text.substring(with: range)
         }
-        // CLI output also uses weekday-only and time-only resets in its local zone.
-        for offset in 0...7 {
+        guard var hour = part(4).flatMap(Int.init) else { return nil }
+        let minute = part(5).flatMap(Int.init) ?? 0
+        guard minute < 60 else { return nil }
+        if let suffix = part(6) {
+            guard (1...12).contains(hour) else { return nil }
+            hour = hour % 12 + (suffix == "pm" ? 12 : 0)
+        } else if hour >= 24 || part(5) == nil { return nil }
+
+        var target = DateComponents()
+        target.hour = hour; target.minute = minute; target.second = 0
+        if let month = part(1), let day = part(2).flatMap(Int.init) {
+            let names = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"]
+            guard let index = names.firstIndex(of: month), (1...31).contains(day) else { return nil }
+            target.month = index + 1; target.day = day
+        } else if let weekday = part(3) {
+            let names = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"]
+            guard let index = names.firstIndex(where: { $0 == weekday || String($0.prefix(3)) == weekday }) else { return nil }
+            target.weekday = index + 1
+        }
+        // Search only the supported eight-day horizon, including across New Year.
+        for offset in 0...8 {
             guard let day = calendar.date(byAdding: .day, value: offset, to: now) else { continue }
-            formatter.dateFormat = "yyyy-MM-dd"
-            let prefix = formatter.string(from: day)
-            for format in ["h:mma", "ha", "h:mm a", "h a", "HH:mm"] {
-                for weekday in ["", "EEE 'at' ", "EEEE 'at' "] {
-                    formatter.dateFormat = "yyyy-MM-dd " + weekday + format
-                    guard let date = valid(formatter.date(from: prefix + " " + raw)) else { continue }
-                    // DateFormatter may ignore a contradictory weekday; require a round trip.
-                    formatter.dateFormat = weekday + format
-                    if formatter.string(from: date).lowercased() == raw.lowercased() { return date }
-                }
-            }
+            let parts = calendar.dateComponents([.year, .month, .day, .weekday], from: day)
+            guard target.month.map({ $0 == parts.month }) != false,
+                  target.day.map({ $0 == parts.day }) != false,
+                  target.weekday.map({ $0 == parts.weekday }) != false else { continue }
+            var clock = parts
+            clock.weekday = nil; clock.hour = hour; clock.minute = minute; clock.second = 0
+            if let date = valid(calendar.date(from: clock)), calendar.component(.hour, from: date) == hour { return date }
         }
         return nil
     }

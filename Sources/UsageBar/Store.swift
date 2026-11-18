@@ -39,6 +39,7 @@ final class AppStore: ObservableObject {
     @Published var offline = false
     @Published var now = Date()
     @Published private(set) var dashboardVisible = false
+    @Published private(set) var dashboardCovered = false
     @Published private(set) var settingsNavigationVersion: UInt64 = 0
     @Published private(set) var menuPreferences = MenuPreferences()
     @Published private(set) var accountNavigationVersion: UInt64 = 0
@@ -343,6 +344,9 @@ final class AppStore: ObservableObject {
                     failure: refreshFailures[account.id], retryAt: schedules[account.id]?.nextAttempt,
                     historyPoints: usageHistory[account.id]?.count ?? 0, summaryDays: usageDays[account.id]?.count ?? 0, now: date)
             }).text()
+    }
+    func setDashboardCovered(_ covered: Bool) {
+        if dashboardCovered != covered { dashboardCovered = covered }
     }
     func setDashboardVisible(_ visible: Bool) {
         guard dashboardVisible != visible else { return }
@@ -1092,8 +1096,11 @@ final class AppStore: ObservableObject {
         for id in affected { schedules[id] = PollState() }
         refresh(force: true, accountIDs: affected)
     }
-    func rediscoverTools() {
-        guard !demo else { return }
+    private var lastToolScan = -Double.infinity
+    func rediscoverTools(force: Bool = true) {
+        let uptime = ProcessInfo.processInfo.systemUptime
+        guard !demo, force || uptime - lastToolScan >= 2 else { return }
+        lastToolScan = uptime
         func detected(_ kind: ConnectionKind, current: URL?, discover: () -> URL?) -> URL? {
             if let record = rememberedTools[kind.rawValue] {
                 if let valid = record.validatedURL { return valid }
@@ -1121,7 +1128,7 @@ final class AppStore: ObservableObject {
             }
         }
         // Opening UI is not a manual refresh; retain the chosen cadence and backoff.
-        if becameVisible { rediscoverTools(); refresh() }
+        if becameVisible { rediscoverTools(force: false); refresh() }
         scheduleHeartbeat()
     }
     private func scheduleHeartbeat() {

@@ -19,11 +19,11 @@ struct HistoryTrendsView: View {
                     Text("See how your usage changes over time.").font(.system(size: 12)).foregroundStyle(.secondary)
                 }
                 Spacer()
-                AppDropdown(accountID.flatMap { id in store.accounts.first { $0.id == id }?.name } ?? "All accounts", symbol: "person.2", menuTitle: "Show accounts") {
+                AppDropdown(accountID.flatMap { id in store.accounts.first { $0.id == id }?.dashboardLabel(in: store.accounts) } ?? "All accounts", symbol: "person.2", menuTitle: "Show accounts") {
                     AppDropdownItem("All accounts", symbol: "person.2", selected: accountID == nil) { accountID = nil }
                     AppDropdownItem.separator
                     for account in store.accounts {
-                        AppDropdownItem(account.pickerLabel, symbol: "person.crop.circle", selected: accountID == account.id) { accountID = account.id }
+                        AppDropdownItem(account.dashboardLabel(in: store.accounts), symbol: "person.crop.circle", selected: accountID == account.id) { accountID = account.id }
                     }
                 }.frame(width: 180).accessibilityLabel("History account filter")
             }
@@ -44,7 +44,7 @@ struct HistoryTrendsView: View {
                 let recorded = store.usageDays[account.id] ?? []
                 let samples = ConsumptionHistory.buckets(recorded, kind: account.kind, session: session, since: start, now: store.now, weekly: days >= 60)
                 let summary = ConsumptionSummary(days: recorded, kind: account.kind, session: session, since: start, now: store.now)
-                HistoryTrendPanel(account: account, samples: samples, summary: summary, firstRecorded: recorded.first(where: { account.kind.isAPI ? $0.money != nil : session ? $0.session != nil : $0.weekly != nil })?.day, start: start, end: store.now, days: days, session: session)
+                HistoryTrendPanel(account: account, displayName: account.dashboardLabel(in: store.accounts), samples: samples, summary: summary, firstRecorded: recorded.first(where: { account.kind.isAPI ? $0.money != nil : session ? $0.session != nil : $0.weekly != nil })?.day, start: start, end: store.now, days: days, session: session)
             }
             Label("Stored on this Mac · 7 days of detail, 400-day retention for daily summaries (UTC)", systemImage: "lock.shield")
                 .font(.system(size: 11)).foregroundStyle(.secondary)
@@ -59,6 +59,7 @@ struct HistoryTrendsView: View {
 
 private struct HistoryTrendPanel: View {
     let account: Account
+    let displayName: String
     let samples: [ConsumptionBucket]
     let summary: ConsumptionSummary
     let firstRecorded: Date?
@@ -88,7 +89,7 @@ private struct HistoryTrendPanel: View {
         VStack(alignment: .leading, spacing: 14) {
             HStack {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(account.name).font(.system(size: 15, weight: .semibold))
+                    Text(displayName).font(.system(size: 15, weight: .semibold))
                     Text(account.expectedIdentity ?? account.kind.title).font(.system(size: 11)).foregroundStyle(.secondary)
                 }
                 Spacer()

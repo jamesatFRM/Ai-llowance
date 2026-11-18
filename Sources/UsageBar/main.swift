@@ -188,14 +188,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
     }
     func applicationDidHide(_ notification: Notification) { closePopover(); store.setDashboardVisible(false) }
     func applicationDidUnhide(_ notification: Notification) { updateWindowVisibility() }
+    func windowDidChangeOcclusionState(_ notification: Notification) { updateWindowVisibility() }
     func windowDidMiniaturize(_ notification: Notification) { updateWindowVisibility() }
     func windowDidDeminiaturize(_ notification: Notification) { updateWindowVisibility() }
     private func updateWindowVisibility() {
         store.setDashboardVisible(hasVisibleSettings)
-        store.setInterfaceVisible(popover.isShown || hasVisibleSettings)
+        let exposed = window?.occlusionState.contains(.visible) == true
+        store.setDashboardCovered(!exposed)
+        store.setInterfaceVisible(popover.isShown || (hasVisibleSettings && exposed))
     }
     func applicationDidResignActive(_ notification: Notification) { closePopover() }
-    func applicationDidBecomeActive(_ notification: Notification) { store.rediscoverTools(); store.refresh(); store.refreshNotificationAccess() }
+    func applicationDidBecomeActive(_ notification: Notification) { store.rediscoverTools(force: false); store.refresh(); store.refreshNotificationAccess() }
     func windowWillClose(_ notification: Notification) { store.setDashboardVisible(false); store.setInterfaceVisible(popover.isShown) }
     private func showAccounts() {
         closePopover()
