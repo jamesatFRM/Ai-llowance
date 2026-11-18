@@ -564,7 +564,7 @@ final class AppStore: ObservableObject {
         return index == 1 ? provider : "\(provider) \(index)"
     }
     func connectOpenAI(existing: Bool = false) {
-        guard !demo, !readOnly, !removing, signingIn == nil, waitingForClaude.isEmpty else { return }
+        guard !demo, !readOnly, !removing, !connectingClaude, signingIn == nil, waitingForClaude.isEmpty else { return }
         guard executable != nil else { notice = "Install Codex CLI once, then return to Accounts → Codex. If it is already installed, choose its location under More options."; return }
         do {
             let account = try add(name: automaticName("OpenAI", kind: .codex), kind: .codex, secret: "", existing: existing, refreshAfter: false)
@@ -688,7 +688,10 @@ final class AppStore: ObservableObject {
     }
     func openClaude(_ account: Account, login: Bool = false, chooseProject: Bool = false, logout: Bool = false) {
         guard !demo, !removing, accounts.contains(where: { $0.id == account.id }) else { return }
-        if login && (waitingForClaude[account.id] != nil || signingIn != nil) { return }
+        if (login || logout) && (!waitingForClaude.isEmpty || signingIn != nil) {
+            notice = "Finish or cancel the current sign-in before switching another account."
+            return
+        }
         do {
             var account = account
             if account.usesExistingClaude == true {
@@ -954,7 +957,6 @@ final class AppStore: ObservableObject {
             schedule.succeeded(at: Date(), interval: refreshInterval(for: account.kind, visible: interfaceVisible, lowPower: ProcessInfo.processInfo.isLowPowerModeEnabled))
             if account.kind == .claudeCode {
                 claudeSignedIn[account.id] = true
-                if notice?.hasPrefix("Finish Claude’s browser sign-in once.") == true { notice = nil }
                 // Once direct usage works, restore the user's old status line. No bridge is needed.
                 do {
                     if !restoredLegacyFeeds.contains(account.id) {
@@ -1009,7 +1011,7 @@ final class AppStore: ObservableObject {
         return try await adapter.fetch(account: account, now: date)
     }
     func signIn(_ account: Account, openBrowser: Bool = true) {
-        guard signingIn == nil, waitingForClaude.isEmpty, !removing, let executable, !demo, !readOnly,
+        guard signingIn == nil, waitingForClaude.isEmpty, !connectingClaude, !removing, let executable, !demo, !readOnly,
               accounts.contains(where: { $0.id == account.id }) else {
             notice = "Wait for refresh to finish and make sure Codex CLI is installed."; return
         }

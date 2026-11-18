@@ -1202,11 +1202,7 @@ struct AccountsView: View {
             }.buttonStyle(.borderedProminent).controlSize(.large).disabled(busyConnecting)
         case .checkSignIn:
             HStack {
-                Button("Sign in to " + account.kind.setupName) {
-                    if account.kind == .grokSubscription { store.openGrokSignIn() }
-                    else { store.openCopilotSignIn() }
-                }.buttonStyle(.borderedProminent)
-                Button("Check sign-in") { store.retryConnection(account) }
+                sharedSignInControls(account)
             }.controlSize(.large)
         case .retry:
             Button("Retry connection") { store.retryConnection(account) }.controlSize(.large)
@@ -1216,6 +1212,15 @@ struct AccountsView: View {
             Button("Open usage page ↗") { store.openUsage(account) }.controlSize(.large)
         case .resume, .replaceKey: EmptyView()
         }
+    }
+    @ViewBuilder private func sharedSignInControls(_ account: Account) -> some View {
+        switch account.kind {
+        case .grokSubscription: Button("Sign in to Grok…") { store.openGrokSignIn() }
+        case .copilot: Button("Sign in to Copilot…") { store.openCopilotSignIn() }
+        case .codex: Text("Run `codex login` for this email, then check again.").foregroundStyle(.secondary)
+        default: EmptyView()
+        }
+        Button("Check sign-in") { store.retryConnection(account) }
     }
     private var agentHelpMenu: some View {
         AppDropdown("Get setup help from Claude or Codex", symbol: "sparkles", menuTitle: "Setup help") {
@@ -1246,7 +1251,7 @@ struct AccountsView: View {
         .buttonStyle(.plain).disabled(busyConnecting)
     }
     private func startManualConnection(existing: Bool) {
-        setupExistingIDs = Set(store.accounts.map(\.id))
+        setupExistingIDs = selectedKind.supportsAdditionalAccounts ? Set(store.accounts.map(\.id)) : []
         setupStarted = true
         switch selectedKind {
         case .claudeCode: store.connectClaude(existing: existing)
@@ -1469,13 +1474,7 @@ struct AccountsView: View {
                         else { store.signIn(account, openBrowser: false) }
                     }.disabled(busyConnecting)
                 case .checkSignIn:
-                    if account.kind == .grokSubscription {
-                        Button("Sign in to Grok…") { store.openGrokSignIn() }
-                    } else if account.kind == .copilot {
-                        Button("Sign in to Copilot…") { store.openCopilotSignIn() }
-                    }
-                    Button("Check sign-in") { store.retryConnection(account) }
-                        .help("Finish signing in through this provider’s CLI, then check again.")
+                    sharedSignInControls(account)
                 case .retry: Button("Retry connection") { store.retryConnection(account) }
                 case .wait:
                     if store.paused { Button("Resume refresh") { store.togglePause() } }
@@ -1487,8 +1486,8 @@ struct AccountsView: View {
                     if account.kind == .claudeCode {
                         AppDropdownItem("Open Claude Code", symbol: "terminal") { store.openClaude(account) }
                         AppDropdownItem("Open in a project…", symbol: "folder") { store.openClaude(account, chooseProject: true) }
-                        AppDropdownItem("Sign in again", symbol: "person.badge.key") { store.openClaude(account, login: true) }
-                        AppDropdownItem("Sign out in Terminal", symbol: "rectangle.portrait.and.arrow.right") { store.openClaude(account, logout: true) }
+                        AppDropdownItem("Sign in again", symbol: "person.badge.key", enabled: !busyConnecting) { store.openClaude(account, login: true) }
+                        AppDropdownItem("Sign out in Terminal", symbol: "rectangle.portrait.and.arrow.right", enabled: !busyConnecting) { store.openClaude(account, logout: true) }
                         AppDropdownItem.separator
                     } else if account.kind == .codex && !account.usesExistingCodex {
                         AppDropdownItem("Sign in again", symbol: "person.badge.key", enabled: !busyConnecting) { store.signIn(account, openBrowser: false) }
