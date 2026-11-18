@@ -9,6 +9,19 @@ public struct HistorySample: Identifiable, Sendable {
 
 /// Lines connect only nearby observations from the same known reporting period.
 public enum HistorySeries {
+    /// Find the nearest recorded sample in an ordered timeline. Earlier wins a tie.
+    public static func nearest(to date: Date, in samples: [HistorySample]) -> HistorySample? {
+        var low = 0, high = samples.count
+        while low < high {
+            let middle = low + (high - low) / 2
+            if samples[middle].timestamp < date { low = middle + 1 } else { high = middle }
+        }
+        if low == 0 { return samples.first }
+        if low == samples.count { return samples.last }
+        let before = samples[low - 1], after = samples[low]
+        return date.timeIntervalSince(before.timestamp) <= after.timestamp.timeIntervalSince(date) ? before : after
+    }
+
     /// The expanded dropdown shows recent detail, not a year of closing readings.
     public static func recentSamples(_ points: [UsageHistoryPoint], kind: ConnectionKind, now: Date) -> [HistorySample] {
         let start = now.addingTimeInterval(-86400)

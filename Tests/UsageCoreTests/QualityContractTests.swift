@@ -173,7 +173,9 @@ private func qualitySnapshot(weekly: Double = 75, session: Double? = 90, at date
     let root = FileManager.default.temporaryDirectory.appendingPathComponent("QualityVersionCancel-\(UUID().uuidString)")
     defer { try? FileManager.default.removeItem(at: root) }
     let tool = root.appendingPathComponent("fixture"), pidFile = root.appendingPathComponent("pid")
-    try Paths.writePrivate(Data(("#!/bin/sh\necho $$ > " + ShellQuote.argument(pidFile.path) + "\nexec /bin/sleep 30\n").utf8), to: tool, executable: true)
+    let pidPath = ShellQuote.argument(pidFile.path)
+    let script = "#!/bin/sh\necho $$ > " + pidPath + ".tmp && /bin/mv " + pidPath + ".tmp " + pidPath + "\nexec /bin/sleep 30\n"
+    try Paths.writePrivate(Data(script.utf8), to: tool, executable: true)
     let task = Task { await ToolVersionProbe.read(executable: tool) }
     let deadline = Date().addingTimeInterval(2)
     while !FileManager.default.fileExists(atPath: pidFile.path), Date() < deadline { try await Task.sleep(for: .milliseconds(10)) }

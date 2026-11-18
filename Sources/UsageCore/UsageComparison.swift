@@ -20,6 +20,7 @@ public struct ComparisonDay: Identifiable, Equatable, Sendable {
 public struct UsageComparison: Equatable, Sendable {
     public let period: UsageComparisonPeriod
     public let days: [ComparisonDay]
+    public let hasRecentObservations: Bool
     public let pairedDays: Int
     public let currentAmount: Double
     public let previousAmount: Double
@@ -65,6 +66,7 @@ public struct UsageComparison: Equatable, Sendable {
         let comparable = paired.count >= 3 && min(currentCoverage, previousCoverage) >= 0.05 && coverageRatio <= 1.25
         changePercent = comparable && previousAmount > 0 ? (currentAmount / previousAmount - 1) * 100 : nil
         let recent = byDay.filter { $0.key >= end.addingTimeInterval(-6 * 86400) && $0.key <= end }.values
+        hasRecentObservations = !recent.isEmpty
         let recorded = recent.reduce(0) { $0 + $1.amount }
         if period == .off {
             summary = recent.isEmpty ? "Usage history building" : kind.isAPI ? String(format: "$%.2f observed · 7d", recorded) : String(format: "%.0f pts observed · 7d", recorded)

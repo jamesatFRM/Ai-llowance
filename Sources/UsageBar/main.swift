@@ -188,14 +188,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
     }
     func applicationDidHide(_ notification: Notification) { closePopover(); store.setDashboardVisible(false) }
     func applicationDidUnhide(_ notification: Notification) { updateWindowVisibility() }
+    func windowDidChangeOcclusionState(_ notification: Notification) { updateWindowVisibility() }
     func windowDidMiniaturize(_ notification: Notification) { updateWindowVisibility() }
     func windowDidDeminiaturize(_ notification: Notification) { updateWindowVisibility() }
     private func updateWindowVisibility() {
         store.setDashboardVisible(hasVisibleSettings)
-        store.setInterfaceVisible(popover.isShown || hasVisibleSettings)
+        let exposed = window?.occlusionState.contains(.visible) == true
+        store.setDashboardCovered(!exposed)
+        store.setInterfaceVisible(popover.isShown || (hasVisibleSettings && exposed))
     }
     func applicationDidResignActive(_ notification: Notification) { closePopover() }
-    func applicationDidBecomeActive(_ notification: Notification) { store.rediscoverTools(); store.refresh(); store.refreshNotificationAccess() }
+    func applicationDidBecomeActive(_ notification: Notification) { store.rediscoverTools(force: false); store.refresh(); store.refreshNotificationAccess() }
     func windowWillClose(_ notification: Notification) { store.setDashboardVisible(false); store.setInterfaceVisible(popover.isShown) }
     private func showAccounts() {
         closePopover()
@@ -209,6 +212,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
             })
             let created = NSWindow(contentViewController: controller)
             created.title = "Ai-llowance · Dashboard"; created.styleMask = [.titled, .closable, .miniaturizable, .resizable]
+            created.titlebarAppearsTransparent = false
             created.setContentSize(NSSize(width: 1080, height: 720)); created.center()
             created.isReleasedWhenClosed = false; created.delegate = self; window = created
         }
@@ -226,7 +230,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
         for panel in [window, popover.contentViewController?.view.window].compactMap({ $0 }) {
             let opaque = !store.menuPreferences.liquidGlass
             if panel.isOpaque != opaque { panel.isOpaque = opaque }
-            let background: NSColor = opaque ? .windowBackgroundColor : .clear
+            // The dashboard's material view supplies its own desktop blur. Keep a
+            // native backing for the title bar, which sits outside that view;
+            // clearing it leaves the traffic lights floating above the dashboard.
+            let background: NSColor = panel === window || opaque ? .windowBackgroundColor : .clear
             if panel.backgroundColor != background { panel.backgroundColor = background }
             if panel.appearance?.name != appearance?.name { panel.appearance = appearance }
         }

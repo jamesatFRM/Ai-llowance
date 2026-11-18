@@ -99,3 +99,12 @@ import Testing
     #expect(HistorySeries.allowanceTrendDomain([.nan, .infinity]) == 0...100)
     #expect(HistorySeries.allowanceTrendDomain([0, 100]) == 0...100)
 }
+
+@Test func hoverUsesNearestObservationAndEarlierTie() {
+    let start = Date()
+    let points = [0, 10, 20].map { HistorySample(timestamp: start.addingTimeInterval(Double($0)), value: Double($0), segment: 0) }
+    #expect(HistorySeries.nearest(to: start, in: []) == nil)
+    for (offset, expected) in [(-1, 0), (0, 0), (5, 0), (8, 10), (10, 10), (26, 20)] {
+        #expect(HistorySeries.nearest(to: start.addingTimeInterval(Double(offset)), in: points)?.value == Double(expected))
+    }
+}

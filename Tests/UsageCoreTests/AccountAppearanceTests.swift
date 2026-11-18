@@ -25,3 +25,17 @@ import Testing
     b.menuColorHex = a.menuColorHex
     #expect(MenuSummary.entries(accounts: [a,b], snapshots: [:], unavailable: [], preferences: preferences, now: Date()).first?.colorHex == "AAFF00")
 }
+
+@Test func dashboardNamesDisambiguateOnlyCollisions() {
+    var claude = Account(name: "Personal", kind: .claudeCode)
+    var second = Account(name: "Personal", kind: .claudeCode)
+    let codex = Account(name: "Personal", kind: .codex)
+    claude.expectedIdentity = "one@example.com"
+    second.expectedIdentity = "two@example.com"
+    #expect(claude.dashboardLabel(in: [claude]) == "Personal")
+    #expect(claude.dashboardLabel(in: [claude, codex]) == "Personal · Claude")
+    let accounts = [claude, second, codex]
+    #expect(claude.dashboardLabel(in: accounts).contains("one@example.com"))
+    #expect(second.dashboardLabel(in: accounts).contains("two@example.com"))
+    #expect(codex.dashboardLabel(in: accounts) == "Personal · OpenAI")
+}

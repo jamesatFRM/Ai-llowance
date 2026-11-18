@@ -246,3 +246,19 @@ private actor RecoveryProbe {
     #expect(store.notice?.contains("provider asked us to wait") == true)
     await store.shutdown()
 }
+
+@Test @MainActor func connectingAccountsDuringAReadKeepsRefreshScoped() async throws {
+    let root = try reliabilityRoot(); defer { try? FileManager.default.removeItem(at: root) }
+    let store = AppStore(root: root, monitor: false, fetch: { account, date in
+        Snapshot(observedAt: date, windows: [try QuotaWindow(id: "codex.week", label: "Week", usedPercent: 10)],
+                 identity: account.id.uuidString + "@example.com", source: "Fixture")
+    })
+    let unrelated = try store.add(name: "Existing", kind: .codex, secret: "", existing: false, refreshAfter: false)
+    let first = try store.add(name: "First", kind: .codex, secret: "", existing: false)
+    let second = try store.add(name: "Second", kind: .codex, secret: "", existing: false)
+    let third = try store.add(name: "Third", kind: .codex, secret: "", existing: false)
+    try await waitUntil { !store.refreshing }
+    #expect(Set(store.snapshots.keys) == [first.id, second.id, third.id])
+    #expect(store.snapshots[unrelated.id] == nil)
+    await store.shutdown()
+}

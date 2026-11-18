@@ -493,3 +493,30 @@ private actor QueuedSetupGate {
     #expect(reloaded.accounts.first == migrated)
     await reloaded.shutdown()
 }
+
+@Test @MainActor func connectingASecondClaudeKeepsItsPromptAndProtectsTheFirstAccount() async throws {
+    let root = try fixtureRoot(); defer { try? FileManager.default.removeItem(at: root) }
+    var launches: [URL] = []
+    let store = AppStore(root: root, monitor: false, fetch: { _, date in
+        Snapshot(observedAt: date, identity: "first@example.com", source: "Fixture")
+    }, openExternal: { launches.append($0); return true })
+    store.claudeExecutable = try cli(root, "exit 0")
+    let first = try store.add(name: "First", kind: .claudeCode, secret: "", existing: false, refreshAfter: false)
+    store.connectSubscription(.claudeCode)
+    try await settle { !store.connectingClaude }
+    let second = try #require(store.accounts.last)
+    #expect(first.id != second.id)
+    store.retryConnection(first)
+    try await settle { !store.refreshing }
+    #expect(store.notice?.contains("Finish Claude") == true)
+    store.openClaude(first, login: true)
+    store.openClaude(first, logout: true)
+    #expect(launches.count == 1)
+    #expect(Set(store.waitingForClaude.keys) == [second.id])
+    #expect(store.snapshots[first.id]?.identity == "first@example.com")
+    store.cancelClaudeSignIn(second)
+    store.openClaude(first, login: true)
+    #expect(launches.count == 2)
+    #expect(Set(store.waitingForClaude.keys) == [first.id])
+    await store.shutdown()
+}

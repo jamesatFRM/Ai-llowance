@@ -599,7 +599,7 @@ struct AccountsView: View {
                                     if store.dashboardVisible { switch section {
                                     case .overview: overviewContent
                                     case .connection: connectionPage
-                                    case .history: historyContent
+                                    case .history: if !store.dashboardCovered { historyContent }
                                     case .trends: HistoryTrendsView(store: store)
                                     case .accounts: accountsContent
                                     case .settings: selectedTabContent.frame(maxWidth: settingsSection == .dropdown ? 1000 : 640).frame(maxWidth: .infinity, alignment: .top)
@@ -626,7 +626,7 @@ struct AccountsView: View {
                                     handledSettingsNavigationVersion = store.settingsNavigationVersion; section = .settings
                                 }
                                 if (CommandLine.arguments.contains("--history") || Bundle.main.object(forInfoDictionaryKey: "AILHistoryPreview") as? Bool == true) { section = .trends }
-                                store.rediscoverTools(); scrollToSelected(proxy)
+                                scrollToSelected(proxy)
                             }
                             .onChange(of: store.accountNavigationVersion) { _, _ in
                                 handledAccountNavigationVersion = store.accountNavigationVersion
@@ -729,11 +729,11 @@ struct AccountsView: View {
             }
             Spacer(minLength: 4)
             if section == .history {
-                AppDropdown(historyAccountID.flatMap { id in store.accounts.first { $0.id == id }?.name } ?? "All accounts", symbol: "person.2", menuTitle: "Show accounts") {
+                AppDropdown(historyAccountID.flatMap { id in store.accounts.first { $0.id == id }?.dashboardLabel(in: store.accounts) } ?? "All accounts", symbol: "person.2", menuTitle: "Show accounts") {
                     AppDropdownItem("All accounts", symbol: "person.2", selected: historyAccountID == nil) { historyAccountID = nil }
                     AppDropdownItem.separator
                     for account in store.accounts {
-                        AppDropdownItem(account.pickerLabel, symbol: "person.crop.circle", selected: historyAccountID == account.id) { historyAccountID = account.id }
+                        AppDropdownItem(account.dashboardLabel(in: store.accounts), symbol: "person.crop.circle", selected: historyAccountID == account.id) { historyAccountID = account.id }
                     }
                 }.frame(width: historyWidth >= 900 ? 148 : historyWidth >= 800 ? 120 : 100).accessibilityLabel("Account filter")
                 Button { showingInsightGallery = true } label: {
@@ -944,7 +944,7 @@ struct AccountsView: View {
         setupStarted = false
         setupExistingIDs = Set(store.accounts.map(\.id))
         section = .connection
-        store.rediscoverTools()
+        store.rediscoverTools(force: false)
     }
     private var setupStatus: AccountSetupStatus {
         let account = setupAccount
@@ -1028,7 +1028,7 @@ struct AccountsView: View {
         let earlier: (() -> Void)? = keys.first == key ? nil : { store.moveDashboardTile(key, offset: -1, within: keys) }
         let later: (() -> Void)? = keys.last == key ? nil : { store.moveDashboardTile(key, offset: 1, within: keys) }
                         let points = store.history(for: account).filter { $0.timestamp >= store.now.addingTimeInterval(-Double(historyHours) * 3600) && $0.timestamp <= store.now }
-                        return HistoryCard(account: account, points: points, snapshot: store.snapshots[account.id],
+                        return HistoryCard(account: account, displayName: account.dashboardLabel(in: store.accounts), points: points, snapshot: store.snapshots[account.id],
                                     error: store.errors[account.id] != nil, cached: store.isCached(account), needsReconnect: store.needsSignIn(account), connection: store.connectionState(account), now: store.now, historyHours: historyHours, chartStyle: store.menuPreferences.dashboardChartStyle, fullScale: store.menuPreferences.dashboardChartFullScale,
                                     comparison: UsageComparison(days: store.usageDays[account.id] ?? [], kind: account.kind, period: account.dashboardComparison ?? .off, now: store.now),
                                     setStyle: { store.setAccountChart(account.id, style: $0) },
@@ -1202,11 +1202,7 @@ struct AccountsView: View {
             }.buttonStyle(.borderedProminent).controlSize(.large).disabled(busyConnecting)
         case .checkSignIn:
             HStack {
-                Button("Sign in to " + account.kind.setupName) {
-                    if account.kind == .grokSubscription { store.openGrokSignIn() }
-                    else { store.openCopilotSignIn() }
-                }.buttonStyle(.borderedProminent)
-                Button("Check sign-in") { store.retryConnection(account) }
+                sharedSignInControls(account)
             }.controlSize(.large)
         case .retry:
             Button("Retry connection") { store.retryConnection(account) }.controlSize(.large)
@@ -1216,6 +1212,15 @@ struct AccountsView: View {
             Button("Open usage page ↗") { store.openUsage(account) }.controlSize(.large)
         case .resume, .replaceKey: EmptyView()
         }
+    }
+    @ViewBuilder private func sharedSignInControls(_ account: Account) -> some View {
+        switch account.kind {
+        case .grokSubscription: Button("Sign in to Grok…") { store.openGrokSignIn() }
+        case .copilot: Button("Sign in to Copilot…") { store.openCopilotSignIn() }
+        case .codex: Text("Run `codex login` for this email, then check again.").foregroundStyle(.secondary)
+        default: EmptyView()
+        }
+        Button("Check sign-in") { store.retryConnection(account) }
     }
     private var agentHelpMenu: some View {
         AppDropdown("Get setup help from Claude or Codex", symbol: "sparkles", menuTitle: "Setup help") {
@@ -1246,7 +1251,7 @@ struct AccountsView: View {
         .buttonStyle(.plain).disabled(busyConnecting)
     }
     private func startManualConnection(existing: Bool) {
-        setupExistingIDs = Set(store.accounts.map(\.id))
+        setupExistingIDs = selectedKind.supportsAdditionalAccounts ? Set(store.accounts.map(\.id)) : []
         setupStarted = true
         switch selectedKind {
         case .claudeCode: store.connectClaude(existing: existing)
@@ -1469,13 +1474,7 @@ struct AccountsView: View {
                         else { store.signIn(account, openBrowser: false) }
                     }.disabled(busyConnecting)
                 case .checkSignIn:
-                    if account.kind == .grokSubscription {
-                        Button("Sign in to Grok…") { store.openGrokSignIn() }
-                    } else if account.kind == .copilot {
-                        Button("Sign in to Copilot…") { store.openCopilotSignIn() }
-                    }
-                    Button("Check sign-in") { store.retryConnection(account) }
-                        .help("Finish signing in through this provider’s CLI, then check again.")
+                    sharedSignInControls(account)
                 case .retry: Button("Retry connection") { store.retryConnection(account) }
                 case .wait:
                     if store.paused { Button("Resume refresh") { store.togglePause() } }
@@ -1487,8 +1486,8 @@ struct AccountsView: View {
                     if account.kind == .claudeCode {
                         AppDropdownItem("Open Claude Code", symbol: "terminal") { store.openClaude(account) }
                         AppDropdownItem("Open in a project…", symbol: "folder") { store.openClaude(account, chooseProject: true) }
-                        AppDropdownItem("Sign in again", symbol: "person.badge.key") { store.openClaude(account, login: true) }
-                        AppDropdownItem("Sign out in Terminal", symbol: "rectangle.portrait.and.arrow.right") { store.openClaude(account, logout: true) }
+                        AppDropdownItem("Sign in again", symbol: "person.badge.key", enabled: !busyConnecting) { store.openClaude(account, login: true) }
+                        AppDropdownItem("Sign out in Terminal", symbol: "rectangle.portrait.and.arrow.right", enabled: !busyConnecting) { store.openClaude(account, logout: true) }
                         AppDropdownItem.separator
                     } else if account.kind == .codex && !account.usesExistingCodex {
                         AppDropdownItem("Sign in again", symbol: "person.badge.key", enabled: !busyConnecting) { store.signIn(account, openBrowser: false) }
@@ -1903,9 +1902,49 @@ private struct UpdateSettings: View {
     }
 }
 
+private final class DashboardPlotCache {
+    struct Plot {
+        let observations: [HistorySample]
+        let marks: [HistorySample]
+        let segmentCounts: [Int: Int]
+        let domain: ClosedRange<Double>
+    }
+    private var previousPoints: [UsageHistoryPoint] = []
+    private var previousStyle: DashboardChartStyle?
+    private var previousHours = 0
+    private var previousFullScale = false
+    private var previousKind: ConnectionKind?
+    private var result: Plot?
+
+    func prepare(_ points: [UsageHistoryPoint], kind: ConnectionKind, style: DashboardChartStyle, hours: Int, fullScale: Bool) -> Plot {
+        if let result, previousStyle == style, previousHours == hours, previousKind == kind,
+           previousFullScale == fullScale, previousPoints == points { return result }
+        let samples = HistorySeries.samples(points, kind: kind)
+        let display = HistorySeries.plotSamples(samples)
+        let marks: [HistorySample]
+        switch style {
+        case .bars: marks = HistorySeries.barSamples(samples, count: hours == 168 ? 28 : 24)
+        case .dots: marks = display
+        default: marks = HistorySeries.smoothTrend(display)
+        }
+        let values = samples.map(\.value)
+        let domain: ClosedRange<Double>
+        if kind.isAPI { domain = min(0, (values.min() ?? 0) * 1.08)...max(1, (values.max() ?? 1) * 1.08) }
+        else if !fullScale && style != .bars && style != .dots { domain = HistorySeries.allowanceTrendDomain(values) }
+        else { domain = 0...100 }
+        let plot = Plot(observations: style == .bars ? marks : samples, marks: marks,
+                        segmentCounts: marks.reduce(into: [:]) { $0[$1.segment, default: 0] += 1 }, domain: domain)
+        previousPoints = points; previousStyle = style; previousHours = hours
+        previousKind = kind; previousFullScale = fullScale; result = plot
+        return plot
+    }
+}
+
 private struct HistoryCard: View {
+    @ViewState private var plotCache = DashboardPlotCache()
     @ViewState private var hoveredDate: Date?
     let account: Account
+    let displayName: String
     let points: [UsageHistoryPoint]
     let snapshot: Snapshot?
     let error: Bool
@@ -1952,25 +1991,7 @@ private struct HistoryCard: View {
     }
     private var dashboardTint: Color { NSColor.accountHex(account.dashboardColorHex).map { Color(nsColor: $0) } ?? providerAccent(account.kind.provider) }
     private var metric: String { account.kind.isBalance ? "Balance (USD)" : account.kind.isAPI ? "Month-to-date spending (USD)" : "Recorded allowance remaining (%)" }
-    private func value(_ point: UsageHistoryPoint) -> Double? {
-        if account.kind.isBalance { return point.balanceUSD.map { NSDecimalNumber(decimal: $0).doubleValue } }
-        if account.kind.isAPI { return point.costUSD.map { NSDecimalNumber(decimal: $0).doubleValue } }
-        return point.remainingPercent
-    }
-    private var plotted: [UsageHistoryPoint] { points.filter { value($0) != nil } }
-    private var samples: [HistorySample] { HistorySeries.samples(points, kind: account.kind) }
-    private var hoveredSample: HistorySample? {
-        guard let hoveredDate else { return nil }
-        return (effectiveStyle == .bars ? HistorySeries.barSamples(samples, count: historyHours == 168 ? 28 : 24) : samples).min { abs($0.timestamp.timeIntervalSince(hoveredDate)) < abs($1.timestamp.timeIntervalSince(hoveredDate)) }
-    }
     private var fittedTrend: Bool { !account.kind.isAPI && !fullScale && effectiveStyle != .bars && effectiveStyle != .dots }
-    private var plotDomain: ClosedRange<Double> {
-        if fittedTrend { return HistorySeries.allowanceTrendDomain(samples.map(\.value)) }
-        if account.kind.isAPI {
-            return min(0, (samples.map(\.value).min() ?? 0) * 1.08)...max(1, (samples.map(\.value).max() ?? 1) * 1.08)
-        }
-        return 0...100
-    }
     private var historyCaption: String {
         guard !account.kind.isAPI else { return "Recorded history" }
         let hours = UsageHeatmap.hours(points: points, kind: account.kind, calendar: .current)
@@ -1980,6 +2001,12 @@ private struct HistoryCard: View {
     }
     private var reading: ReadingPresentation { ReadingPresentation(snapshot: snapshot, kind: account.kind, now: now, saved: connection.saved || cached) }
     private var sessionQuota: QuotaWindow? { reading.session }
+    private func readingAge(_ date: Date) -> String {
+        let minutes = max(0, Int(now.timeIntervalSince(date) / 60))
+        if minutes == 0 { return "just now" }
+        if minutes < 60 { return "\(minutes)m ago" }
+        return minutes < 1440 ? "\(minutes / 60)h ago" : "\(minutes / 1440)d ago"
+    }
     private var quotaSummary: some View {
         VStack(alignment: .leading, spacing: 5) {
             Text(reading.value)
@@ -1987,7 +2014,7 @@ private struct HistoryCard: View {
                 .foregroundStyle(connection.saved ? Color.secondary : Color.primary)
                 .lineLimit(1).minimumScaleFactor(0.65)
             HStack {
-                Text(reading.compactTitle).lineLimit(2)
+                Text(reading.title).lineLimit(2)
                 Spacer(minLength: 4)
                 Text(reading.reset).lineLimit(2).multilineTextAlignment(.trailing)
             }.font(.system(size: 10)).foregroundStyle(.secondary)
@@ -2018,12 +2045,6 @@ private struct HistoryCard: View {
     }
 
     @ViewBuilder private var allowancePlot: some View {
-        let samples = self.samples
-        let plotted = self.plotted
-        let plotDomain = self.plotDomain
-        let displaySamples = HistorySeries.plotSamples(samples)
-        let series = effectiveStyle == .bars ? HistorySeries.barSamples(samples, count: historyHours == 168 ? 28 : 24) : effectiveStyle == .dots ? displaySamples : HistorySeries.smoothTrend(displaySamples)
-        let segmentCounts = Dictionary(grouping: series, by: \.segment).mapValues(\.count)
                 if effectiveStyle.isCurrentAllowance {
                     CurrentAllowanceChart(percent: snapshot?.displayWindow(for: account.kind)?.remainingPercent,
                                           style: effectiveStyle, tint: graphTint,
@@ -2031,7 +2052,13 @@ private struct HistoryCard: View {
                         .frame(height: 86)
                     Text(snapshot?.unlimited == true ? "No percentage limit" : reading.saved ? "Remaining vs. used · last known" : "Remaining vs. used · current limit")
                         .font(.system(size: 10)).foregroundStyle(.secondary).lineLimit(1)
-                } else if plotted.isEmpty {
+                } else {
+                    let plot = plotCache.prepare(points, kind: account.kind, style: effectiveStyle, hours: historyHours, fullScale: fullScale)
+                    let samples = plot.observations
+                    let series = plot.marks
+                    let segmentCounts = plot.segmentCounts
+                    let plotDomain = plot.domain
+                    if samples.isEmpty {
                     Text(snapshot?.unlimited == true ? "The provider reports an unlimited allowance, with no percentage history." : "No readings in this range yet. History grows as this Mac refreshes your accounts.")
                         .font(.system(size: 12)).foregroundStyle(.secondary).frame(maxWidth: .infinity).frame(height: 86)
                 } else {
@@ -2108,7 +2135,7 @@ private struct HistoryCard: View {
                                         if let plotFrame = proxy.plotFrame {
                                             let frame = geometry[plotFrame]
                                             let date: Date? = frame.contains(location) ? proxy.value(atX: location.x - frame.minX, as: Date.self) : nil
-                                            let nearest = date.flatMap { date in samples.min { abs($0.timestamp.timeIntervalSince(date)) < abs($1.timestamp.timeIntervalSince(date)) }?.timestamp }
+                                            let nearest = date.flatMap { date in HistorySeries.nearest(to: date, in: samples)?.timestamp }
                                             if hoveredDate != nearest { hoveredDate = nearest }
                                         }
                                     case .ended: hoveredDate = nil
@@ -2118,7 +2145,7 @@ private struct HistoryCard: View {
                         }
                     }
                     .overlay(alignment: .topLeading) {
-                        if let sample = hoveredSample {
+                        if let hoveredDate, let sample = HistorySeries.nearest(to: hoveredDate, in: samples), sample.timestamp == hoveredDate {
                             Text(sample.timestamp.formatted(date: .omitted, time: .shortened) + " · " + (account.kind.isAPI ? String(format: "$%.2f", sample.value) : String(format: "%.1f%% left", sample.value)))
                                 .font(.system(size: 10, weight: .medium)).monospacedDigit()
                                 .padding(5).background(.regularMaterial, in: RoundedRectangle(cornerRadius: 5))
@@ -2126,7 +2153,7 @@ private struct HistoryCard: View {
                         }
                     }
                     .frame(height: 86).padding(.top, 3).padding(.bottom, 2)
-                    if let last = plotted.last {
+                    if let last = samples.last {
                         HStack {
                             Text(fittedTrend ? String(format: "Smoothed trend · %.0f–%.0f%%", plotDomain.lowerBound, plotDomain.upperBound) : effectiveStyle == .bars ? "Latest reading per time bucket" : historyCaption).lineLimit(1).help(fittedTrend ? "The trend uses a fitted vertical scale and one-hour smoothing. Hover for exact recorded readings. Switch to the full 0–100% scale in the chart menu. Missing intervals and resets are never connected." : "History uses the full scale. Hover for exact recorded readings; missing intervals and resets are not connected.")
                             Spacer()
@@ -2134,24 +2161,25 @@ private struct HistoryCard: View {
                         }.font(.system(size: 10)).foregroundStyle(.secondary)
                     }
 
+                    }
                 }
     }
     private var cardControls: some View {
         HStack(spacing: 6) {
-            AppDropdown(effectiveStyle.title, symbol: effectiveStyle.symbol, accent: graphTint, menuTitle: "Chart style") {
+            AppDropdown("", symbol: effectiveStyle.symbol, accent: graphTint, showsChevron: false, menuTitle: "Chart style") {
                 AppDropdownItem("Use default", symbol: "sparkles", selected: account.dashboardChartStyle == nil) { setStyle(nil) }
                 AppDropdownItem.separator
                 for style in DashboardChartStyle.allCases.filter({ $0 != .mixed && (!account.kind.isAPI || !$0.isCurrentAllowance) }) {
                     AppDropdownItem(style.title, symbol: style.symbol, selected: account.dashboardChartStyle == style) { setStyle(style) }
                 }
-            }.accessibilityLabel("Chart for " + account.name)
-            AppDropdown(comparison.period == .off ? "Compare" : comparison.period.title, symbol: "arrow.left.arrow.right", accent: graphTint, menuTitle: "Compare usage") {
+            }.frame(width: 28).help("Chart style · " + effectiveStyle.title).accessibilityLabel("Chart for " + displayName)
+            AppDropdown("", symbol: "arrow.left.arrow.right", accent: graphTint, showsChevron: false, menuTitle: "Compare usage") {
                 for period in UsageComparisonPeriod.allCases {
                     AppDropdownItem(period.title, symbol: period == .off ? "minus.circle" : "arrow.left.arrow.right",
                                     subtitle: period == .off ? "Current history only" : "vs " + period.previousLabel,
                                     selected: comparison.period == period) { setComparison(period) }
                 }
-            }.accessibilityLabel("Compare " + account.name)
+            }.frame(width: 28).accessibilityLabel("Compare " + displayName)
                 .help("WoW: last week · MoM: last month · YoY: last year. Seven completed days, compared with the matching earlier period.")
         }
     }
@@ -2160,10 +2188,10 @@ private struct HistoryCard: View {
             VStack(alignment: .leading, spacing: 5) {
                 HStack(spacing: 7) {
                     ProviderMark(provider: account.kind.provider, size: 23).foregroundStyle(dashboardTint)
-                    Text(account.name).font(.system(size: 14, weight: .semibold)).lineLimit(1)
+                    Text(displayName).font(.system(size: 14, weight: .semibold)).lineLimit(1)
                     Spacer(minLength: 2)
                     Image(systemName: connection.symbol).foregroundStyle(statusColor).help(connection.title)
-                    DashboardCollapseButton(collapsed: account.dashboardCollapsed == true, item: account.name, action: toggleCollapsed)
+                    DashboardCollapseButton(collapsed: account.dashboardCollapsed == true, item: displayName, action: toggleCollapsed)
                 }
                 if account.dashboardCollapsed == true {
                     HStack(alignment: .firstTextBaseline) {
@@ -2175,13 +2203,26 @@ private struct HistoryCard: View {
                     Text(account.expectedIdentity ?? snapshot?.identity ?? account.kind.title)
                         .font(.system(size: 11)).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
                     quotaSummary
-                    cardControls
+                    if reading.saved, let timestamp = snapshot?.observedAt {
+                        Label("Last reading · " + readingAge(timestamp), systemImage: "clock")
+                            .font(.caption).foregroundStyle(.secondary)
+                    } else if let session = sessionQuota, session.remainingPercent <= 0 {
+                        Label("5h exhausted · " + ReadingPresentation.resetText(session.resetsAt, at: now).lowercased(), systemImage: "clock")
+                            .font(.caption.weight(.semibold)).foregroundStyle(.orange)
+                    }
+                    HStack {
+                        Text(comparison.period == .off ? "Usage history" : comparison.period.title).font(.caption.weight(.medium)).foregroundStyle(.secondary)
+                        Spacer()
+                        cardControls
+                    }
                     VStack(alignment: .leading, spacing: 5) {
                         if comparison.period == .off { allowancePlot }
                         else { AccountComparisonChart(comparison: comparison, style: effectiveStyle, tint: graphTint, isMoney: account.kind.isAPI) }
                     }.frame(height: 120, alignment: .top)
+                    if comparison.period != .off || comparison.hasRecentObservations || snapshot?.unlimited == true {
                     Text(snapshot?.unlimited == true && comparison.period == .off ? "Provider reports no limit" : comparison.summary).font(.system(size: 11, weight: .medium)).lineLimit(1).minimumScaleFactor(0.8)
                         .foregroundStyle(comparison.changePercent == nil ? Color.secondary : graphTint).help(comparison.detail)
+                    }
                 if !account.kind.isAPI { sessionSummary }
                 else {
                     Label(account.kind.isBalance ? "Credits, separate from plan limits" : "Spending, not a credit balance", systemImage: "info.circle")
@@ -2199,7 +2240,7 @@ private struct HistoryCard: View {
                         AppDropdownItem("Move later", symbol: "arrow.right", enabled: moveLater != nil) { moveLater?() }
                         AppDropdownItem("Reset dashboard order", symbol: "arrow.counterclockwise", enabled: resetOrder != nil) { resetOrder?() }
                         if let hide { AppDropdownItem("Hide card", symbol: "eye.slash", action: hide) }
-                    }.frame(width: 30).help("Name, color & dashboard order").accessibilityLabel("Options for " + account.name)
+                    }.frame(width: 30).help("Name, color & dashboard order").accessibilityLabel("Options for " + displayName)
                 }.font(.system(size: 11, weight: .medium)).buttonStyle(QuietButtonStyle())
                 }
             }
@@ -2292,7 +2333,7 @@ private struct ActivityHeatmap: View {
                     let step = geometry.size.width < 320 ? 4 : 1
                     let hours = Array(stride(from: 0, to: 24, by: step))
                     let grouped = Dictionary(grouping: buckets, by: { entry in
-                        String(calendar.startOfDay(for: entry.key).timeIntervalSince1970) + ":" + String(calendar.component(.hour, from: entry.key) / step)
+                        HeatmapSlot(day: calendar.startOfDay(for: entry.key), block: calendar.component(.hour, from: entry.key) / step)
                     })
                     let peak = grouped.values.map { $0.reduce(0) { $0 + $1.value } }.max() ?? 0
                     VStack(spacing: 6) {
@@ -2307,7 +2348,7 @@ private struct ActivityHeatmap: View {
                             ForEach(days, id: \.self) { day in
                                 GridRow {
                                     Text(day, format: .dateTime.weekday(.abbreviated).day()).font(.system(size: 9)).foregroundStyle(.secondary).frame(width: 46, alignment: .leading)
-                                    ForEach(hours, id: \.self) { hour in heatmapCell(day: day, hour: hour, step: step, buckets: buckets, peak: peak) }
+                                    ForEach(hours, id: \.self) { hour in heatmapCell(day: day, hour: hour, step: step, entries: grouped[HeatmapSlot(day: day, block: hour / step)] ?? [], peak: peak) }
                                 }
                             }
                         }
@@ -2325,9 +2366,9 @@ private struct ActivityHeatmap: View {
             }
         }
     }
-    private func heatmapCell(day: Date, hour: Int, step: Int, buckets: [Date: Double], peak: Double) -> some View {
-        let matching = buckets.filter { calendar.isDate($0.key, inSameDayAs: day) && (hour..<(hour + step)).contains(calendar.component(.hour, from: $0.key)) }
-        let value: Double? = matching.isEmpty ? nil : matching.values.reduce(0, +)
+    private struct HeatmapSlot: Hashable { let day: Date; let block: Int }
+    private func heatmapCell(day: Date, hour: Int, step: Int, entries: [(key: Date, value: Double)], peak: Double) -> some View {
+        let value: Double? = entries.isEmpty ? nil : entries.reduce(0) { $0 + $1.value }
         let strength = value.map { peak > 0 ? min(1, sqrt($0 / peak)) : 0 } ?? 0
         let fill: Color = value == nil ? Color.primary.opacity(0.025) : Brand.cyan.opacity(0.12 + strength * 0.88)
         let border: Color = Color.primary.opacity(value == nil ? 0.08 : 0)
@@ -2338,7 +2379,7 @@ private struct ActivityHeatmap: View {
             .fill(fill)
             .overlay(RoundedRectangle(cornerRadius: 3).strokeBorder(border, lineWidth: 0.5))
             .frame(maxWidth: .infinity).frame(height: 10)
-            .opacity(value != nil && matching.count < step ? 0.65 : 1)
+            .opacity(value != nil && entries.count < step ? 0.65 : 1)
             .help(description)
             .accessibilityLabel(description)
     }
@@ -2490,7 +2531,7 @@ private struct UsageOverviewCharts: View {
                                 if amount > 0 {
                                     SectorMark(angle: .value("Allowance points", amount), innerRadius: .ratio(0.68), angularInset: 3)
                                         .foregroundStyle(tint(account).gradient).cornerRadius(3)
-                                        .accessibilityLabel(account.name)
+                                        .accessibilityLabel(account.dashboardLabel(in: colorAccounts))
                                         .accessibilityValue(String(format: "%.1f allowance points, %.0f percent of observed consumption", amount, amount / total * 100))
                                 }
                             }
@@ -2512,7 +2553,7 @@ private struct UsageOverviewCharts: View {
                                                 let value = daily.first { $0.account == account.id }?.value ?? 0
                                                 Rectangle().fill(tint(account).gradient)
                                                     .frame(width: geometry.size.width * value / peak)
-                                                    .help(account.name + String(format: ": %.1f allowance points", value))
+                                                    .help(account.dashboardLabel(in: colorAccounts) + String(format: ": %.1f allowance points", value))
                                             }
                                         }.clipShape(RoundedRectangle(cornerRadius: 2))
                                     }.frame(height: 7)
@@ -2522,13 +2563,13 @@ private struct UsageOverviewCharts: View {
                         }.frame(height: 94)
 
                     }
-                    HStack(spacing: 8) {
+                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 138), alignment: .leading)], alignment: .leading, spacing: 4) {
                         ForEach(eligible.prefix(4)) { account in
                             let amount = totals.first { $0.0.id == account.id }?.1 ?? 0
                             HStack(spacing: 3) {
                                 Circle().fill(tint(account)).frame(width: 5, height: 5)
-                                Text(account.name + (records.contains { $0.account == account.id } ? String(format: " %.0f%%", amount / total * 100) : " —")).lineLimit(1)
-                            }.help(account.name + (records.contains { $0.account == account.id } ? String(format: ": %.1f allowance points consumed", amount) : ": no measured intervals"))
+                                Text(account.dashboardLabel(in: colorAccounts) + (records.contains { $0.account == account.id } ? String(format: " %.0f%%", amount / total * 100) : " —")).lineLimit(1)
+                            }.help(account.dashboardLabel(in: colorAccounts) + (records.contains { $0.account == account.id } ? String(format: ": %.1f allowance points consumed", amount) : ": no measured intervals"))
                         }
                         if eligible.count > 4 { Text("+\(eligible.count - 4)").help("Additional accounts are included in both charts.") }
                     }.font(.system(size: 9)).foregroundStyle(.secondary)
