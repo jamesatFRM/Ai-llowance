@@ -554,7 +554,7 @@ final class AppStore: ObservableObject {
         accounts.append(account)
         do { try persist() }
         catch { accounts.removeAll { $0.id == account.id }; if kind.isAPI { try? keychain.delete(account.id) }; throw error }
-        if refreshAfter { refresh(force: true) }
+        if refreshAfter { refresh(force: true, accountIDs: [account.id]) }
         return account
     }
     private func automaticName(_ provider: String, kind: ConnectionKind) -> String {
@@ -569,7 +569,7 @@ final class AppStore: ObservableObject {
         do {
             let account = try add(name: automaticName("OpenAI", kind: .codex), kind: .codex, secret: "", existing: existing, refreshAfter: false)
             selectedAccountID = account.id
-            if existing { refresh(force: true) } else { signIn(account, openBrowser: accounts.filter { $0.kind == .codex }.count == 1) }
+            if existing { refresh(force: true, accountIDs: [account.id]) } else { signIn(account, openBrowser: accounts.filter { $0.kind == .codex }.count == 1) }
         } catch { notice = safeMessage(error) }
     }
     /// The basic setup always gives subscription accounts their own sign-in.
@@ -682,7 +682,7 @@ final class AppStore: ObservableObject {
                 do { try persist() }
                 catch { accounts.removeAll { $0.id == account.id }; try? connection.uninstall(account: account); throw error }
                 openClaude(account, login: true)
-                schedules[account.id] = PollState(); refresh(force: true)
+                schedules[account.id] = PollState(); refresh(force: true, accountIDs: [account.id])
             } catch { notice = safeMessage(error) }
         }
     }
@@ -761,7 +761,6 @@ final class AppStore: ObservableObject {
             return
         }
         schedules[account.id] = PollState()
-        if refreshing { pendingAccountRetries.insert(account.id); return }
         refresh(force: true, accountIDs: [account.id])
     }
     func needsSignIn(_ account: Account) -> Bool {
@@ -861,7 +860,13 @@ final class AppStore: ObservableObject {
         defer { scheduleHeartbeat() }
         checkClaudeSignIns(at: now)
         guard !shuttingDown, !demo, !paused, !sleeping, !removing, !offline else { return }
-        if refreshing { pendingManualRefresh = pendingManualRefresh || force; return }
+        if refreshing {
+            if force {
+                if let accountIDs { pendingAccountRetries.formUnion(accountIDs) }
+                else { pendingManualRefresh = true }
+            }
+            return
+        }
         let due = accounts.filter {
             $0.enabled && (accountIDs == nil || accountIDs!.contains($0.id)) && signingIn != $0.id && waitingForClaude[$0.id] == nil && (schedules[$0.id] ?? PollState()).shouldRefresh(at: now, manual: force)
         }
@@ -1033,7 +1038,8 @@ final class AppStore: ObservableObject {
                 var schedule = PollState(); schedule.failed(UsageError.authentication, at: Date()); schedules[account.id] = schedule
             }
             codexSignInURL = nil
-            signingIn = nil; refresh(force: true)
+            signingIn = nil
+            if !authenticationRequired.contains(account.id) { refresh(force: true, accountIDs: [account.id]) }
         }
     }
     func copyCodexSignInLink() {
@@ -1080,8 +1086,9 @@ final class AppStore: ObservableObject {
         else { copilotExecutable = url }
         rememberedTools[kind.rawValue] = remember.state == .on ? record : nil
         do { try persist() } catch { notice = "Could not remember the CLI location." }
-        for account in accounts where account.kind == kind { schedules[account.id] = PollState() }
-        refresh(force: true)
+        let affected = Set(accounts.filter { $0.kind == kind }.map(\.id))
+        for id in affected { schedules[id] = PollState() }
+        refresh(force: true, accountIDs: affected)
     }
     func rediscoverTools() {
         guard !demo else { return }
