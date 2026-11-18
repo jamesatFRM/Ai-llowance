@@ -209,6 +209,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
             })
             let created = NSWindow(contentViewController: controller)
             created.title = "Ai-llowance · Dashboard"; created.styleMask = [.titled, .closable, .miniaturizable, .resizable]
+            created.titlebarAppearsTransparent = false
             created.setContentSize(NSSize(width: 1080, height: 720)); created.center()
             created.isReleasedWhenClosed = false; created.delegate = self; window = created
         }
@@ -226,7 +227,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
         for panel in [window, popover.contentViewController?.view.window].compactMap({ $0 }) {
             let opaque = !store.menuPreferences.liquidGlass
             if panel.isOpaque != opaque { panel.isOpaque = opaque }
-            let background: NSColor = opaque ? .windowBackgroundColor : .clear
+            // The dashboard's material view supplies its own desktop blur. Keep a
+            // native backing for the title bar, which sits outside that view;
+            // clearing it leaves the traffic lights floating above the dashboard.
+            let background: NSColor = panel === window || opaque ? .windowBackgroundColor : .clear
             if panel.backgroundColor != background { panel.backgroundColor = background }
             if panel.appearance?.name != appearance?.name { panel.appearance = appearance }
         }
